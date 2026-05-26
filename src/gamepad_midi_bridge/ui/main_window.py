@@ -22,6 +22,7 @@ from ..updater import UpdateChecker, UpdateInfo
 from .calibration_dialog import CalibrationDialog
 from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
+from .help_tab import HelpTab
 from .mapping_editor import MappingEditor
 from .marketplace_tab import MarketplaceTab
 from .onboarding import OnboardingWizard, is_first_launch, mark_complete
@@ -277,6 +278,17 @@ class MainWindow(QMainWindow):
         self._settings.recalibrate_clicked.connect(self._on_recalibrate)
         self._settings.multi_mode_changed.connect(self._on_multi_mode_changed)
         tabs.addTab(self._settings, "Settings")
+
+        # Help tab — owns its own QShortcut instances and signals them back
+        # up so MainWindow keeps a single source of truth for app actions.
+        self._tabs_ref = tabs
+        self._help = HelpTab()
+        self._help.toggle_bridge_requested.connect(self._toggle_bridge)
+        self._help.quit_requested.connect(self._quit_from_tray)
+        self._help.open_settings_requested.connect(self._focus_settings_tab)
+        self._help.hide_window_requested.connect(self.hide)
+        self._help.recalibrate_requested.connect(self._on_recalibrate)
+        tabs.addTab(self._help, "Help")
 
         about_tab = self._build_about_tab()
         tabs.addTab(about_tab, "About")
@@ -600,6 +612,17 @@ class MainWindow(QMainWindow):
             self._on_stop()
         else:
             self._on_start()
+
+    def _focus_settings_tab(self) -> None:
+        """Jump focus to the Settings tab. Wired from the Help-tab shortcut so
+        Cmd/Ctrl+, behaves like the platform-standard Preferences hotkey."""
+        tabs = getattr(self, "_tabs_ref", None)
+        if tabs is None:
+            return
+        for i in range(tabs.count()):
+            if tabs.tabText(i) == "Settings":
+                tabs.setCurrentIndex(i)
+                return
 
     # ============================================================== tray helpers
 

@@ -9,7 +9,7 @@ from typing import Optional
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 import json
@@ -176,6 +176,44 @@ class SettingsPanel(QWidget):
         self._r2_effect = self._build_effect_combo(mapping.r2_haptic_effect)
         haptics_form.addRow("R2 feel", self._r2_effect)
 
+        # OSC output — Pro feature, lives alongside the MIDI port.
+        osc_group = QGroupBox(f"OSC output{pro_suffix}")
+        osc_form = QFormLayout(osc_group)
+        self._osc_enabled = QCheckBox("Send OSC packets alongside MIDI")
+        self._osc_enabled.setChecked(mapping.osc.enabled)
+        self._osc_enabled.toggled.connect(self._emit)
+        osc_form.addRow(self._osc_enabled)
+
+        self._osc_mode = QComboBox()
+        for label, value in (("Alongside MIDI", "alongside"), ("OSC only", "only")):
+            self._osc_mode.addItem(label, value)
+        idx = max(0, [self._osc_mode.itemData(i) for i in range(self._osc_mode.count())]
+                     .index(mapping.osc.mode) if mapping.osc.mode in
+                     ("alongside", "only") else 0)
+        self._osc_mode.setCurrentIndex(idx)
+        self._osc_mode.currentIndexChanged.connect(self._emit)
+        osc_form.addRow("Mode", self._osc_mode)
+
+        self._osc_host = QLineEdit(mapping.osc.host)
+        self._osc_host.setPlaceholderText("127.0.0.1")
+        self._osc_host.editingFinished.connect(self._emit)
+        osc_form.addRow("Host", self._osc_host)
+
+        self._osc_port = QSpinBox()
+        self._osc_port.setRange(1, 65535)
+        self._osc_port.setValue(mapping.osc.port)
+        self._osc_port.valueChanged.connect(self._emit)
+        osc_form.addRow("Port", self._osc_port)
+
+        osc_note = QLabel(
+            "Address-per-control mapping lives in your preset JSON for now. "
+            "Resolume listens on 7000 by default; TouchDesigner / MadMapper "
+            "are user-configured."
+        )
+        osc_note.setStyleSheet("color: #5a606b; font-size: 11px;")
+        osc_note.setWordWrap(True)
+        osc_form.addRow(osc_note)
+
         # Privacy / telemetry — opt-in only, never gated.
         privacy_group = QGroupBox("Privacy")
         privacy_form = QFormLayout(privacy_group)
@@ -217,6 +255,7 @@ class SettingsPanel(QWidget):
         outer.addWidget(corners_group)
         outer.addWidget(touchpad_group)
         outer.addWidget(haptics_group)
+        outer.addWidget(osc_group)
         outer.addWidget(privacy_group)
         outer.addWidget(calib_group)
         outer.addStretch(1)
@@ -225,6 +264,7 @@ class SettingsPanel(QWidget):
         corners_group.setEnabled(pro)
         touchpad_group.setEnabled(pro)
         haptics_group.setEnabled(pro)
+        osc_group.setEnabled(pro)
 
         self._building = False
 
@@ -287,6 +327,13 @@ class SettingsPanel(QWidget):
         # Adaptive-trigger effects.
         self._mapping.l2_haptic_effect = self._EFFECT_LABELS[self._l2_effect.currentIndex()][1]
         self._mapping.r2_haptic_effect = self._EFFECT_LABELS[self._r2_effect.currentIndex()][1]
+
+        # OSC output.
+        osc = self._mapping.osc
+        osc.enabled = self._osc_enabled.isChecked()
+        osc.mode = self._osc_mode.currentData() or "alongside"
+        osc.host = self._osc_host.text().strip() or "127.0.0.1"
+        osc.port = self._osc_port.value()
 
         self.settings_changed.emit(self._mapping)
 
