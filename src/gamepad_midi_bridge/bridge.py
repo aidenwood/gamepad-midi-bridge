@@ -19,6 +19,7 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 from . import dualsense as ds
 from .calibration import calibrate
 from .controller import ControllerInfo, ControllerReader
+from .demo_controller import SyntheticControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
 from .mapping import Mapping, STICK_AXES
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
@@ -67,15 +68,19 @@ class BridgeWorker(QObject):
     midi_sent = Signal()
 
     def __init__(self, slot_index: int = 0,
-                 midi_port_name: Optional[str] = None) -> None:
+                 midi_port_name: Optional[str] = None,
+                 demo: bool = False) -> None:
         """Multi-controller plumbing — slot_index picks which pygame joystick
         this worker binds to, and midi_port_name overrides the virtual port so
         two workers don't fight over a single "Gamepad MIDI Bridge" port name.
+        `demo` swaps the pygame reader for a synthetic one so the bridge can
+        be exercised end-to-end without hardware (recording demo videos, CI).
         Both default to the V1.1 single-controller behaviour.
         """
         super().__init__()
         self._slot_index = max(0, int(slot_index))
         self._midi_port_name = midi_port_name or DEFAULT_PORT_NAME
+        self._demo = bool(demo)
         self._state = BridgeState()
         self._reader: Optional[ControllerReader] = None
         self._midi: Optional[OpenedPort] = None
@@ -111,7 +116,9 @@ class BridgeWorker(QObject):
     @Slot()
     def start(self) -> None:
         """Entry point — invoked once when the worker's thread starts."""
-        self._reader = ControllerReader(slot_index=self._slot_index)
+        self._reader = (SyntheticControllerReader(slot_index=self._slot_index)
+                        if self._demo
+                        else ControllerReader(slot_index=self._slot_index))
         info = self._reader.detect()
         self.controller_info.emit(info)
         if info is None:
@@ -559,12 +566,14 @@ class BridgeController(QObject):
 
     def __init__(self, parent: Optional[QObject] = None,
                  slot_index: int = 0,
-                 midi_port_name: Optional[str] = None) -> None:
+                 midi_port_name: Optional[str] = None,
+                 demo: bool = False) -> None:
         super().__init__(parent)
         self.slot_index = max(0, int(slot_index))
         self.worker = BridgeWorker(
             slot_index=self.slot_index,
             midi_port_name=midi_port_name,
+            demo=demo,
         )
         self.thread = QThread()
         self.worker.moveToThread(self.thread)

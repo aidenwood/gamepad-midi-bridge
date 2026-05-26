@@ -15,6 +15,7 @@ to its own meter directly, which keeps BridgeWorker untouched on the single
 from __future__ import annotations
 
 import copy
+import os
 from typing import List, Optional
 
 from PySide6.QtCore import QObject
@@ -25,6 +26,13 @@ from .bridge import BridgeController
 from .controller import available_count
 from .mapping import Mapping
 from .midi_backend import DEFAULT_PORT_NAME
+
+
+def _demo_env() -> bool:
+    """`GMB_DEMO=1` env var swaps every controller for the synthetic one.
+    Lets the GUI path opt into demo mode without re-plumbing every callsite.
+    """
+    return os.environ.get("GMB_DEMO", "").lower() in ("1", "true", "yes")
 
 
 # User-facing modes for the "Active controllers" combo in Settings.
@@ -97,7 +105,10 @@ class MultiBridgeController(QObject):
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._parent = parent
-        self.bridges: List[BridgeController] = [BridgeController(parent)]
+        self._demo = _demo_env()
+        self.bridges: List[BridgeController] = [
+            BridgeController(parent, demo=self._demo)
+        ]
 
     # ------------------------------------------------------------------ slots
 
@@ -129,6 +140,7 @@ class MultiBridgeController(QObject):
             self.bridges.append(BridgeController(
                 self._parent,
                 slot_index=1,
+                demo=self._demo,
                 midi_port_name=port_name_for_slot(1),
             ))
         # Push per-slot mappings — each worker gets a deep copy so edits on

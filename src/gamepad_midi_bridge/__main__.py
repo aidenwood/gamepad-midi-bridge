@@ -35,6 +35,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Print where the log file lives and exit.")
     p.add_argument("--debug", action="store_true",
                    help="Verbose logging to both file and stderr.")
+    p.add_argument("--demo", action="store_true",
+                   help="Run with a synthetic controller (no hardware). "
+                        "Useful for demos, CI, and DAW connector testing.")
     p.add_argument("deep_link", nargs="?", default=None,
                    help="Optional gmb:// URL handed in by the OS URL handler.")
     return p
@@ -82,7 +85,7 @@ def _do_import_pack(path_str: str) -> int:
     return 0
 
 
-def _do_headless(deep_link: str | None) -> int:
+def _do_headless(deep_link: str | None, demo: bool = False) -> int:
     """Run the bridge with no GUI. Uses QCoreApplication for the event loop."""
     import logging
     from PySide6.QtCore import QCoreApplication
@@ -92,7 +95,7 @@ def _do_headless(deep_link: str | None) -> int:
     from .mapping import Mapping
 
     app = QCoreApplication(sys.argv)
-    bridge = BridgeController()
+    bridge = BridgeController(demo=demo)
     bridge.worker.set_mapping(Mapping())
     bridge.worker.status.connect(lambda msg: log.info("status: %s", msg))
     bridge.worker.error.connect(lambda msg: log.error("error: %s", msg))
@@ -132,7 +135,12 @@ def main() -> int:
     setup_logging(console=args.debug)
 
     if args.headless:
-        return _do_headless(args.deep_link)
+        return _do_headless(args.deep_link, demo=args.demo)
+
+    # GUI path picks demo up from GMB_DEMO env var (multi.py reads it).
+    if args.demo:
+        import os
+        os.environ["GMB_DEMO"] = "1"
 
     from .app import run
     return run(sys.argv)
