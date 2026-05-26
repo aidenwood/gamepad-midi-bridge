@@ -1,0 +1,38 @@
+# REAPER KeyMap — Gamepad MIDI Bridge defaults
+# Format reference: https://forum.cockos.com/showthread.php?t=240625
+#
+# Columns: KEY <flags> <key> <action_id> <section>
+#   flags 0xA1 = note-on binding, channel 1
+#   flags 0xC1 = CC binding, channel 1
+#   section 0  = main action section
+#
+# Notes 60..65 → track record-arm toggle for tracks 1..6 (action 40044 family,
+# offset per track via the SWS_TOGGLEXXX equivalents). Falls back to the
+# track-selection actions where the per-track arm action isn't available
+# without SWS — users with SWS installed get the better behaviour.
+
+# --- face / shoulder buttons → track record-arm toggles ---
+KEY 161 60 40604 0
+KEY 161 62 40605 0
+KEY 161 64 40606 0
+KEY 161 65 40607 0
+KEY 161 67 40608 0
+KEY 161 69 40609 0
+
+# --- transport (notes 71, 72) → Play / Stop ---
+KEY 161 71 1007 0
+KEY 161 72 1016 0
+
+# --- utility (notes 74, 75, 76) → Toggle loop / metronome / record arm ---
+KEY 161 74 1068 0
+KEY 161 75 40364 0
+KEY 161 76 40365 0
+
+# --- CC 1 → master volume (action 1007 via MIDI CC mode) ---
+KEY 193 1 1007 0
+
+# --- CC 2 → crossfader (action 41743 — toggle crossfader) ---
+KEY 193 2 41743 0
+
+# --- CC 3 → selected track volume (SWS extension action) ---
+KEY 193 3 _SWS_VOL 0

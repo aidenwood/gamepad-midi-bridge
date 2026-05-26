@@ -6,6 +6,10 @@ from typing import List
 from .base import Connector, HostInstallation, InstallResult
 from .resolume import ResolumeConnector
 from .ableton import AbletonConnector
+from .touchdesigner import TouchDesignerConnector
+from .vdmx import VDMXConnector
+from .madmapper import MadMapperConnector
+from .reaper import ReaperConnector
 
 
 def all_connectors() -> List[Connector]:
@@ -13,6 +17,10 @@ def all_connectors() -> List[Connector]:
     return [
         ResolumeConnector(),
         AbletonConnector(),
+        TouchDesignerConnector(),
+        VDMXConnector(),
+        MadMapperConnector(),
+        ReaperConnector(),
     ]
 
 
@@ -22,5 +30,9 @@ __all__ = [
     "InstallResult",
     "ResolumeConnector",
     "AbletonConnector",
+    "TouchDesignerConnector",
+    "VDMXConnector",
+    "MadMapperConnector",
+    "ReaperConnector",
     "all_connectors",
 ]

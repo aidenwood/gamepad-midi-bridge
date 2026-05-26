@@ -1,21 +1,8 @@
 """First-launch onboarding wizard.
 
-Walks a fresh user through the four things that have to be true before the
-bridge can fire a single MIDI note:
-
-    1. The app is welcomed (sets expectations, kills the blank-slate moment).
-    2. A controller is physically connected (pygame can see it).
-    3. A virtual MIDI port can be opened (on Windows that means loopMIDI).
-    4. At least one connector template has been installed in a host.
-    5. Stick calibration baseline is captured (handled live by the bridge).
-
-We deliberately keep the wizard read-only with respect to mappings/presets —
-its job is environment readiness, not configuration. Anything beyond the bare
-minimum is left for the main window's tabs.
-
-Why a dedicated module: the wizard is one-shot UI that should never load on
-subsequent launches. Keeping it isolated means PyInstaller can drop it from
-hot paths, and the main_window stays focused on steady-state UX.
+Six-step modal: welcome, controller detect, MIDI probe, connector picker,
+calibration primer, done. Why isolated module: one-shot UI that PyInstaller
+can drop from hot paths, keeps main_window focused on steady-state UX.
 """
 from __future__ import annotations
 
@@ -33,7 +20,7 @@ from PySide6.QtWidgets import (
 from .. import APP_NAME
 from ..connectors import all_connectors
 from ..controller import ControllerReader
-from ..midi_backend import MidiPortError, open_port, close_port
+from ..midi_backend import MidiPortError, close_port, open_port
 from ..paths import config_path
 from ..telemetry import send_event
 
@@ -45,8 +32,8 @@ ONBOARDING_FLAG = "onboarding_complete"
 # ============================================================== persistence
 
 def _read_config() -> dict:
-    """Best-effort read of the shared config blob. Empty dict on any failure
-    so a corrupt config can't block first-launch flow."""
+    # Best-effort read — empty dict on any failure so a corrupt config can't
+    # block first-launch flow.
     path = config_path()
     if not path.exists():
         return {}
@@ -56,28 +43,22 @@ def _read_config() -> dict:
         return {}
 
 
-def _write_config(cfg: dict) -> None:
-    config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-
-
 def is_first_launch() -> bool:
-    """True when the onboarding flag has never been set. Any falsy value (missing
-    key, explicit false) is treated as first launch — we only suppress when the
-    user has explicitly completed the wizard at least once."""
+    """True until mark_complete() writes the flag. Missing key counts as first."""
     return not bool(_read_config().get(ONBOARDING_FLAG, False))
 
 
 def mark_complete() -> None:
-    """Write the flag so we never show the wizard again on this machine."""
+    """Persist the flag so the wizard never reappears on this machine."""
     cfg = _read_config()
     cfg[ONBOARDING_FLAG] = True
-    _write_config(cfg)
+    config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 # ============================================================== wizard
 
 class OnboardingWizard(QDialog):
-    """Modal six-step wizard. Emits `onboarding_complete` on success and
+    """Modal six-step wizard. Emits `onboarding_complete` when done and
     `start_requested` if the user wants the bridge to fire immediately."""
 
     onboarding_complete = Signal()
@@ -92,7 +73,7 @@ class OnboardingWizard(QDialog):
         self._controller_detected = False
         self._steps_completed = 0
         self._installed_slugs: List[str] = []
-        # Holds the test port so we can close it cleanly when the wizard exits.
+        # Probe port lives until cleanup so the bridge can claim a fresh one.
         self._test_port = None
 
         root = QVBoxLayout(self)
@@ -101,50 +82,36 @@ class OnboardingWizard(QDialog):
 
         self._stack = QStackedWidget()
         root.addWidget(self._stack, 1)
-
-        # Steps are added in display order so indexes match the spec.
-        self._stack.addWidget(self._build_welcome())        # 0
-        self._stack.addWidget(self._build_controller())     # 1
-        self._stack.addWidget(self._build_midi())           # 2
-        self._stack.addWidget(self._build_connectors())     # 3
-        self._stack.addWidget(self._build_calibration())    # 4
-        self._stack.addWidget(self._build_done())           # 5
+        for builder in (
+            self._build_welcome, self._build_controller, self._build_midi,
+            self._build_connectors, self._build_calibration, self._build_done,
+        ):
+            self._stack.addWidget(builder())
 
         root.addWidget(self._build_footer())
         self._update_footer()
-
         send_event("onboarding_started")
 
     # ============================================================== steps
 
     def _build_welcome(self) -> QWidget:
         return self._page(
-            title="Turn your gamepad into a MIDI controller.",
-            body=(
-                "Three minutes to set up. Skip if you've done this dance before.\n\n"
-                "We'll find your controller, open a virtual MIDI port, wire up the "
-                "hosts you use, and calibrate your sticks. Nothing leaves your machine."
-            ),
+            "Turn your gamepad into a MIDI controller.",
+            "Three minutes to set up. Skip if you've done this dance before.\n\n"
+            "We'll find your controller, open a virtual MIDI port, wire up the "
+            "hosts you use, and calibrate your sticks. Nothing leaves your machine.",
         )
 
     def _build_controller(self) -> QWidget:
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(36, 36, 36, 36)
-        v.setSpacing(14)
-
-        heading = QLabel("Looking for your controller…")
-        heading.setStyleSheet("font-size: 18px; font-weight: 600; color: #f5f7fa;")
-        v.addWidget(heading)
-
+        page, v = self._page_shell("Looking for your controller…")
         self._controller_status = QLabel("Scanning…")
         self._controller_status.setStyleSheet("color: #c2c6cc;")
         self._controller_status.setWordWrap(True)
         v.addWidget(self._controller_status)
 
         hint = QLabel(
-            "Works with PS5 DualSense, Xbox, Switch Pro, and most generic gamepads. "
-            "USB or Bluetooth — your call."
+            "Works with PS5 DualSense, Xbox, Switch Pro, and most generic "
+            "gamepads. USB or Bluetooth — your call."
         )
         hint.setStyleSheet("color: #8a9099; font-size: 12px;")
         hint.setWordWrap(True)
@@ -153,22 +120,13 @@ class OnboardingWizard(QDialog):
         retry = QPushButton("Scan again")
         retry.clicked.connect(self._poll_controller)
         v.addWidget(retry, alignment=Qt.AlignLeft)
-
         v.addStretch(1)
-        # Defer the first poll so the page actually paints before pygame churns.
+        # Defer first poll so the page paints before pygame churns.
         QTimer.singleShot(150, self._poll_controller)
         return page
 
     def _build_midi(self) -> QWidget:
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(36, 36, 36, 36)
-        v.setSpacing(14)
-
-        heading = QLabel("Opening a virtual MIDI port…")
-        heading.setStyleSheet("font-size: 18px; font-weight: 600; color: #f5f7fa;")
-        v.addWidget(heading)
-
+        page, v = self._page_shell("Opening a virtual MIDI port…")
         self._midi_status = QLabel("Probing the MIDI backend…")
         self._midi_status.setStyleSheet("color: #c2c6cc;")
         self._midi_status.setWordWrap(True)
@@ -182,21 +140,12 @@ class OnboardingWizard(QDialog):
         retry = QPushButton("Try again")
         retry.clicked.connect(self._poll_midi)
         v.addWidget(retry, alignment=Qt.AlignLeft)
-
         v.addStretch(1)
         QTimer.singleShot(150, self._poll_midi)
         return page
 
     def _build_connectors(self) -> QWidget:
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(36, 36, 36, 36)
-        v.setSpacing(10)
-
-        heading = QLabel("Pick the hosts you'll perform with.")
-        heading.setStyleSheet("font-size: 18px; font-weight: 600; color: #f5f7fa;")
-        v.addWidget(heading)
-
+        page, v = self._page_shell("Pick the hosts you'll perform with.")
         sub = QLabel(
             "We'll write a small mapping file into each host's config folder. "
             "You can manage these later from the Connectors tab."
@@ -212,13 +161,9 @@ class OnboardingWizard(QDialog):
         rows = QVBoxLayout(inner)
         rows.setContentsMargins(0, 8, 0, 0)
         rows.setSpacing(8)
-
-        # Build one row per connector. Each row owns its own install button so the
-        # user can opt in selectively without ticking a checkbox first.
         for connector in all_connectors():
             rows.addWidget(self._build_connector_row(connector))
         rows.addStretch(1)
-
         scroll.setWidget(inner)
         v.addWidget(scroll, 1)
         return page
@@ -244,83 +189,68 @@ class OnboardingWizard(QDialog):
 
         install_btn = QPushButton("Install")
         install_btn.setObjectName("PrimaryButton")
-
-        status_label = QLabel("")
-        status_label.setStyleSheet("color: #2dd4bf; font-size: 12px;")
-        h.addWidget(status_label)
+        status = QLabel("")
+        status.setStyleSheet("color: #2dd4bf; font-size: 12px;")
+        h.addWidget(status)
         h.addWidget(install_btn)
 
-        # Disable up-front when nothing's detected so users aren't promised
-        # a no-op install. We still let them tick the box for visibility.
-        hosts = []
+        # Disable install when host isn't detected so we don't promise a no-op.
         try:
             hosts = connector.detect()
         except Exception:
             hosts = []
         if not hosts:
             install_btn.setEnabled(False)
-            status_label.setText("not detected")
-            status_label.setStyleSheet("color: #8a9099; font-size: 12px;")
+            status.setText("not detected")
+            status.setStyleSheet("color: #8a9099; font-size: 12px;")
 
         def do_install() -> None:
             check.setChecked(True)
-            successes = 0
+            ok = 0
             for host in hosts:
                 try:
                     res = connector.install(host)
                 except Exception as e:
                     res = type("R", (), {"success": False, "message": str(e)})()
                 if getattr(res, "success", False):
-                    successes += 1
-            if successes:
-                status_label.setText("installed")
+                    ok += 1
+            if ok:
+                status.setText("installed")
                 install_btn.setEnabled(False)
                 self._installed_slugs.append(connector.slug)
                 send_event("onboarding_connector_installed", connector=connector.slug)
             else:
-                status_label.setText("failed — see Connectors tab")
-                status_label.setStyleSheet("color: #f97373; font-size: 12px;")
+                status.setText("failed — see Connectors tab")
+                status.setStyleSheet("color: #f97373; font-size: 12px;")
 
         install_btn.clicked.connect(do_install)
         return row
 
     def _build_calibration(self) -> QWidget:
         return self._page(
-            title="Stick calibration runs at Start.",
-            body=(
-                "When you hit Start Bridging, keep your hands off the controller "
-                "for two seconds. We sample resting position to compensate for drift "
-                "automatically — most modern sticks need it.\n\n"
-                "If a stick is too far gone for software compensation, we'll flag it."
-            ),
+            "Stick calibration runs at Start.",
+            "When you hit Start Bridging, keep your hands off the controller for "
+            "two seconds. We sample resting position to compensate for drift "
+            "automatically — most modern sticks need it.\n\n"
+            "If a stick is too far gone for software compensation, we'll flag it.",
         )
 
     def _build_done(self) -> QWidget:
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(36, 36, 36, 36)
-        v.setSpacing(14)
-
-        heading = QLabel("You're ready.")
-        heading.setStyleSheet("font-size: 22px; font-weight: 700; color: #f5f7fa;")
-        v.addWidget(heading)
-
+        page, v = self._page_shell("You're ready.", big=True)
         body = QLabel(
-            "Hit Start Bridging when you want to perform. Tweak mappings, browse "
-            "presets, and add connectors from the main window any time."
+            "Hit Start Bridging when you want to perform. Tweak mappings, "
+            "browse presets, and add connectors from the main window any time."
         )
         body.setStyleSheet("color: #c2c6cc;")
         body.setWordWrap(True)
         v.addWidget(body)
-
         v.addStretch(1)
 
         row = QHBoxLayout()
         row.addStretch(1)
-        finish_only = QPushButton("Close")
-        finish_only.clicked.connect(self._finish_without_start)
-        row.addWidget(finish_only)
-
+        close = QPushButton("Close")
+        close.clicked.connect(self._finish_without_start)
+        row.addWidget(close)
         start = QPushButton("Start Bridging")
         start.setObjectName("PrimaryButton")
         start.setMinimumWidth(160)
@@ -345,7 +275,6 @@ class OnboardingWizard(QDialog):
         self._skip_btn.setStyleSheet("color: #8a9099;")
         self._skip_btn.clicked.connect(self._on_skip)
         h.addWidget(self._skip_btn)
-
         h.addStretch(1)
 
         self._back_btn = QPushButton("Back")
@@ -362,8 +291,7 @@ class OnboardingWizard(QDialog):
     def _update_footer(self) -> None:
         idx = self._stack.currentIndex()
         self._back_btn.setEnabled(idx > 0)
-        # Final step uses its own buttons — hide the footer Next to avoid
-        # double CTAs racing each other.
+        # Final step has its own CTAs — hide footer Next to avoid double primaries.
         on_final = idx == self._stack.count() - 1
         self._next_btn.setVisible(not on_final)
         self._skip_btn.setVisible(not on_final)
@@ -371,8 +299,7 @@ class OnboardingWizard(QDialog):
     # ============================================================== polling
 
     def _poll_controller(self) -> None:
-        """Probe pygame for a connected joystick. Cheap enough to call on
-        demand; we tear the reader down each time so we don't leak SDL state."""
+        # Tear reader down after each probe so SDL state doesn't leak.
         reader = ControllerReader()
         info = None
         try:
@@ -394,11 +321,8 @@ class OnboardingWizard(QDialog):
             self._controller_status.setStyleSheet("color: #2dd4bf;")
 
     def _poll_midi(self) -> None:
-        """Open and immediately discard a virtual MIDI port. On Windows this
-        surfaces the missing-loopMIDI case so we can point the user at the
-        download link instead of failing silently."""
-        # Close any previous probe before opening a new one — rtmidi will
-        # happily collide with itself otherwise.
+        # Probe-then-release. On Windows surfaces missing loopMIDI so we can
+        # point at the download instead of failing silently.
         if self._test_port is not None:
             close_port(self._test_port)
             self._test_port = None
@@ -414,10 +338,9 @@ class OnboardingWizard(QDialog):
         except MidiPortError as e:
             self._midi_status.setText(str(e))
             self._midi_status.setStyleSheet("color: #f97373;")
-            # Only Windows users need loopMIDI; hide the button elsewhere.
             self._loopmidi_btn.setVisible(sys.platform == "win32")
 
-    # ============================================================== nav
+    # ============================================================== nav + finish
 
     def _go_next(self) -> None:
         idx = self._stack.currentIndex()
@@ -461,8 +384,8 @@ class OnboardingWizard(QDialog):
         )
 
     def _cleanup_test_port(self) -> None:
-        """Release the probe port so the bridge can claim a fresh one when the
-        user clicks Start — rtmidi virtual ports collide on the same name."""
+        # Release probe port — rtmidi virtual ports collide on the same name,
+        # so the bridge needs a clean slate when the user clicks Start.
         if self._test_port is not None:
             close_port(self._test_port)
             self._test_port = None
@@ -470,15 +393,7 @@ class OnboardingWizard(QDialog):
     # ============================================================== helpers
 
     def _page(self, title: str, body: str) -> QWidget:
-        """Simple title+body page used for the welcome and calibration steps."""
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(36, 36, 36, 36)
-        v.setSpacing(16)
-        h = QLabel(title)
-        h.setStyleSheet("font-size: 22px; font-weight: 700; color: #f5f7fa;")
-        h.setWordWrap(True)
-        v.addWidget(h)
+        page, v = self._page_shell(title, big=True)
         b = QLabel(body)
         b.setStyleSheet("color: #c2c6cc; font-size: 13px;")
         b.setWordWrap(True)
@@ -486,9 +401,22 @@ class OnboardingWizard(QDialog):
         v.addStretch(1)
         return page
 
+    def _page_shell(self, title: str, big: bool = False) -> tuple[QWidget, QVBoxLayout]:
+        # Shared title+layout scaffold so per-step builders stay short.
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(36, 36, 36, 36)
+        v.setSpacing(14)
+        h = QLabel(title)
+        size = "22px" if big else "18px"
+        weight = "700" if big else "600"
+        h.setStyleSheet(f"font-size: {size}; font-weight: {weight}; color: #f5f7fa;")
+        h.setWordWrap(True)
+        v.addWidget(h)
+        return page, v
+
     def closeEvent(self, event) -> None:  # noqa: D401 — Qt override
-        # Treat window-close as skip so we never leak the probe port and never
-        # re-prompt on next launch after the user dismissed us.
+        # Window-close == skip. Marks complete so we never re-prompt on next launch.
         self._cleanup_test_port()
         if is_first_launch():
             send_event("onboarding_skipped", step=self._stack.currentIndex())

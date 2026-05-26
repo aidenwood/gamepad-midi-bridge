@@ -14,6 +14,7 @@ from .. import APP_NAME, __version__, telemetry
 from ..bridge import BridgeController
 from ..license import activate_from_string, is_pro, state as license_state
 from ..mapping import Mapping
+from ..portable import export_pack, import_pack
 from ..updater import UpdateChecker, UpdateInfo
 from .calibration_dialog import CalibrationDialog
 from .connectors_tab import ConnectorsTab
@@ -73,6 +74,27 @@ class MainWindow(QMainWindow):
         self._updater = UpdateChecker(self)
         self._updater.update_available.connect(self._on_update_available)
         QTimer.singleShot(1500, self._updater.check_async)
+
+        # First-launch onboarding. Deferred so the main window paints before the
+        # modal appears — keeps the welcome moment from feeling like a blocker.
+        self._onboarding_wizard: OnboardingWizard | None = None
+        if is_first_launch():
+            QTimer.singleShot(500, self._show_onboarding)
+
+    # ============================================================== onboarding
+
+    def _show_onboarding(self) -> None:
+        """Run the first-launch wizard. Wires its completion signals so a user
+        who clicks Start Bridging skips straight into the live bridge without a
+        second click on the main window."""
+        wizard = OnboardingWizard(self)
+        self._onboarding_wizard = wizard
+        wizard.start_requested.connect(self._on_start)
+        # mark_complete is also called inside the wizard, but we belt-and-brace
+        # here in case a subclass ever short-circuits the wizard's own writes.
+        wizard.onboarding_complete.connect(mark_complete)
+        wizard.exec()
+        self._onboarding_wizard = None
 
     # ============================================================== ui builders
 
@@ -240,6 +262,30 @@ class MainWindow(QMainWindow):
         recovery_row.addStretch(1)
         v.addLayout(recovery_row)
 
+        # Portable config row — export/import everything as a single file
+        v.addSpacing(16)
+        portable_label = QLabel("CONFIG PACK")
+        portable_label.setStyleSheet(
+            "color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
+        )
+        v.addWidget(portable_label)
+        portable_note = QLabel(
+            "Bundle your mapping + presets + Pro license into a single "
+            ".gmbpack file. Useful for moving rigs between machines."
+        )
+        portable_note.setStyleSheet("color: #8a9099; font-size: 12px;")
+        portable_note.setWordWrap(True)
+        v.addWidget(portable_note)
+        portable_row = QHBoxLayout()
+        export_btn = QPushButton("Export config…")
+        export_btn.clicked.connect(self._on_export_pack)
+        import_btn = QPushButton("Import config…")
+        import_btn.clicked.connect(self._on_import_pack)
+        portable_row.addWidget(export_btn)
+        portable_row.addWidget(import_btn)
+        portable_row.addStretch(1)
+        v.addLayout(portable_row)
+
         v.addStretch(1)
         self._refresh_tier_label()
         return w
@@ -399,6 +445,73 @@ class MainWindow(QMainWindow):
             )
 
     # ============================================================== misc
+
+    # ============================================================== portable config
+
+    def _on_export_pack(self) -> None:
+        from pathlib import Path
+        from PySide6.QtWidgets import QFileDialog
+
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Export config pack", "gamepad-midi-bridge.gmbpack",
+            "Config Pack (*.gmbpack)",
+        )
+        if not path_str:
+            return
+        try:
+            report = export_pack(Path(path_str), self._mapping)
+        except Exception as e:
+            QMessageBox.warning(self, "Export failed", str(e))
+            return
+        telemetry.send_event("config_exported", preset_count=report.preset_count)
+        QMessageBox.information(
+            self, "Config exported",
+            f"Saved {report.preset_count} preset(s) and your current mapping"
+            + (" + license" if report.license_present else "") + ".",
+        )
+
+    def _on_import_pack(self) -> None:
+        from pathlib import Path
+        from PySide6.QtWidgets import QFileDialog
+
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Import config pack", "",
+            "Config Pack (*.gmbpack)",
+        )
+        if not path_str:
+            return
+        # Ask separately about license — it's the most invasive piece.
+        replace_license = False
+        try:
+            from ..portable import list_contents
+            contents = list_contents(Path(path_str))
+            if "license.key" in contents:
+                resp = QMessageBox.question(
+                    self, "Replace license?",
+                    "This pack includes a license key. Replace your current one?",
+                )
+                replace_license = resp == QMessageBox.Yes
+        except Exception as e:
+            QMessageBox.warning(self, "Import failed", str(e))
+            return
+
+        try:
+            mapping, report = import_pack(Path(path_str), replace_license=replace_license)
+        except Exception as e:
+            QMessageBox.warning(self, "Import failed", str(e))
+            return
+
+        if mapping is not None:
+            self._on_preset_loaded(mapping)
+        self._presets.refresh()
+        telemetry.send_event("config_imported", preset_count=report.preset_count)
+        QMessageBox.information(
+            self, "Config imported",
+            f"Restored {report.preset_count} preset(s)"
+            + (" and license" if replace_license and report.license_present else "")
+            + (" — created with v" + report.creator_version if report.creator_version else "")
+            + ".",
+        )
 
     # ============================================================== deep links
 
