@@ -16,3 +16,4 @@ dist/
 # License issuer secret — must never be committed
 scripts/private_key.pem
 scripts/public_key.pem
+.DS_Store
