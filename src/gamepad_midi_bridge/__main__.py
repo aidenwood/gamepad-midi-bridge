@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from . import APP_NAME, __version__
+from .crash_reporter import install_hook as install_crash_hook
 from .logger import setup as setup_logging, log_path
 
 
@@ -110,6 +111,7 @@ def _do_headless(deep_link: str | None) -> int:
 
 
 def main() -> int:
+    install_crash_hook()
     args = _build_parser().parse_args()
 
     if args.log_path:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import webbrowser
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox,
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
@@ -34,6 +34,30 @@ RECOVERY_URL = "https://store.aidxn.com/recover"
 CHANGELOG_URL = "https://store.aidxn.com/changelog"
 
 
+def _load_last_mapping() -> Mapping:
+    """Restore the user's last mapping if it was persisted, otherwise defaults."""
+    import json
+    from ..paths import last_mapping_path
+    path = last_mapping_path()
+    if path.exists():
+        try:
+            return Mapping.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return Mapping()
+
+
+def _save_last_mapping(mapping: Mapping) -> None:
+    import json
+    from ..paths import last_mapping_path
+    try:
+        last_mapping_path().write_text(
+            json.dumps(mapping.to_dict(), indent=2), encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 def _anonymise(controller_name: str) -> str:
     """Strip serial-ish noise from a controller name before sending in telemetry."""
     lc = controller_name.lower()
@@ -52,7 +76,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.resize(820, 640)
 
-        self._mapping = Mapping()
+        self._mapping = _load_last_mapping()
         self._bridge = BridgeController(self)
         self._calibration_dialog = None
         self._activity_timer = QTimer(self)
@@ -77,6 +101,12 @@ class MainWindow(QMainWindow):
         self._updater = UpdateChecker(self)
         self._updater.update_available.connect(self._on_update_available)
         QTimer.singleShot(1500, self._updater.check_async)
+
+        # Global shortcuts — Cmd/Ctrl+Enter toggles the bridge from anywhere
+        # in the app (handy when the user is mid-edit in the mapping tab).
+        toggle = QShortcut(QKeySequence("Ctrl+Return"), self)
+        toggle.setContext(Qt.ApplicationShortcut)
+        toggle.activated.connect(self._toggle_bridge)
 
         # Tray icon — optional, depends on platform support.
         self._tray: Optional[TrayController] = None
@@ -391,6 +421,7 @@ class MainWindow(QMainWindow):
         # Live-apply to the worker so changes take effect without restart.
         self._mapping = mapping
         self._bridge.worker.set_mapping(mapping)
+        _save_last_mapping(mapping)
 
     def _on_recalibrate(self) -> None:
         if not self._stop_btn.isEnabled():
@@ -407,6 +438,7 @@ class MainWindow(QMainWindow):
         self._mapping = mapping
         self._bridge.worker.set_mapping(mapping)
         self._mapping_editor.set_mapping(mapping)
+        _save_last_mapping(mapping)
         QMessageBox.information(self, "Preset loaded", f"Loaded '{mapping.name}'.")
 
     def _on_corner_triggered(self, side: str, kind: str, sector: int) -> None:
@@ -463,6 +495,14 @@ class MainWindow(QMainWindow):
             )
 
     # ============================================================== misc
+
+    # ============================================================== shortcuts
+
+    def _toggle_bridge(self) -> None:
+        if self._stop_btn.isEnabled():
+            self._on_stop()
+        else:
+            self._on_start()
 
     # ============================================================== tray helpers
 
@@ -603,5 +643,6 @@ class MainWindow(QMainWindow):
         self._status_sub.setText("Plug in a controller and click Start.")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        _save_last_mapping(self._mapping)
         self._bridge.shutdown()
         event.accept()

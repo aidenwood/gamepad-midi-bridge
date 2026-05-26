@@ -35,3 +35,8 @@ def license_path() -> Path:
 
 def config_path() -> Path:
     return user_data_dir() / "config.json"
+
+
+def last_mapping_path() -> Path:
+    """Where the in-memory mapping is persisted between launches."""
+    return user_data_dir() / "last_mapping.json"
