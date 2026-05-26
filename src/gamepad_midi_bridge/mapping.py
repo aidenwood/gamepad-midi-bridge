@@ -58,6 +58,66 @@ class OscConfig:
 
 
 @dataclass
+class HapticInputBinding:
+    """One incoming-MIDI → trigger-effect rule.
+
+    `trigger`     — which adaptive trigger fires: "L2" or "R2".
+    `source`      — incoming MIDI message family: "note" or "cc".
+    `midi_id`     — note number (0..127) for "note", CC number for "cc".
+    `effect`      — one of `dualsense.TRIGGER_EFFECTS` keys (feedback,
+                    vibration, weapon, bow, galloping, machine).
+    `intensity_scale` — multiplier applied to the normalised velocity/CC
+                    value (0..1) before passing to the trigger writer. >1
+                    pushes weaker MIDI sources up; <1 dampens hot ones.
+
+    WHY a dataclass per binding rather than a flat dict: lets users add
+    many rules without colliding on the same source (e.g. note 36 → L2
+    vibration AND note 36 → R2 feedback at the same time). The bridge
+    iterates and applies every matching binding.
+    """
+    trigger: str = "L2"
+    source: str = "note"
+    midi_id: int = 36
+    effect: str = "vibration"
+    intensity_scale: float = 1.0
+
+
+# Default bindings the user gets when they flip `enabled` on for the first
+# time. Note 36 / 38 are the GM drum-kit standard for kick / snare so most
+# DAWs route drum tracks here without any extra config. CC 71 / 74 are the
+# canonical "resonance" / "filter cutoff" CCs from the MMA recommended
+# practice list — synths point those at the obvious knobs.
+_DEFAULT_HAPTIC_BINDINGS = [
+    HapticInputBinding(trigger="L2", source="note", midi_id=36,
+                       effect="vibration", intensity_scale=1.0),
+    HapticInputBinding(trigger="R2", source="note", midi_id=38,
+                       effect="vibration", intensity_scale=1.0),
+    HapticInputBinding(trigger="L2", source="cc", midi_id=71,
+                       effect="feedback", intensity_scale=1.0),
+    HapticInputBinding(trigger="R2", source="cc", midi_id=74,
+                       effect="feedback", intensity_scale=1.0),
+]
+
+
+@dataclass
+class HapticInputConfig:
+    """Incoming-MIDI → adaptive-trigger haptics config.
+
+    `enabled=False` by default so existing users don't suddenly start
+    grabbing a virtual MIDI input port without asking. Once enabled the
+    bridge opens `INPUT_PORT_NAME` and any bound message fires the matching
+    trigger effect, intensity scaled by velocity (notes) or value (CCs).
+
+    `listen_channel = -1` means "every channel" — set to 0..15 to filter.
+    """
+    enabled: bool = False
+    listen_channel: int = -1
+    bindings: List[HapticInputBinding] = field(
+        default_factory=lambda: list(_DEFAULT_HAPTIC_BINDINGS)
+    )
+
+
+@dataclass
 class TouchpadConfig:
     """DualSense touchpad as a 2D MIDI modulator. Pro feature.
 
@@ -116,6 +176,10 @@ class Mapping:
     l2_haptic_effect: Optional[str] = None
     r2_haptic_effect: Optional[str] = None
 
+    # Incoming-MIDI → adaptive-trigger feedback. Stays disabled by default
+    # so V1.1 users don't get their behaviour changed under them.
+    haptic_input: HapticInputConfig = field(default_factory=HapticInputConfig)
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -142,6 +206,7 @@ class Mapping:
             osc=_osc_from_dict(data.get("osc")),
             l2_haptic_effect=data.get("l2_haptic_effect"),
             r2_haptic_effect=data.get("r2_haptic_effect"),
+            haptic_input=_haptic_input_from_dict(data.get("haptic_input")),
         )
 
 
@@ -169,6 +234,37 @@ def _osc_from_dict(d: Optional[dict]) -> OscConfig:
         port=int(d.get("port", 7000)),
         button_addresses={int(k): str(v) for k, v in d.get("button_addresses", {}).items()},
         axis_addresses={int(k): str(v) for k, v in d.get("axis_addresses", {}).items()},
+    )
+
+
+def _haptic_input_from_dict(d: Optional[dict]) -> HapticInputConfig:
+    """Hydrate HapticInputConfig from JSON. If the key is absent (V1/V1.1
+    presets), we return the default config with the stock kick/snare/CC
+    bindings BUT `enabled=False` — so loading an old preset never silently
+    starts grabbing a virtual MIDI input port."""
+    if not d:
+        return HapticInputConfig()
+    raw_bindings = d.get("bindings") or []
+    bindings: List[HapticInputBinding] = []
+    for entry in raw_bindings:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            bindings.append(HapticInputBinding(
+                trigger=str(entry.get("trigger", "L2")).upper(),
+                source=str(entry.get("source", "note")).lower(),
+                midi_id=int(entry.get("midi_id", 0)),
+                effect=str(entry.get("effect", "vibration")).lower(),
+                intensity_scale=float(entry.get("intensity_scale", 1.0)),
+            ))
+        except (TypeError, ValueError):
+            # Skip malformed entries rather than failing the whole load —
+            # a partially-corrupt preset shouldn't lock the user out.
+            continue
+    return HapticInputConfig(
+        enabled=bool(d.get("enabled", False)),
+        listen_channel=int(d.get("listen_channel", -1)),
+        bindings=bindings if bindings else list(_DEFAULT_HAPTIC_BINDINGS),
     )
 
 

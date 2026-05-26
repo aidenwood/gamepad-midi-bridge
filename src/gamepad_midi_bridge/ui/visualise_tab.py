@@ -79,36 +79,27 @@ class _Sparkline(QWidget):
         self._buf.append(max(-1.0, min(1.0, float(value))))
 
     def paintEvent(self, _event) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        p = QPainter(self); p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         _filled_rect(p, QRectF(0, 0, w, h), PANEL_BG, radius=6)
-
-        # Dashed zero line so the user can read sign at a glance.
+        # Dashed zero baseline so the user can read sign at a glance.
         mid_y = h / 2.0
         p.setPen(QPen(GRID_LINE, 1, Qt.DashLine))
         p.drawLine(QPointF(6, mid_y), QPointF(w - 6, mid_y))
-
-        _label(p, QRectF(6, 2, w - 12, 14), self._label, TEXT_DIM,
-               align=Qt.AlignLeft)
+        _label(p, QRectF(6, 2, w - 12, 14), self._label, TEXT_DIM, align=Qt.AlignLeft)
         if len(self._buf) < 2:
             return
-
-        x_start, x_end = 6, w - 6
-        y_top, y_bot = 14, h - 6
+        x_end = w - 6; y_top, y_bot = 14, h - 6
         span_y = max(1.0, y_bot - y_top)
-        step = (x_end - x_start) / (SPARKLINE_SAMPLES - 1)
+        step = (x_end - 6) / (SPARKLINE_SAMPLES - 1)
         n = len(self._buf)
         # Right-align so partial buffers look like fresh data scrolling in.
         first_x = x_end - (n - 1) * step
-
         poly = QPolygonF()
         for i, v in enumerate(self._buf):
-            x = first_x + i * step
-            y = y_top + (1.0 - (v + 1.0) / 2.0) * span_y  # +1 → top
-            poly.append(QPointF(x, y))
-        p.setPen(QPen(STICK_DOT, 1))
-        p.setBrush(Qt.NoBrush)
+            poly.append(QPointF(first_x + i * step,
+                                y_top + (1.0 - (v + 1.0) / 2.0) * span_y))
+        p.setPen(QPen(STICK_DOT, 1)); p.setBrush(Qt.NoBrush)
         p.drawPolyline(poly)
 
 
@@ -123,35 +114,28 @@ class _Heatmap(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
     def flash(self, key: object, pressed: bool) -> None:
-        # Stamp on every state change so a quick tap still leaves a trail.
-        self._held[key] = pressed
-        self._stamps[key] = time.perf_counter()
+        # Stamp every state change so a quick tap still leaves a trail.
+        self._held[key] = pressed; self._stamps[key] = time.perf_counter()
 
     def paintEvent(self, _event) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        p = QPainter(self); p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         # 3 rows x 5 cols = 15 cells, exactly matches BUTTON_CELLS length.
-        cols, rows = 5, 3
-        margin, gap = 6, 6
-        cell_w = (w - margin * 2 - gap * (cols - 1)) / cols
-        cell_h = (h - margin * 2 - gap * (rows - 1)) / rows
+        cols, rows, margin, gap = 5, 3, 6, 6
+        cw = (w - margin * 2 - gap * (cols - 1)) / cols
+        ch = (h - margin * 2 - gap * (rows - 1)) / rows
         now = time.perf_counter()
-
         for i, (label, key) in enumerate(BUTTON_CELLS):
             r, c = divmod(i, cols)
-            rect = QRectF(margin + c * (cell_w + gap),
-                          margin + r * (cell_h + gap), cell_w, cell_h)
+            rect = QRectF(margin + c * (cw + gap), margin + r * (ch + gap), cw, ch)
             if self._held.get(key):
-                intensity = 1.0
+                t = 1.0
             else:
                 last = self._stamps.get(key)
-                intensity = max(0.0, 1.0 - (now - last) / HEATMAP_DECAY_S) \
-                    if last is not None else 0.0
-            fill = self._blend(intensity)
-            _filled_rect(p, rect, fill, radius=4)
-            text_color = QColor("#0e0f12") if intensity > 0.45 else TEXT_DIM
-            _label(p, rect, label, text_color, size=9)
+                t = max(0.0, 1.0 - (now - last) / HEATMAP_DECAY_S) if last else 0.0
+            _filled_rect(p, rect, self._blend(t), radius=4)
+            _label(p, rect, label,
+                   QColor("#0e0f12") if t > 0.45 else TEXT_DIM, size=9)
 
     @staticmethod
     def _blend(t: float) -> QColor:
@@ -176,8 +160,16 @@ class _DualSenseDiagram(QWidget):
         self._touch_contact = False
         self._touch_x = 0.5
         self._touch_y = 0.5
+        # Haptic pulse markers — perf-counter timestamp per side ("L"/"R").
+        # Diagram repaints fade the marker over `HEATMAP_DECAY_S` so users
+        # see a brief teal dot next to each trigger when MIDI fires haptics.
+        self._haptic_stamps: Dict[str, float] = {}
         self.setMinimumSize(560, 360)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def on_haptic(self, side: str, _effect: str, _intensity: float) -> None:
+        """Stamp the most recent haptic-in pulse so paintEvent can draw it."""
+        self._haptic_stamps[side.upper()] = time.perf_counter()
 
     def on_axis(self, idx: int, value: float) -> None: self._axes[idx] = value
     def on_button(self, idx: int, pressed: bool) -> None: self._buttons[idx] = pressed
@@ -189,66 +181,58 @@ class _DualSenseDiagram(QWidget):
         self._touch_contact = False
 
     def paintEvent(self, _event) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        p = QPainter(self); p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-
-        body_w = min(w - 20, 600)
-        body_h = min(h - 60, 320)
-        bx = (w - body_w) / 2
-        by = 40
+        body_w = min(w - 20, 600); body_h = min(h - 60, 320)
+        bx = (w - body_w) / 2; by = 40
         _filled_rect(p, QRectF(bx, by, body_w, body_h),
                      QColor("#10131a"), radius=60)
-
         # Light bar (cosmetic) above touchpad.
         bar_w = body_w * 0.18
-        p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor("#1c2530")))
+        p.setPen(Qt.NoPen); p.setBrush(QBrush(QColor("#1c2530")))
         p.drawRoundedRect(QRectF(bx + (body_w - bar_w) / 2, by + 6, bar_w, 4), 2, 2)
-
         # Touchpad — broad rect, centred top.
-        tp_w = body_w * 0.34
-        tp_h = body_h * 0.32
-        tp_x = bx + (body_w - tp_w) / 2
-        tp_y = by + 22
+        tp_w = body_w * 0.34; tp_h = body_h * 0.32
+        tp_x = bx + (body_w - tp_w) / 2; tp_y = by + 22
         self._draw_touchpad(p, tp_x, tp_y, tp_w, tp_h)
-
-        # Sticks — bottom row, symmetric. L3=btn8, R3=btn9 light up when pressed.
+        # Sticks — bottom row. L3=btn8, R3=btn9 light up when pressed.
         stick_size = body_h * 0.34
         stick_y = by + body_h - stick_size - 30
-        for cx_pct, axes, click_idx, label in (
-            (0.30, (0, 1), 8, "L"),
-            (0.70, (2, 3), 9, "R"),
+        for cx_pct, ax, ay, click_idx, label in (
+            (0.30, 0, 1, 8, "L"), (0.70, 2, 3, 9, "R"),
         ):
             sx = bx + body_w * cx_pct - stick_size / 2
             self._draw_stick(p, sx, stick_y, stick_size,
-                             self._axes.get(axes[0], 0.0),
-                             self._axes.get(axes[1], 0.0),
+                             self._axes.get(ax, 0.0), self._axes.get(ay, 0.0),
                              self._buttons.get(click_idx, False), label)
-
-        # D-pad — upper-left quadrant.
-        self._draw_dpad(p, bx + body_w * 0.14, by + body_h * 0.36,
-                        body_h * 0.24)
-        # Face buttons — upper-right quadrant.
+        # D-pad upper-left, face buttons upper-right.
+        self._draw_dpad(p, bx + body_w * 0.14, by + body_h * 0.36, body_h * 0.24)
         face_size = body_h * 0.30
         self._draw_face(p, bx + body_w * 0.86 - face_size,
                         by + body_h * 0.34, face_size)
-
-        # Shoulders + triggers — above body.
-        sh_w = body_w * 0.18
-        sh_h = 18
-        tr_h = 28
-        for x_pct, btn_idx, axis_idx, sh_label, tr_label in (
-            (0.10, 4, 4, "L1", "L2"),
-            (0.72, 5, 5, "R1", "R2"),
+        # Shoulders + triggers — above body. Haptic pulses render as a teal
+        # dot beside the L2/R2 fill bar, decaying over HEATMAP_DECAY_S.
+        sh_w = body_w * 0.18; sh_h = 18; tr_h = 28
+        now = time.perf_counter()
+        for x_pct, btn_idx, ax_idx, sh_lbl, tr_lbl, side in (
+            (0.10, 4, 4, "L1", "L2", "L"),
+            (0.72, 5, 5, "R1", "R2", "R"),
         ):
             sx = bx + body_w * x_pct
             self._draw_shoulder(p, sx, by - sh_h + 4, sh_w, sh_h,
-                                self._buttons.get(btn_idx, False), sh_label)
+                                self._buttons.get(btn_idx, False), sh_lbl)
             self._draw_trigger(p, sx, by - sh_h - tr_h, sh_w, tr_h,
-                               self._axes.get(axis_idx, -1.0), tr_label)
-
-        # Share/Options pills + PS button below touchpad.
+                               self._axes.get(ax_idx, -1.0), tr_lbl)
+            stamp = self._haptic_stamps.get(side)
+            if stamp is not None:
+                t = max(0.0, 1.0 - (now - stamp) / HEATMAP_DECAY_S)
+                if t > 0:
+                    dot = QColor(STICK_DOT); dot.setAlpha(int(255 * t))
+                    p.setPen(Qt.NoPen); p.setBrush(QBrush(dot))
+                    p.drawEllipse(
+                        QPointF(sx + sh_w + 6, by - sh_h - tr_h / 2), 5, 5,
+                    )
+        # Share / Options pills + PS button under touchpad.
         small_y = tp_y + tp_h + 6
         self._draw_pill(p, bx + body_w * 0.22, small_y, 44, 14,
                         self._buttons.get(6, False), "SHARE")
@@ -377,24 +361,18 @@ class VisualiseTab(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 20, 20, 20)
-        root.setSpacing(14)
+        root.setContentsMargins(20, 20, 20, 20); root.setSpacing(14)
 
-        top = QHBoxLayout()
-        top.setSpacing(14)
+        top = QHBoxLayout(); top.setSpacing(14)
         self._diagram = _DualSenseDiagram()
         top.addWidget(self._diagram, 3)
         top.addWidget(self._build_stats_panel(), 1)
         root.addLayout(top, 3)
 
         # Sparkline grid — 3 cols x 2 rows even split.
-        spark_frame = QFrame()
-        spark_frame.setStyleSheet(
-            f"background-color: {PANEL_BG.name()}; border-radius: 8px;"
-        )
+        spark_frame = self._panel_frame()
         spark_grid = QGridLayout(spark_frame)
-        spark_grid.setContentsMargins(10, 10, 10, 10)
-        spark_grid.setSpacing(8)
+        spark_grid.setContentsMargins(10, 10, 10, 10); spark_grid.setSpacing(8)
         self._sparklines: Dict[int, _Sparkline] = {}
         for i, (axis_idx, label) in enumerate(SPARK_AXES):
             spark = _Sparkline(label)
@@ -402,37 +380,33 @@ class VisualiseTab(QWidget):
             spark_grid.addWidget(spark, i // 3, i % 3)
         root.addWidget(spark_frame, 2)
 
-        heat_frame = QFrame()
-        heat_frame.setStyleSheet(
-            f"background-color: {PANEL_BG.name()}; border-radius: 8px;"
-        )
+        heat_frame = self._panel_frame()
         heat_v = QVBoxLayout(heat_frame)
-        heat_v.setContentsMargins(10, 8, 10, 10)
-        heat_v.setSpacing(4)
-        heat_title = QLabel("BUTTON ACTIVITY")
-        heat_title.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 1px;"
-        )
-        heat_v.addWidget(heat_title)
+        heat_v.setContentsMargins(10, 8, 10, 10); heat_v.setSpacing(4)
+        heat_v.addWidget(self._section_title("BUTTON ACTIVITY"))
         self._heatmap = _Heatmap()
         heat_v.addWidget(self._heatmap, 1)
         root.addWidget(heat_frame, 2)
 
+    @staticmethod
+    def _panel_frame() -> QFrame:
+        f = QFrame()
+        f.setStyleSheet(f"background-color: {PANEL_BG.name()}; border-radius: 8px;")
+        return f
+
+    @staticmethod
+    def _section_title(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            "color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
+        )
+        return lbl
+
     def _build_stats_panel(self) -> QWidget:
-        panel = QFrame()
-        panel.setStyleSheet(
-            f"background-color: {PANEL_BG.name()}; border-radius: 8px;"
-        )
+        panel = self._panel_frame()
         v = QVBoxLayout(panel)
-        v.setContentsMargins(16, 16, 16, 16)
-        v.setSpacing(10)
-        title = QLabel("LIVE STATS")
-        title.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 1px;"
-        )
-        v.addWidget(title)
+        v.setContentsMargins(16, 16, 16, 16); v.setSpacing(10)
+        v.addWidget(self._section_title("LIVE STATS"))
         self._stat_name     = self._make_stat(v, "Controller", "—")
         self._stat_transport = self._make_stat(v, "Transport", "—")
         self._stat_battery  = self._make_stat(v, "Battery", "—")
@@ -445,15 +419,13 @@ class VisualiseTab(QWidget):
 
     @staticmethod
     def _make_stat(layout: QVBoxLayout, label: str, value: str) -> QLabel:
-        """Build a label+value pair, return the value QLabel for later mutation."""
-        row = QVBoxLayout()
-        row.setSpacing(2)
+        """Build label+value pair, return the value QLabel for later mutation."""
+        row = QVBoxLayout(); row.setSpacing(2)
         lbl = QLabel(label.upper())
         lbl.setStyleSheet("color: #5a606b; font-size: 9px; font-weight: 600;")
         val = QLabel(value)
         val.setStyleSheet("color: #f5f7fa; font-size: 14px; font-weight: 600;")
-        row.addWidget(lbl)
-        row.addWidget(val)
+        row.addWidget(lbl); row.addWidget(val)
         layout.addLayout(row)
         return val
 
@@ -469,6 +441,10 @@ class VisualiseTab(QWidget):
         worker.controller_info.connect(self._on_controller_info)
         worker.started.connect(self._on_started)
         worker.stopped.connect(self._on_stopped)
+        # Optional: older worker builds may not expose `haptic_event` yet.
+        # Guard so plugging this tab into legacy bridges still works.
+        if hasattr(worker, "haptic_event"):
+            worker.haptic_event.connect(self._diagram.on_haptic)
 
     def _on_axis(self, idx: int, value: float) -> None:
         self._diagram.on_axis(idx, value)
@@ -532,20 +508,17 @@ class VisualiseTab(QWidget):
             charge = " ⚡" if self._battery_charging else ""
             self._stat_battery.setText(f"{self._battery_pct}%{charge}")
         self._stat_total.setText(str(self._midi_total))
-
-        # <1 ms gets a fixed label — keeps the readout from jittering on noise.
+        # <1 ms fixed label — stops jitter on signal-dispatch noise.
         if self._latency_samples:
             ms = (sum(self._latency_samples) / len(self._latency_samples)) * 1000.0
             self._stat_latency.setText("<1 ms" if ms < 1.0 else f"{ms:.1f} ms")
         else:
             self._stat_latency.setText("—")
-
         if self._runtime_start is None:
             self._stat_runtime.setText("—")
         else:
             secs = int(time.perf_counter() - self._runtime_start)
-            h, rem = divmod(secs, 3600)
-            m, s = divmod(rem, 60)
+            h, rem = divmod(secs, 3600); m, s = divmod(rem, 60)
             self._stat_runtime.setText(
                 f"{h}h {m:02d}m {s:02d}s" if h else f"{m:02d}:{s:02d}"
             )

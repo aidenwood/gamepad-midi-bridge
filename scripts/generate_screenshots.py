@@ -26,10 +26,13 @@ from PySide6.QtWidgets import QApplication, QTabWidget  # noqa: E402
 # Tabs we want a clean shot of, paired with the filename slug.
 TABS = [
     ("Live", "live"),
+    ("Visualise", "visualise"),
     ("Mapping", "mapping"),
+    ("Templates", "templates"),
     ("Presets", "presets"),
     ("Marketplace", "marketplace"),
     ("Connectors", "connectors"),
+    ("Bluetooth", "bluetooth"),
     ("Settings", "settings"),
     ("Help", "help"),
     ("About", "about"),

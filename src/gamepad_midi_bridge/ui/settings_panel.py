@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
@@ -16,9 +16,11 @@ import json
 
 from ..license import is_pro
 from ..mapping import Mapping
+from ..midi_input import INPUT_PORT_NAME
 from ..paths import config_path
 from ..updater import set_opt_in as set_update_opt_in
 from .. import telemetry
+from .haptic_input_dialog import HapticInputDialog
 
 
 def _read_update_opt_in() -> bool:
@@ -183,6 +185,28 @@ class SettingsPanel(QWidget):
         self._r2_effect = self._build_effect_combo(mapping.r2_haptic_effect)
         haptics_form.addRow("R2 feel", self._r2_effect)
 
+        # Haptic-in (incoming MIDI → trigger pulses). Headline V1.1c feature.
+        self._haptic_in_enabled = QCheckBox("Respond to incoming MIDI (haptic-in)")
+        self._haptic_in_enabled.setChecked(mapping.haptic_input.enabled)
+        self._haptic_in_enabled.toggled.connect(self._emit)
+        haptics_form.addRow(self._haptic_in_enabled)
+
+        port_hint = QLabel(
+            f"Listen port: <code>{INPUT_PORT_NAME}</code> — point your DAW's "
+            "MIDI output here."
+        )
+        port_hint.setTextFormat(Qt.RichText)
+        port_hint.setStyleSheet("color: #5a606b; font-size: 11px;")
+        port_hint.setWordWrap(True)
+        haptics_form.addRow(port_hint)
+
+        bindings_row = QHBoxLayout()
+        manage_btn = QPushButton("Manage bindings…")
+        manage_btn.clicked.connect(self._open_haptic_bindings_dialog)
+        bindings_row.addWidget(manage_btn)
+        bindings_row.addStretch(1)
+        haptics_form.addRow(bindings_row)
+
         # OSC output — Pro feature, lives alongside the MIDI port.
         osc_group = QGroupBox(f"OSC output{pro_suffix}")
         osc_form = QFormLayout(osc_group)
@@ -340,6 +364,9 @@ class SettingsPanel(QWidget):
         self._mapping.l2_haptic_effect = self._EFFECT_LABELS[self._l2_effect.currentIndex()][1]
         self._mapping.r2_haptic_effect = self._EFFECT_LABELS[self._r2_effect.currentIndex()][1]
 
+        # Haptic-in enabled flag — bindings are edited via dialog, not here.
+        self._mapping.haptic_input.enabled = self._haptic_in_enabled.isChecked()
+
         # OSC output.
         osc = self._mapping.osc
         osc.enabled = self._osc_enabled.isChecked()
@@ -348,6 +375,16 @@ class SettingsPanel(QWidget):
         osc.port = self._osc_port.value()
 
         self.settings_changed.emit(self._mapping)
+
+    def _open_haptic_bindings_dialog(self) -> None:
+        """Open the bindings editor. Mutates the live mapping in place on
+        OK then re-emits settings_changed so the bridge picks the new list
+        up without a restart."""
+        dlg = HapticInputDialog(self._mapping.haptic_input, parent=self)
+        if dlg.exec():
+            self._mapping.haptic_input.bindings = dlg.bindings()
+            self._mapping.haptic_input.listen_channel = dlg.listen_channel()
+            self.settings_changed.emit(self._mapping)
 
     def _on_osc_ping(self) -> None:
         from ..osc_backend import OscSender

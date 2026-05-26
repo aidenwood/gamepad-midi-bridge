@@ -10,20 +10,38 @@ edge-quantized stick corners on top of the SDL2-driven pygame input.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import (
+    QMetaObject, QObject, QThread, Q_ARG, Qt, Signal, Slot,
+)
 
 from . import dualsense as ds
 from .calibration import calibrate
 from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import Mapping, STICK_AXES
+from .mapping import HapticInputBinding, Mapping, STICK_AXES
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
+from .midi_input import (
+    INPUT_PORT_NAME, MidiInputError, OpenedInputPort,
+    close_input_port, open_input_port, set_callback as set_input_callback,
+)
 from .osc_backend import OscSender
+
+
+# Adaptive-trigger effects whose output report carries a meaningful amplitude/
+# strength byte. The bridge scales those bytes by incoming velocity/CC. The
+# rest are fire-or-skip (we threshold at 0.5).
+_AMPLITUDE_AWARE_EFFECTS = frozenset({"feedback", "vibration"})
+
+# How long an incoming MIDI event holds the trigger effect before the bridge
+# reverts to the user's static l2/r2_haptic_effect. ~50 ms is long enough to
+# feel as a real "thump" but short enough that fast notes don't smear.
+_HAPTIC_PULSE_MS = 50
 
 # macOS-only PyObjC fallback for adaptive triggers. Imported lazily so
 # non-mac users don't even attempt to load the framework.
@@ -70,6 +88,10 @@ class BridgeWorker(QObject):
     # --- MIDI sent (for the "MIDI activity" indicator)
     midi_sent = Signal()
 
+    # --- V1.1c haptic-input: emitted whenever an incoming MIDI message
+    # fired a trigger effect. (side="L"/"R", effect name, intensity 0..1).
+    haptic_event = Signal(str, str, float)
+
     def __init__(self, slot_index: int = 0,
                  midi_port_name: Optional[str] = None,
                  demo: bool = False) -> None:
@@ -94,6 +116,12 @@ class BridgeWorker(QObject):
         self._left_corner: Optional[CornerDetector] = None
         self._right_corner: Optional[CornerDetector] = None
         self._last_haptic_pair: tuple = (None, None)   # (l2, r2) last applied
+        # Haptic-in plumbing. Lock serialises HID writes between the rtmidi
+        # callback thread and the main poll loop's `_apply_haptics` calls so
+        # we never interleave two output reports on the same handle.
+        self._midi_in: Optional[OpenedInputPort] = None
+        self._haptic_lock = threading.Lock()
+        self._haptic_revert_timers: List["threading.Timer"] = []
         self._running = False
         self._prev_buttons: Dict[int, bool] = {}
         self._prev_cc: Dict[int, int] = {}
@@ -115,6 +143,7 @@ class BridgeWorker(QObject):
         self._sync_corner_detectors()
         self._apply_haptics()
         self._sync_osc_sender()
+        self._sync_haptic_input()
 
     @Slot()
     def start(self) -> None:
@@ -138,6 +167,7 @@ class BridgeWorker(QObject):
         self._sync_corner_detectors()
         self._apply_haptics()
         self._sync_osc_sender()
+        self._sync_haptic_input()
 
         # Auto-calibrate on first start. UI may also trigger recalibration.
         self._run_calibration()
@@ -239,29 +269,155 @@ class BridgeWorker(QObject):
         """Push current trigger-effect config to the controller.
 
         Idempotent — if nothing's changed since last apply, no-op. Safe to
-        call before a handle exists (it just defers until one does).
+        call before a handle exists (it just defers until one does). The
+        lock serialises against haptic-input pulses so we never interleave
+        two HID writes on the same handle.
         """
         m = self._state.mapping
         pair = (m.l2_haptic_effect, m.r2_haptic_effect)
         if pair == self._last_haptic_pair:
             return
 
-        applied = False
+        with self._haptic_lock:
+            applied = self._write_trigger_pair(m.l2_haptic_effect, m.r2_haptic_effect)
+        if applied:
+            self._last_haptic_pair = pair
+
+    def _write_trigger_pair(self, l2: Optional[str], r2: Optional[str]) -> bool:
+        """Low-level HID write. Caller MUST hold `self._haptic_lock`."""
         # macOS goes through GCController; everything else uses hidapi.
         if self._mac_haptic_handle is not None:
             try:
-                self._mac_haptic_handle.set_trigger_effect("L", m.l2_haptic_effect or "off")
-                self._mac_haptic_handle.set_trigger_effect("R", m.r2_haptic_effect or "off")
-                applied = True
+                self._mac_haptic_handle.set_trigger_effect("L", l2 or "off")
+                self._mac_haptic_handle.set_trigger_effect("R", r2 or "off")
+                return True
             except Exception as e:
                 self.status.emit(f"Haptic apply failed: {e}")
-        elif self._ds_handle is not None and self._ds_handle.wired:
-            # BT haptics needs a CRC32 tail — V2. Wired only for V1.1b.
-            applied = ds.write_trigger_effects(
-                self._ds_handle, m.l2_haptic_effect, m.r2_haptic_effect,
-            )
+                return False
+        if self._ds_handle is not None and self._ds_handle.wired:
+            # BT haptics now use a CRC32-framed report — both paths supported.
+            return ds.write_trigger_effects(self._ds_handle, l2, r2)
+        if self._ds_handle is not None and not self._ds_handle.wired:
+            return ds.write_trigger_effects(self._ds_handle, l2, r2)
+        return False
 
-        if applied:
+    # ---------------------------------------------------------- haptic input
+
+    def _sync_haptic_input(self) -> None:
+        """Open / close the virtual MIDI input port based on mapping.haptic_input.
+
+        Re-entrant: called on start() AND every set_mapping() so the user can
+        toggle the feature live from the Settings panel. If the port can't
+        open (no loopMIDI on Windows, broken CoreMIDI, etc.) we surface it
+        through `status` so the GUI shows the failure without crashing.
+        """
+        cfg = self._state.mapping.haptic_input
+        if not cfg.enabled:
+            if self._midi_in is not None:
+                close_input_port(self._midi_in)
+                self._midi_in = None
+            return
+        if self._midi_in is not None:
+            # Already open — just keep using it. Bindings live on `self._state`
+            # so changes propagate without re-opening the port.
+            return
+        try:
+            self._midi_in = open_input_port(INPUT_PORT_NAME)
+            set_input_callback(self._midi_in, self._on_midi_in)
+            self.status.emit(
+                f"Haptic-in listening on '{self._midi_in.name}'"
+            )
+        except MidiInputError as e:
+            self.status.emit(f"Haptic-in unavailable: {e}")
+            self._midi_in = None
+
+    def _on_midi_in(self, event, _data) -> None:
+        """rtmidi callback — runs on librtmidi's C thread.
+
+        Must stay non-blocking. We parse the message, find every matching
+        binding, and fire the trigger effect under a small mutex. Heavy work
+        (timer scheduling for the revert) is fine because `threading.Timer`
+        just hands the callback to a daemon thread.
+
+        Why we don't marshal back to the QThread via QMetaObject: the
+        BridgeWorker's QThread is busy running the input poll loop and never
+        spins a Qt event loop, so queued invocations would never execute.
+        Direct HID writes from this thread are safe as long as we lock
+        against the main loop's `_apply_haptics`.
+        """
+        try:
+            message, _delta = event
+        except (TypeError, ValueError):
+            return
+        if not message:
+            return
+        cfg = self._state.mapping.haptic_input
+        if not cfg.enabled or not cfg.bindings:
+            return
+        try:
+            status_byte = message[0]
+        except IndexError:
+            return
+        msg_type = status_byte & 0xF0
+        channel = status_byte & 0x0F
+        if cfg.listen_channel >= 0 and channel != (cfg.listen_channel & 0x0F):
+            return
+
+        # NOTE_ON with velocity 0 is conventionally a NOTE_OFF; ignore.
+        if msg_type == 0x90 and len(message) >= 3 and message[2] > 0:
+            self._dispatch_haptic("note", int(message[1]),
+                                  int(message[2]) / 127.0)
+        elif msg_type == 0xB0 and len(message) >= 3:
+            self._dispatch_haptic("cc", int(message[1]),
+                                  int(message[2]) / 127.0)
+        # NOTE_OFF, polyphonic aftertouch, program change, etc. are no-ops —
+        # haptics naturally decay (we revert after _HAPTIC_PULSE_MS).
+
+    def _dispatch_haptic(self, source: str, midi_id: int, normalized: float) -> None:
+        """Match an incoming MIDI value against every binding and fire."""
+        cfg = self._state.mapping.haptic_input
+        for binding in cfg.bindings:
+            if binding.source != source or binding.midi_id != midi_id:
+                continue
+            intensity = max(0.0, min(1.0, normalized * binding.intensity_scale))
+            # For non-amplitude effects (weapon, bow, etc.) only fire above
+            # the half-mark — otherwise a quiet note silently slams the
+            # trigger into full resistance.
+            if (binding.effect not in _AMPLITUDE_AWARE_EFFECTS
+                    and intensity < 0.5):
+                continue
+            self._fire_haptic(binding, intensity)
+
+    def _fire_haptic(self, binding: HapticInputBinding, intensity: float) -> None:
+        """Write the trigger effect and schedule a revert to the static config."""
+        side = "L" if binding.trigger.upper() == "L2" else "R"
+        # Build the (l2, r2) tuple — only touch the bound side, leave the
+        # other at its static config so the user's existing L2/R2 'feel'
+        # selection survives the pulse on the opposite trigger.
+        m = self._state.mapping
+        if side == "L":
+            new_pair = (binding.effect, m.r2_haptic_effect)
+        else:
+            new_pair = (m.l2_haptic_effect, binding.effect)
+        with self._haptic_lock:
+            self._write_trigger_pair(*new_pair)
+            self._last_haptic_pair = new_pair
+        self.haptic_event.emit(side, binding.effect, intensity)
+
+        # Schedule a revert so the trigger relaxes back to the user's static
+        # 'feel'. Each binding gets its own timer; if a flurry of notes lands
+        # on the same trigger we just keep refreshing the latest revert.
+        t = threading.Timer(_HAPTIC_PULSE_MS / 1000.0, self._revert_to_static)
+        t.daemon = True
+        self._haptic_revert_timers.append(t)
+        t.start()
+
+    def _revert_to_static(self) -> None:
+        """Restore the user's static L2/R2 trigger feel after a pulse."""
+        m = self._state.mapping
+        pair = (m.l2_haptic_effect, m.r2_haptic_effect)
+        with self._haptic_lock:
+            self._write_trigger_pair(*pair)
             self._last_haptic_pair = pair
 
     @staticmethod
@@ -518,6 +674,19 @@ class BridgeWorker(QObject):
                     pass
 
     def _cleanup(self) -> None:
+        # Close the input port FIRST so no more callback writes land while
+        # we're tearing the HID handle down. cancel_callback inside
+        # close_input_port blocks until any in-flight callback returns.
+        if self._midi_in is not None:
+            close_input_port(self._midi_in)
+            self._midi_in = None
+        for t in self._haptic_revert_timers:
+            try:
+                t.cancel()
+            except Exception:
+                pass
+        self._haptic_revert_timers.clear()
+
         close_port(self._midi)
         self._midi = None
         if self._osc is not None:
