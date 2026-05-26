@@ -20,9 +20,11 @@ from ..multi import MultiBridgeController, desired_slot_count
 from ..portable import export_pack, import_pack
 from ..updater import UpdateChecker, UpdateInfo
 from .calibration_dialog import CalibrationDialog
+from .bluetooth_tab import BluetoothTab
 from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
 from .help_tab import HelpTab
+from .log_console import LogConsole
 from .mapping_editor import MappingEditor
 from .marketplace_tab import MarketplaceTab
 from .onboarding import OnboardingWizard, is_first_launch, mark_complete
@@ -106,7 +108,22 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_status_bar())
         self._update_banner = self._build_update_banner()
         root.addWidget(self._update_banner)
-        root.addWidget(self._build_tabs(), 1)
+
+        # Tabs over a collapsible log console. QSplitter lets the user drag
+        # the divide; the console respects its own collapsed flag on launch.
+        body_splitter = QSplitter(Qt.Vertical)
+        body_splitter.setHandleWidth(2)
+        body_splitter.setChildrenCollapsible(False)
+        body_splitter.addWidget(self._build_tabs())
+        self._log_console = LogConsole()
+        body_splitter.addWidget(self._log_console)
+        body_splitter.setStretchFactor(0, 1)
+        body_splitter.setStretchFactor(1, 0)
+        body_splitter.setSizes([640, 1 if self._log_console.is_collapsed() else 200])
+        root.addWidget(body_splitter, 1)
+
+        # Stream stdlib logging + bridge activity into the console.
+        self._log_console.install_root_handler()
 
         self._wire_signals()
         self._refresh_status_idle()
@@ -287,6 +304,10 @@ class MainWindow(QMainWindow):
         self._connectors.status_message.connect(self._on_status)
         tabs.addTab(self._connectors, "Connectors")
 
+        self._bluetooth = BluetoothTab()
+        self._bluetooth.status_message.connect(self._on_status)
+        tabs.addTab(self._bluetooth, "Bluetooth")
+
         self._settings = SettingsPanel(self._mapping)
         self._settings.settings_changed.connect(self._on_settings_changed)
         self._settings.recalibrate_clicked.connect(self._on_recalibrate)
@@ -396,6 +417,8 @@ class MainWindow(QMainWindow):
         # path unchanged. Slot 1 wiring is deferred until configure() actually
         # spins up a second bridge.
         self._wire_bridge_to_meter(self._bridge, self._meter, primary=True)
+        # Mirror primary bridge activity into the bottom console.
+        self._log_console.attach_bridge_signals(self._bridge.worker)
 
     def _wire_bridge_to_meter(self, bridge, meter, primary: bool) -> None:
         w = bridge.worker
