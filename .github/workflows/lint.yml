@@ -1,0 +1,40 @@
+name: lint
+
+# Ruff check + format-verify on every PR. Cheap, single OS, single Python.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  ruff:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Install ruff directly rather than via `pip install -e ".[dev]"` to keep
+      # the lint job snappy — we don't need the full app dep tree for linting.
+      - name: Install ruff
+        run: |
+          python -m pip install --upgrade pip
+          pip install "ruff>=0.5"
+
+      # `ruff check .` honours pyproject.toml ([tool.ruff]) automatically.
+      - name: ruff check
+        run: ruff check .
+
+      # `--check` makes ruff format exit non-zero on any diff instead of
+      # rewriting files. CI verifies; humans format locally.
+      - name: ruff format --check
+        run: ruff format --check .

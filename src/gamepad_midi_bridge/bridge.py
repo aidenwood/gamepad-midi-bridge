@@ -452,18 +452,28 @@ class BridgeWorker(QObject):
                 self.battery_changed.emit(*snapshot)
             self._last_battery_poll = now
 
-        # Touchpad — only first touch contact in V1.1 (two-finger gestures = V2)
+        # Touchpad — primary finger always; second finger when two_finger mode on.
         if mapping.touchpad.enabled:
-            t = state.touch_a
-            if t.active or not mapping.touchpad.require_contact:
-                x_norm, y_norm = t.normalized()
-                self.touchpad_xy.emit(t.active, x_norm, y_norm)
-                self._send_touch_cc(midi, cc, mapping.touchpad.x_cc, x_norm)
-                self._send_touch_cc(midi, cc, mapping.touchpad.y_cc, y_norm)
+            tp_cfg = mapping.touchpad
+            ta = state.touch_a
+            if ta.active or not tp_cfg.require_contact:
+                x_norm, y_norm = ta.normalized()
+                self.touchpad_xy.emit(ta.active, x_norm, y_norm)
+                self._send_touch_cc(midi, cc, tp_cfg.x_cc, x_norm)
+                self._send_touch_cc(midi, cc, tp_cfg.y_cc, y_norm)
             elif self._prev_touch_cc:
                 # Finger lifted — reset the GUI but keep the last MIDI value
                 # (Kaoss Pad behaviour: release leaves the modulator where it was).
                 self.touchpad_xy.emit(False, 0.0, 0.0)
+
+            if tp_cfg.two_finger:
+                tb = state.touch_b
+                # Only fire the secondary CCs while the second finger is down,
+                # so producers can use 2-finger mode as a momentary modulator.
+                if tb.active:
+                    bx, by = tb.normalized()
+                    self._send_touch_cc(midi, cc, tp_cfg.b_x_cc, bx)
+                    self._send_touch_cc(midi, cc, tp_cfg.b_y_cc, by)
 
     def _send_touch_cc(self, midi, cc, cc_num: int, normalized: float) -> None:
         val = max(0, min(127, int(round(normalized * 127))))

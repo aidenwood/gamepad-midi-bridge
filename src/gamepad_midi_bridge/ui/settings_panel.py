@@ -168,6 +168,13 @@ class SettingsPanel(QWidget):
         self._touchpad_require_contact.toggled.connect(self._emit)
         touchpad_form.addRow(self._touchpad_require_contact)
 
+        self._touchpad_two_finger = QCheckBox(
+            "Two-finger mode (send 2nd finger to CC 18/19)"
+        )
+        self._touchpad_two_finger.setChecked(mapping.touchpad.two_finger)
+        self._touchpad_two_finger.toggled.connect(self._emit)
+        touchpad_form.addRow(self._touchpad_two_finger)
+
         # Adaptive triggers (DualSense L2/R2 force-feedback) — Pro feature.
         haptics_group = QGroupBox(f"Adaptive triggers{pro_suffix}")
         haptics_form = QFormLayout(haptics_group)
@@ -323,6 +330,7 @@ class SettingsPanel(QWidget):
         tp.x_cc = self._touchpad_x_cc.value()
         tp.y_cc = self._touchpad_y_cc.value()
         tp.require_contact = self._touchpad_require_contact.isChecked()
+        tp.two_finger = self._touchpad_two_finger.isChecked()
 
         # Adaptive-trigger effects.
         self._mapping.l2_haptic_effect = self._EFFECT_LABELS[self._l2_effect.currentIndex()][1]

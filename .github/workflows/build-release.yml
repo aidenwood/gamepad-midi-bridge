@@ -1,0 +1,136 @@
+name: build-release
+
+# Triggers only on semver tags pushed to the repo (e.g. `git tag v0.1.0 && git push --tags`).
+# Builds the PyInstaller bundle on each OS, uploads per-OS zips as artifacts,
+# then a final job assembles a GitHub Release with all three zips attached.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# GITHUB_TOKEN is provided automatically by Actions; `contents: write` is
+# required for softprops/action-gh-release to create the release + upload assets.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            asset_suffix: macos
+          - os: windows-latest
+            asset_suffix: windows
+          - os: ubuntu-latest
+            asset_suffix: linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # ALSA headers required to build python-rtmidi from source on Linux.
+      # Wheels exist for macOS (arm64 + x86_64) and Windows so no system deps needed there.
+      - name: Install ALSA headers (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
+      - name: Install project + build extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      - name: Run PyInstaller via build.py
+        run: python build.py
+
+      # ---- Per-OS packaging ----
+      # macOS: PyInstaller --windowed produces `dist/Gamepad MIDI Bridge.app`
+      # (a directory bundle). We zip the .app directly. `ditto` preserves the
+      # bundle's resource forks + symlinks correctly; plain `zip -r` can mangle them.
+      #
+      # CODE SIGNING: not done here. To add later:
+      #   1. Add APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, APPLE_TEAM_ID,
+      #      APPLE_NOTARY_USER, APPLE_NOTARY_PASSWORD to repo secrets.
+      #   2. Before `python build.py`: decode the .p12 into a temp keychain,
+      #      `security import`, then pass `--codesign-identity` to PyInstaller
+      #      (or run `codesign --deep --options runtime` post-build).
+      #   3. After zipping: `xcrun notarytool submit ... --wait` + `xcrun stapler staple`.
+      - name: Zip macOS .app
+        if: runner.os == 'macOS'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent "Gamepad MIDI Bridge.app" "../gamepad-midi-bridge-${TAG}-macos.zip"
+
+      # Windows: --windowed (without --onefile, which our build.py omits on Windows)
+      # produces a folder `dist/Gamepad MIDI Bridge/` containing the .exe + deps.
+      # We zip the whole folder so users get a self-contained app directory.
+      - name: Zip Windows folder
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          Compress-Archive -Path "dist/Gamepad MIDI Bridge" -DestinationPath "gamepad-midi-bridge-$env:TAG-windows.zip"
+
+      # Linux: --onefile produces a single binary `dist/Gamepad MIDI Bridge`.
+      # Zip it so the asset name + extension stay consistent across OSes.
+      - name: Zip Linux binary
+        if: runner.os == 'Linux'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          zip "../gamepad-midi-bridge-${TAG}-linux.zip" "Gamepad MIDI Bridge"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gamepad-midi-bridge-${{ matrix.asset_suffix }}
+          path: gamepad-midi-bridge-*-${{ matrix.asset_suffix }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Download all three per-OS artifacts into a single folder. v4 changed
+      # behaviour: omitting `name` downloads every artifact, each into its own
+      # subdir. We flatten with `merge-multiple: true`.
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List collected assets
+        run: ls -la release-assets
+
+      # Creates the release for the pushed tag and attaches every zip in the
+      # folder. `generate_release_notes: true` makes GitHub auto-build notes
+      # from merged PRs since the last tag — saves us writing them manually.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,38 @@
+version: 2
+
+# Weekly dep updates for the two ecosystems this repo cares about:
+#   - pip (pyproject.toml dependency pins)
+#   - github-actions (action versions in .github/workflows/*.yml)
+#
+# Monday morning bundling keeps PR noise predictable.
+
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: "Australia/Brisbane"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: "deps"
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: "Australia/Brisbane"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "ci"
+      include: scope

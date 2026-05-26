@@ -59,10 +59,19 @@ class OscConfig:
 
 @dataclass
 class TouchpadConfig:
-    """DualSense touchpad as a 2D MIDI modulator. Pro feature."""
+    """DualSense touchpad as a 2D MIDI modulator. Pro feature.
+
+    The DualSense reports up to two simultaneous touch contacts. The first
+    finger drives x_cc/y_cc; the second finger (when present) drives
+    b_x_cc/b_y_cc. Producers can use this as a Kaoss Pad with a "macro"
+    second control surface in the same physical space.
+    """
     enabled: bool = False
-    x_cc: int = 16          # MIDI CC for X position
-    y_cc: int = 17          # MIDI CC for Y position
+    x_cc: int = 16                 # primary finger X
+    y_cc: int = 17                 # primary finger Y
+    b_x_cc: int = 18               # secondary finger X (two-finger mode)
+    b_y_cc: int = 19               # secondary finger Y
+    two_finger: bool = False       # also send b_x_cc/b_y_cc when a 2nd finger lands
     require_contact: bool = True   # only send CCs while finger is on the pad
 
 
@@ -170,5 +179,8 @@ def _touchpad_from_dict(d: Optional[dict]) -> TouchpadConfig:
         enabled=bool(d.get("enabled", False)),
         x_cc=int(d.get("x_cc", 16)),
         y_cc=int(d.get("y_cc", 17)),
+        b_x_cc=int(d.get("b_x_cc", 18)),
+        b_y_cc=int(d.get("b_y_cc", 19)),
+        two_finger=bool(d.get("two_finger", False)),
         require_contact=bool(d.get("require_contact", True)),
     )
