@@ -12,8 +12,23 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+import json
+
 from ..license import is_pro
 from ..mapping import Mapping
+from ..paths import config_path
+from ..updater import set_opt_in as set_update_opt_in
+from .. import telemetry
+
+
+def _read_update_opt_in() -> bool:
+    path = config_path()
+    if not path.exists():
+        return True
+    try:
+        return bool(json.loads(path.read_text(encoding="utf-8")).get("check_for_updates", True))
+    except Exception:
+        return True
 
 
 class SettingsPanel(QWidget):
@@ -99,6 +114,27 @@ class SettingsPanel(QWidget):
         self._r2_effect = self._build_effect_combo(mapping.r2_haptic_effect)
         haptics_form.addRow("R2 feel", self._r2_effect)
 
+        # Privacy / telemetry — opt-in only, never gated.
+        privacy_group = QGroupBox("Privacy")
+        privacy_form = QFormLayout(privacy_group)
+        self._check_updates = QCheckBox("Check for updates on startup")
+        self._check_updates.setChecked(_read_update_opt_in())
+        self._check_updates.toggled.connect(self._on_update_opt_changed)
+        privacy_form.addRow(self._check_updates)
+
+        self._anon_stats = QCheckBox("Send anonymous usage stats (opt-in)")
+        self._anon_stats.setChecked(telemetry.is_enabled())
+        self._anon_stats.toggled.connect(self._on_telemetry_opt_changed)
+        privacy_form.addRow(self._anon_stats)
+
+        privacy_note = QLabel(
+            "Updates check fires once per launch, no personal data. "
+            "Usage stats are off by default and never include preset content."
+        )
+        privacy_note.setStyleSheet("color: #5a606b; font-size: 11px;")
+        privacy_note.setWordWrap(True)
+        privacy_form.addRow(privacy_note)
+
         # Calibration group
         calib_group = QGroupBox("Calibration")
         calib_layout = QVBoxLayout(calib_group)
@@ -118,6 +154,7 @@ class SettingsPanel(QWidget):
         outer.addWidget(corners_group)
         outer.addWidget(touchpad_group)
         outer.addWidget(haptics_group)
+        outer.addWidget(privacy_group)
         outer.addWidget(calib_group)
         outer.addStretch(1)
 
@@ -190,6 +227,16 @@ class SettingsPanel(QWidget):
         self._mapping.r2_haptic_effect = self._EFFECT_LABELS[self._r2_effect.currentIndex()][1]
 
         self.settings_changed.emit(self._mapping)
+
+    def _on_update_opt_changed(self, checked: bool) -> None:
+        if self._building:
+            return
+        set_update_opt_in(checked)
+
+    def _on_telemetry_opt_changed(self, checked: bool) -> None:
+        if self._building:
+            return
+        telemetry.set_enabled(checked)
 
     @staticmethod
     def _apply_corner_combo(combo: QComboBox, cfg) -> None:
