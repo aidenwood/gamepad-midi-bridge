@@ -88,6 +88,15 @@ class MainWindow(QMainWindow):
         self._activity_timer.setSingleShot(True)
         self._activity_timer.timeout.connect(self._fade_activity)
 
+        # MIDI throughput counter — incremented on midi_sent and flushed to
+        # the status bar at 2Hz so the user can see a live rate without the
+        # text flickering at 100Hz.
+        self._midi_count = 0
+        self._rate_timer = QTimer(self)
+        self._rate_timer.setInterval(500)
+        self._rate_timer.timeout.connect(self._flush_rate)
+        self._rate_timer.start()
+
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
@@ -163,6 +172,11 @@ class MainWindow(QMainWindow):
         title_col.addWidget(self._status_title)
         title_col.addWidget(self._status_sub)
         h.addLayout(title_col, 1)
+
+        self._rate_label = QLabel("")
+        self._rate_label.setStyleSheet("color: #5a606b; font-size: 11px;")
+        self._rate_label.setMinimumWidth(70)
+        h.addWidget(self._rate_label)
 
         self._activity_dot = QLabel("●")
         self._activity_dot.setObjectName("ActivityDot")
@@ -548,7 +562,18 @@ class MainWindow(QMainWindow):
             self._status_sub.setText(f"Corner {side}{sector} → MIDI note fired")
         self._on_midi_sent()
 
+    def _flush_rate(self) -> None:
+        # Convert the half-second tally to a per-second rate, round to nearest 10.
+        rate = self._midi_count * 2
+        if rate > 0:
+            rounded = (rate // 10) * 10 if rate >= 30 else rate
+            self._rate_label.setText(f"{rounded}/s")
+        elif self._rate_label.text():
+            self._rate_label.setText("")
+        self._midi_count = 0
+
     def _on_midi_sent(self) -> None:
+        self._midi_count += 1
         self._activity_dot.setStyleSheet("color: #2dd4bf; font-size: 18px;")
         self._activity_timer.start(120)
 
