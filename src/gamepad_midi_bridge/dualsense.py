@@ -328,7 +328,8 @@ def _parse_touch(buf, base: int) -> TouchPoint:
 # bytes zero apart from the framing constants 0xA2/0x31/0x02/0xFF/0xF7 and the
 # `off` trigger ID 0x05 at the two block starts):
 #
-#     expected CRC32 (hex, little-endian on the wire): 0x84E9B97A
+#     expected CRC32 (integer, hex):                       0x81C5A8D1
+#     bytes on wire at [74:78] (little-endian):            D1 A8 C5 81
 #
 # If a future change flips a framing byte by accident this hex will move,
 # giving us a fast regression tripwire long before plugging into hardware.

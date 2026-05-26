@@ -19,6 +19,7 @@ from .calibration_dialog import CalibrationDialog
 from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
 from .mapping_editor import MappingEditor
+from .marketplace_tab import MarketplaceTab
 from .preset_manager import PresetManager
 from .settings_panel import SettingsPanel
 
@@ -153,6 +154,11 @@ class MainWindow(QMainWindow):
         self._presets.activate_clicked.connect(self._enter_license_key)
         self._presets.preset_loaded.connect(self._on_preset_loaded)
         tabs.addTab(self._presets, "Presets")
+
+        self._marketplace = MarketplaceTab()
+        self._marketplace.preset_chosen.connect(self._on_preset_loaded)
+        self._marketplace.status_message.connect(self._on_status)
+        tabs.addTab(self._marketplace, "Marketplace")
 
         self._connectors = ConnectorsTab()
         self._connectors.status_message.connect(self._on_status)
