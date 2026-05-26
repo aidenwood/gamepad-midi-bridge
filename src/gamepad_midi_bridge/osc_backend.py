@@ -46,6 +46,14 @@ class OscSender:
         except Exception:
             return False
 
+    def ping(self) -> bool:
+        """Send a `/gmb/ping` discovery message. Useful from the GUI as a
+        'is anything listening on this port' button — Resolume's OSC
+        monitor or TouchDesigner's OSC In CHOP will surface it as a
+        named address, confirming the route.
+        """
+        return self.send("/gmb/ping", 1)
+
 
 # --------------------------------------------------------------- packet building
 

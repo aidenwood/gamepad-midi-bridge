@@ -51,7 +51,10 @@ class BridgeWorker(QObject):
     error = Signal(str)
     controller_info = Signal(object)                  # ControllerInfo | None
     calibration_progress = Signal(float)              # 0.0..1.0
-    calibration_done = Signal(dict, list, list)       # offsets, severe, significant
+    # PySide6's dict ↔ QVariantMap conversion sometimes warns about
+    # _pythonToCppCopy; declaring `object` keeps the Python dict intact
+    # across the queued connection without the noise.
+    calibration_done = Signal(object, list, list)     # offsets, severe, significant
 
     # --- Live telemetry (throttled to avoid spamming the GUI)
     axis_value = Signal(int, float)                   # axis_idx, -1..1 (post-offset)

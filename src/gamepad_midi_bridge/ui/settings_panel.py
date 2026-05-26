@@ -221,6 +221,10 @@ class SettingsPanel(QWidget):
         osc_note.setWordWrap(True)
         osc_form.addRow(osc_note)
 
+        ping_btn = QPushButton("Send /gmb/ping (test the route)")
+        ping_btn.clicked.connect(self._on_osc_ping)
+        osc_form.addRow(ping_btn)
+
         # Privacy / telemetry — opt-in only, never gated.
         privacy_group = QGroupBox("Privacy")
         privacy_form = QFormLayout(privacy_group)
@@ -344,6 +348,26 @@ class SettingsPanel(QWidget):
         osc.port = self._osc_port.value()
 
         self.settings_changed.emit(self._mapping)
+
+    def _on_osc_ping(self) -> None:
+        from ..osc_backend import OscSender
+        host = self._osc_host.text().strip() or "127.0.0.1"
+        port = self._osc_port.value()
+        s = OscSender(host=host, port=port)
+        ok = s.ping()
+        s.close()
+        from PySide6.QtWidgets import QMessageBox
+        if ok:
+            QMessageBox.information(
+                self, "OSC ping sent",
+                f"Sent /gmb/ping → {host}:{port}\n\n"
+                "Check Resolume's OSC monitor (Preferences → OSC → "
+                "Input devices) or TouchDesigner's OSC In CHOP to "
+                "confirm receipt.",
+            )
+        else:
+            QMessageBox.warning(self, "OSC ping failed",
+                                f"Couldn't send to {host}:{port}.")
 
     def _on_update_opt_changed(self, checked: bool) -> None:
         if self._building:
