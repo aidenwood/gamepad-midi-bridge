@@ -1,0 +1,38 @@
+{
+  "schema": "gamepad-midi-bridge.tdmap/1",
+  "name": "Gamepad MIDI Bridge",
+  "description": "Named MIDI mappings for the Gamepad MIDI Bridge virtual port. Wire these into mididevice DAT / CHOP by name to avoid hard-coding CC numbers.",
+  "midi_channel": 1,
+  "notes": [
+    {"name": "face_south",  "note": 60, "source": "button 0"},
+    {"name": "face_east",   "note": 62, "source": "button 1"},
+    {"name": "face_west",   "note": 64, "source": "button 2"},
+    {"name": "face_north",  "note": 65, "source": "button 3"},
+    {"name": "shoulder_l1", "note": 67, "source": "button 4"},
+    {"name": "shoulder_r1", "note": 69, "source": "button 5"},
+    {"name": "select",      "note": 71, "source": "button 6"},
+    {"name": "start",       "note": 72, "source": "button 7"},
+    {"name": "ps_home",     "note": 74, "source": "button 8"},
+    {"name": "stick_l_click","note": 76, "source": "button 9"},
+    {"name": "stick_r_click","note": 77, "source": "button 10"},
+    {"name": "dpad_up",     "note": 78, "source": "hat up"},
+    {"name": "dpad_down",   "note": 79, "source": "hat down"},
+    {"name": "dpad_left",   "note": 80, "source": "hat left"},
+    {"name": "dpad_right",  "note": 81, "source": "hat right"}
+  ],
+  "ccs": [
+    {"name": "stick_l_x", "cc": 3, "source": "axis 0"},
+    {"name": "stick_l_y", "cc": 4, "source": "axis 1"},
+    {"name": "stick_r_x", "cc": 5, "source": "axis 2"},
+    {"name": "stick_r_y", "cc": 6, "source": "axis 3"},
+    {"name": "trigger_l", "cc": 1, "source": "axis 4"},
+    {"name": "trigger_r", "cc": 2, "source": "axis 5"},
+    {"name": "touchpad_x", "cc": 16, "source": "touchpad x (Pro)"},
+    {"name": "touchpad_y", "cc": 17, "source": "touchpad y (Pro)"}
+  ],
+  "wiring_hints": {
+    "mididevice_dat": "Set Device to the bridge virtual MIDI port. Channel 1.",
+    "midiin_chop": "Use Channel Name Scope from the 'name' column above for clean references.",
+    "stick_centering": "Sticks idle around CC value 64. Bridge already deadzones — no need to deadzone again in TD."
+  }
+}

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from .. import APP_NAME, __version__
+from .. import APP_NAME, __version__, telemetry
 from ..bridge import BridgeController
 from ..license import activate_from_string, is_pro, state as license_state
 from ..mapping import Mapping
@@ -20,12 +20,26 @@ from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
 from .mapping_editor import MappingEditor
 from .marketplace_tab import MarketplaceTab
+from .onboarding import OnboardingWizard, is_first_launch, mark_complete
 from .preset_manager import PresetManager
 from .settings_panel import SettingsPanel
 
 
 UPGRADE_URL = "https://store.aidxn.com/gamepad-midi-bridge"
 RECOVERY_URL = "https://store.aidxn.com/recover"
+CHANGELOG_URL = "https://store.aidxn.com/changelog"
+
+
+def _anonymise(controller_name: str) -> str:
+    """Strip serial-ish noise from a controller name before sending in telemetry."""
+    lc = controller_name.lower()
+    if "dualsense" in lc:
+        return "dualsense"
+    if "xbox" in lc or "x-input" in lc:
+        return "xbox"
+    if "dualshock" in lc:
+        return "dualshock"
+    return "other"
 
 
 class MainWindow(QMainWindow):
@@ -216,6 +230,13 @@ class MainWindow(QMainWindow):
         recover.setFlat(True)
         recover.setStyleSheet("color: #8a9099; text-align: left;")
         recovery_row.addWidget(recover)
+
+        changelog = QPushButton("Release notes")
+        changelog.clicked.connect(lambda: webbrowser.open(CHANGELOG_URL))
+        changelog.setFlat(True)
+        changelog.setStyleSheet("color: #8a9099; text-align: left;")
+        recovery_row.addWidget(changelog)
+
         recovery_row.addStretch(1)
         v.addLayout(recovery_row)
 
@@ -264,6 +285,8 @@ class MainWindow(QMainWindow):
     def _on_started(self, controller_name: str, port_name: str) -> None:
         self._status_title.setText("Bridging")
         self._status_sub.setText(f"{controller_name}  →  {port_name}")
+        telemetry.send_event("bridge_started",
+                             controller=_anonymise(controller_name))
         if self._calibration_dialog and not self._calibration_dialog.isVisible():
             # Dialog already closed by user — nothing to do.
             self._calibration_dialog = None
@@ -349,6 +372,7 @@ class MainWindow(QMainWindow):
             return
         new_state = activate_from_string(key)
         if new_state.is_pro:
+            telemetry.send_event("license_activated")
             QMessageBox.information(
                 self, "Pro unlocked",
                 f"Thanks{'!' if not new_state.email else f', {new_state.email}!'} "

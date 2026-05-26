@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from .. import telemetry
 from ..connectors import Connector, HostInstallation, all_connectors
 
 
@@ -166,6 +167,9 @@ class ConnectorsTab(QWidget):
     def _on_install(self, connector: Connector, host: HostInstallation) -> None:
         result = connector.install(host)
         if result.success:
+            telemetry.send_event("connector_installed",
+                                 connector=connector.slug,
+                                 host_version=host.version)
             QMessageBox.information(
                 self, f"{connector.display_name} installed",
                 f"{result.message}\n\n{connector.post_install_steps(host)}",

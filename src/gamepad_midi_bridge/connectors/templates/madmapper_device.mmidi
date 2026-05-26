@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MidiDevice name="Gamepad MIDI Bridge" version="1" channel="1">
+    <Description>
+        Virtual MIDI controller exposed by the Gamepad MIDI Bridge.
+        Map any surface to a gamepad control via right-click — Learn MIDI.
+    </Description>
+    <Controls>
+        <Control name="Face South"  type="note" channel="1" note="60"/>
+        <Control name="Face East"   type="note" channel="1" note="62"/>
+        <Control name="Face West"   type="note" channel="1" note="64"/>
+        <Control name="Face North"  type="note" channel="1" note="65"/>
+        <Control name="Shoulder L1" type="note" channel="1" note="67"/>
+        <Control name="Shoulder R1" type="note" channel="1" note="69"/>
+        <Control name="Select"      type="note" channel="1" note="71"/>
+        <Control name="Start"       type="note" channel="1" note="72"/>
+        <Control name="PS Home"     type="note" channel="1" note="74"/>
+        <Control name="Stick L Click" type="note" channel="1" note="76"/>
+        <Control name="Stick R Click" type="note" channel="1" note="77"/>
+        <Control name="DPad Up"     type="note" channel="1" note="78"/>
+        <Control name="DPad Down"   type="note" channel="1" note="79"/>
+        <Control name="DPad Left"   type="note" channel="1" note="80"/>
+        <Control name="DPad Right"  type="note" channel="1" note="81"/>
+        <Control name="Stick L X"   type="cc"   channel="1" cc="3"/>
+        <Control name="Stick L Y"   type="cc"   channel="1" cc="4"/>
+        <Control name="Stick R X"   type="cc"   channel="1" cc="5"/>
+        <Control name="Stick R Y"   type="cc"   channel="1" cc="6"/>
+        <Control name="Trigger L"   type="cc"   channel="1" cc="1"/>
+        <Control name="Trigger R"   type="cc"   channel="1" cc="2"/>
+        <Control name="Touchpad X"  type="cc"   channel="1" cc="16"/>
+        <Control name="Touchpad Y"  type="cc"   channel="1" cc="17"/>
+    </Controls>
+</MidiDevice>
