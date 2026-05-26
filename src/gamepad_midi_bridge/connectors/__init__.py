@@ -10,6 +10,7 @@ from .touchdesigner import TouchDesignerConnector
 from .vdmx import VDMXConnector
 from .madmapper import MadMapperConnector
 from .reaper import ReaperConnector
+from .obs import ObsConnector
 
 
 def all_connectors() -> List[Connector]:
@@ -21,6 +22,7 @@ def all_connectors() -> List[Connector]:
         VDMXConnector(),
         MadMapperConnector(),
         ReaperConnector(),
+        ObsConnector(),
     ]
 
 
@@ -34,5 +36,6 @@ __all__ = [
     "VDMXConnector",
     "MadMapperConnector",
     "ReaperConnector",
+    "ObsConnector",
     "all_connectors",
 ]
