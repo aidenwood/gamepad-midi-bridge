@@ -42,6 +42,22 @@ class CornerConfig:
 
 
 @dataclass
+class OscConfig:
+    """Optional OSC output alongside (or instead of) MIDI.
+
+    OSC addresses are per-control via lookup tables keyed by the same
+    button/axis indices the MIDI side uses. Empty maps = no OSC sent for
+    those controls. Pro feature.
+    """
+    enabled: bool = False
+    mode: str = "alongside"          # "alongside" (MIDI + OSC) or "only" (OSC only)
+    host: str = "127.0.0.1"
+    port: int = 7000                 # Resolume default
+    button_addresses: Dict[int, str] = field(default_factory=dict)
+    axis_addresses: Dict[int, str] = field(default_factory=dict)
+
+
+@dataclass
 class TouchpadConfig:
     """DualSense touchpad as a 2D MIDI modulator. Pro feature."""
     enabled: bool = False
@@ -83,6 +99,7 @@ class Mapping:
     left_stick_corners: CornerConfig = field(default_factory=CornerConfig)
     right_stick_corners: CornerConfig = field(default_factory=CornerConfig)
     touchpad: TouchpadConfig = field(default_factory=TouchpadConfig)
+    osc: OscConfig = field(default_factory=OscConfig)
 
     # Reserved for V1.1b adaptive triggers. Effect names come from dualsense
     # protocol: "off", "feedback", "weapon", "vibration", "bow", "galloping",
@@ -113,6 +130,7 @@ class Mapping:
             left_stick_corners=_corner_from_dict(data.get("left_stick_corners")),
             right_stick_corners=_corner_from_dict(data.get("right_stick_corners")),
             touchpad=_touchpad_from_dict(data.get("touchpad")),
+            osc=_osc_from_dict(data.get("osc")),
             l2_haptic_effect=data.get("l2_haptic_effect"),
             r2_haptic_effect=data.get("r2_haptic_effect"),
         )
@@ -130,6 +148,19 @@ def _corner_from_dict(d: Optional[dict]) -> CornerConfig:
     )
     cfg.ensure_notes()
     return cfg
+
+
+def _osc_from_dict(d: Optional[dict]) -> OscConfig:
+    if not d:
+        return OscConfig()
+    return OscConfig(
+        enabled=bool(d.get("enabled", False)),
+        mode=str(d.get("mode", "alongside")),
+        host=str(d.get("host", "127.0.0.1")),
+        port=int(d.get("port", 7000)),
+        button_addresses={int(k): str(v) for k, v in d.get("button_addresses", {}).items()},
+        axis_addresses={int(k): str(v) for k, v in d.get("axis_addresses", {}).items()},
+    )
 
 
 def _touchpad_from_dict(d: Optional[dict]) -> TouchpadConfig:
