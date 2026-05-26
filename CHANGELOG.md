@@ -1,59 +1,90 @@
 # Changelog
 
-All notable changes land here. Versions follow semver: `MAJOR.MINOR.PATCH`.
+Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 ## [Unreleased]
 
-Engine, GUI, and ecosystem features built ahead of the first public release.
+The full V1 surface — built ahead of the first public release. Everything below
+ships in the same `.app` / `.exe` / AppImage and either runs end-to-end today
+or is wired and waiting on a credential.
 
-### Added
+### Engine
+- DualSense parallel HID layer — battery, touchpad XY (both fingers), wired vs
+  Bluetooth detect, adaptive trigger output (USB direct + Bluetooth via 78-byte
+  `0x31` framing with IEEE 802.3 CRC32)
+- macOS adaptive triggers route through Apple's `GCController` (raw HID writes
+  blocked post-Catalina) — auto-detected via `pyobjc-framework-GameController`
+- Stick drift auto-calibration on start + on-demand
+- Stick edge quantizer — push to a corner to fire a MIDI note, 4 / 8 / 16
+  sectors, hysteresis prevents chatter
+- Touchpad XY → MIDI CC (Kaoss Pad-style modulator), plus two-finger mode
+- Multi-controller orchestrator — daisy-chain two pads on separate MIDI
+  channels + virtual ports (Pro)
+- OSC 1.0 UDP backend — runs alongside or in place of MIDI, per-control
+  address mapping
 
-**Engine**
-- DualSense parallel HID layer (battery, touchpad, wired/BT detect, adaptive triggers)
-- Stick drift auto-calibration with hysteresis
-- Stick edge quantizer — push to a corner to fire a MIDI note (4 / 8 / 16 sectors)
-- Touchpad XY → MIDI CC (Kaoss Pad-style modulator)
-- Adaptive trigger haptics — seven effects (off, feedback, weapon, vibration, bow, galloping, machine), USB on Win/Linux + Bluetooth via CRC32 framing + macOS via PyObjC GCController
-- Multi-controller support (Pro) — second controller on its own MIDI channel + virtual port
-- OSC output backend (UDP, OSC 1.0) — alternative to MIDI for Resolume / TouchDesigner / MadMapper
+### Host connectors (seven shipped)
+- **Resolume Arena** — XML map writer, schema verified against four factory
+  presets
+- **Ableton Live 11+** — Python 3 Remote Script, installs into User Library
+- **TouchDesigner 2022+** — JSON descriptor for the MIDI Mapper palette
+- **VDMX** — programmatic plist template
+- **MadMapper 5+** — XML device descriptor
+- **REAPER** — `.ReaperKeyMap` plain-text file
+- **OBS Studio** — Python helper script using obs-websocket v5
 
-**Host connectors**
-- Resolume Arena (XML map writer, verified against four factory presets)
-- Ableton Live 11+ (Python 3 Remote Script)
-- TouchDesigner 2022+
-- VDMX (programmatic plist template)
-- MadMapper 5+
-- REAPER (`.ReaperKeyMap` plain text)
-
-**App**
-- PySide6 GUI with seven tabs (Live, Mapping, Presets, Marketplace, Connectors, Settings, About)
-- First-launch onboarding wizard (controller detect → MIDI test → connector picker → calibration)
+### App
+- PySide6 GUI, eight tabs: Live, Mapping, Presets, Marketplace, Connectors,
+  Settings, Help, About
+- First-launch onboarding wizard (controller detect → MIDI test →
+  connector picker → calibration)
 - System tray / menu bar icon with start/stop/show/quit
-- Global Ctrl/Cmd+Enter to toggle bridging from any tab
 - Auto-update banner (silent on failure, opt-out in Settings)
+- Demo mode (`--demo` flag or `GMB_DEMO=1` env var) — synthetic controller
+  for CI, demo videos, and DAW testing with no hardware
 - Crash reporter (writes to `user_data_dir/crashes/`, never phones home)
-- Structured logging to `user_data_dir/logs/app.log` (rotated 2MB × 3)
+- Rotating log file at `user_data_dir/logs/app.log`
+- MIDI throughput readout in status bar (N/s rounded)
 - Headless mode (`--headless`) for kiosks and performance rigs
-- CLI flags: `--version`, `--reset-config`, `--export-pack`, `--import-pack`, `--log-path`, `--debug`
-- `gmb://` URL scheme for one-click license activation + preset import
+- CLI flags: `--version`, `--reset-config`, `--export-pack`,
+  `--import-pack`, `--log-path`, `--debug`, `--demo`
+- `gmb://` URL scheme — one-click license activation + preset import
 - Last-mapping autosave (persists across launches and into headless mode)
-- Portable config bundles (`.gmbpack`) — mapping + presets + license in one file
+- Portable config bundles (`.gmbpack`) — mapping + presets + license in
+  a single zip
+- Global Ctrl/Cmd+Enter toggles the bridge from any tab
+- 4 starter presets bundled and seeded on first launch
 
-**Marketplace + store**
+### Marketplace + store
 - In-app Marketplace tab — browse + install presets shared by other users
 - Supabase schema with RLS, trusted-author auto-approve, full-text search
-- Store at `store.aidxn.com` — landing, recovery, success, privacy, terms
-- Stripe Checkout → Netlify Function → Ed25519-signed license email via Resend
-- Admin dashboard at `/admin/dashboard?key=...` with daily-active / connector / onboarding views
+- 8 seed presets ready to ingest on day one
+- Astro store site at `store.aidxn.com` — landing, recovery, success,
+  privacy, terms, admin dashboard, OG image generator
+- Stripe Checkout → Netlify Function → Ed25519-signed license email via
+  Resend; idempotent on webhook retries, enumeration-safe recovery
+- Admin dashboard at `/admin/dashboard?key=ADMIN_TOKEN` — DAU,
+  connector install rates, onboarding funnel
 
-**Privacy**
-- Anonymous usage stats opt-in (default off)
-- Update check opt-in (default on, easy toggle in Settings)
-- Telemetry receiver strips identifying fields server-side as belt-and-braces
+### Quality
+- 47 pytest tests covering pure-logic modules
+- GitHub Actions CI: test on push (mac/Linux/Windows), lint on PR,
+  build artifacts on tag (`v*.*.*`) attached to a GitHub Release
+- Dependabot weekly
+- Privacy posture: opt-in telemetry, server-side identity stripping,
+  90-day retention plan documented
+
+### Brand
+- Original SVG icon (analog stick + travel envelope + radial MIDI ticks)
+- Full ICNS / ICO / 7 PNG sizes / favicon SVG
+- 8 dark-theme tab screenshots in `docs/screenshots/`
 
 ### Notes
-
-- License keys verify offline via Ed25519. Issuer keys live in Netlify env vars only.
-- macOS adaptive triggers route through `GCController` because Apple blocks raw HID writes post-Catalina.
-- Bow / Galloping / Machine effects fall back to "off" on macOS (require Sony's libpad SDK, not in Apple's framework).
-- Ableton connector targets Live 11+ only (Python 3 mandatory; Live 10 used Python 2).
+- License keys verify offline via Ed25519. Issuer keys live in Netlify env
+  vars only — never in the repo or the desktop bundle.
+- macOS bow / galloping / machine adaptive-trigger effects fall back to
+  "off" (Sony libpad SDK only, not in Apple's framework). USB Win+Linux
+  gets all seven.
+- Ableton connector targets Live 11+ only (Python 3 mandatory).
+- Xbox impulse-trigger haptics deferred to V2 (no Python binding for
+  Windows.Gaming.Input).
