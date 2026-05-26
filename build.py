@@ -17,7 +17,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 SRC = ROOT / "src" / "gamepad_midi_bridge"
-ENTRY = SRC / "__main__.py"
+# PyInstaller can't honour package-relative imports when running the bootstrap
+# script, so we point it at a tiny wrapper that imports the package properly.
+ENTRY = ROOT / "scripts" / "app_entry.py"
 RESOURCES = SRC / "resources"
 QSS = SRC / "ui" / "styles.qss"
 APP_NAME = "Gamepad MIDI Bridge"
