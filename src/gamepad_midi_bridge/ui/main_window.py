@@ -30,7 +30,9 @@ from .marketplace_tab import MarketplaceTab
 from .onboarding import OnboardingWizard, is_first_launch, mark_complete
 from .preset_manager import PresetManager
 from .settings_panel import SettingsPanel
+from .template_builder_tab import TemplateBuilderTab
 from .tray import TrayController, is_available as tray_available
+from .visualise_tab import VisualiseTab
 
 
 UPGRADE_URL = "https://store.aidxn.com/gamepad-midi-bridge"
@@ -284,10 +286,23 @@ class MainWindow(QMainWindow):
         live_v.addWidget(self._live_splitter, 1)
         tabs.addTab(live_wrap, "Live")
 
+        # Visualise tab — richer post-setup view with sparklines + heatmap.
+        # Sits between Live (minimal) and Mapping (configuration) so the
+        # natural left-to-right reading order is observe → analyse → configure.
+        self._visualise = VisualiseTab()
+        tabs.addTab(self._visualise, "Visualise")
+
         self._mapping_editor = MappingEditor(self._mapping)
         self._mapping_editor.upgrade_clicked.connect(self._open_upgrade)
         self._mapping_editor.activate_clicked.connect(self._enter_license_key)
         tabs.addTab(self._mapping_editor, "Mapping")
+
+        # Templates — visual mapping builder + multi-format exporter.
+        # Sits between Mapping (Pro table view) and Presets so users can
+        # iterate visually then save the result alongside their named presets.
+        self._template_builder = TemplateBuilderTab(self._mapping)
+        self._template_builder.mapping_changed.connect(self._on_template_mapping_changed)
+        tabs.addTab(self._template_builder, "Templates")
 
         self._presets = PresetManager(lambda: self._mapping)
         self._presets.upgrade_clicked.connect(self._open_upgrade)
@@ -419,6 +434,8 @@ class MainWindow(QMainWindow):
         self._wire_bridge_to_meter(self._bridge, self._meter, primary=True)
         # Mirror primary bridge activity into the bottom console.
         self._log_console.attach_bridge_signals(self._bridge.worker)
+        # Feed the Visualise tab from the same primary worker.
+        self._visualise.attach_bridge_signals(self._bridge.worker)
 
     def _wire_bridge_to_meter(self, bridge, meter, primary: bool) -> None:
         w = bridge.worker
@@ -557,6 +574,16 @@ class MainWindow(QMainWindow):
     def _on_settings_changed(self, mapping: Mapping) -> None:
         # Live-apply to every active slot so multi-controller users see edits
         # propagate without restarting the bridge.
+        self._mapping = mapping
+        self._multi.apply_mapping(mapping)
+        _save_last_mapping(mapping)
+
+    def _on_template_mapping_changed(self, mapping: Mapping) -> None:
+        """Template builder edits — forward to live bridge + persist.
+
+        Same shape as _on_settings_changed but skips re-pushing to the
+        settings panel (which uses live spin widgets the builder doesn't own).
+        """
         self._mapping = mapping
         self._multi.apply_mapping(mapping)
         _save_last_mapping(mapping)
