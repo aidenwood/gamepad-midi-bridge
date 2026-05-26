@@ -1,0 +1,201 @@
+/* Gamepad MIDI Bridge — dark theme.
+   Targets standard QWidget classes so the file works without per-widget objectName. */
+
+QWidget {
+    background-color: #0e0f12;
+    color: #e6e8eb;
+    font-family: -apple-system, "Segoe UI", "SF Pro Text", "Inter", sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow {
+    background-color: #0e0f12;
+}
+
+QFrame#StatusBar {
+    background-color: #16181d;
+    border-bottom: 1px solid #24262d;
+    padding: 14px 18px;
+}
+
+QLabel#StatusTitle {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f5f7fa;
+}
+
+QLabel#StatusSub {
+    color: #8a9099;
+    font-size: 12px;
+}
+
+QLabel#ActivityDot {
+    color: #2dd4bf;
+    font-size: 18px;
+}
+
+QPushButton {
+    background-color: #1f232b;
+    border: 1px solid #2c313b;
+    border-radius: 6px;
+    padding: 8px 16px;
+    color: #e6e8eb;
+    font-weight: 500;
+}
+
+QPushButton:hover {
+    background-color: #272c36;
+    border-color: #3a414e;
+}
+
+QPushButton:pressed {
+    background-color: #1a1d24;
+}
+
+QPushButton:disabled {
+    color: #5a606b;
+    background-color: #161920;
+}
+
+QPushButton#PrimaryButton {
+    background-color: #2dd4bf;
+    color: #0e0f12;
+    border: none;
+}
+
+QPushButton#PrimaryButton:hover {
+    background-color: #4ae0cd;
+}
+
+QPushButton#PrimaryButton:disabled {
+    background-color: #1a4d47;
+    color: #5a606b;
+}
+
+QPushButton#StopButton {
+    background-color: #f97373;
+    color: #0e0f12;
+    border: none;
+}
+
+QPushButton#StopButton:hover {
+    background-color: #fb8b8b;
+}
+
+QTabWidget::pane {
+    border: none;
+    background-color: #0e0f12;
+}
+
+QTabBar::tab {
+    background-color: transparent;
+    color: #8a9099;
+    padding: 10px 18px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-right: 4px;
+}
+
+QTabBar::tab:selected {
+    color: #f5f7fa;
+    border-bottom: 2px solid #2dd4bf;
+}
+
+QTabBar::tab:hover {
+    color: #c2c6cc;
+}
+
+QLabel#ProLockTitle {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f5f7fa;
+}
+
+QLabel#ProLockSub {
+    color: #8a9099;
+    font-size: 13px;
+}
+
+QFrame#ProBadge {
+    background-color: #2dd4bf;
+    color: #0e0f12;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+QGroupBox {
+    border: 1px solid #24262d;
+    border-radius: 8px;
+    margin-top: 18px;
+    padding-top: 12px;
+    color: #c2c6cc;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 6px;
+    color: #8a9099;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+QProgressBar {
+    border: 1px solid #24262d;
+    border-radius: 4px;
+    background-color: #16181d;
+    text-align: center;
+    color: #e6e8eb;
+}
+
+QProgressBar::chunk {
+    background-color: #2dd4bf;
+    border-radius: 3px;
+}
+
+QSpinBox, QDoubleSpinBox, QLineEdit {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 4px;
+    padding: 6px 8px;
+    color: #e6e8eb;
+}
+
+QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
+    border-color: #2dd4bf;
+}
+
+QListWidget {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QListWidget::item {
+    padding: 8px 10px;
+    border-radius: 4px;
+}
+
+QListWidget::item:selected {
+    background-color: #1f3a36;
+    color: #2dd4bf;
+}
+
+QTableWidget {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 6px;
+    gridline-color: #24262d;
+}
+
+QHeaderView::section {
+    background-color: #1a1d24;
+    color: #8a9099;
+    border: none;
+    padding: 8px;
+    font-weight: 600;
+}

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Gamepad MIDI Bridge - Resolume Arena minimal mapping.
+
+  Clean starting point: 4 face buttons -> Layer 1 clips 1..4,
+  left stick X (CC 3) -> Layer 1 opacity, L2 (CC 1) -> master crossfader.
+  Everything else is unmapped so you can add your own in Resolume's
+  MIDI Edit mode without fighting prior defaults.
+
+  Drop in:  ~/Documents/Resolume Arena 7/Shortcuts/MIDI/
+  Then in Resolume:  Shortcuts -> Edit MIDI -> select preset
+  (or restart Resolume to rescan the folder).
+
+  Assumes MIDI channel 1.
+-->
+<MidiShortcutPreset name="Gamepad MIDI Bridge (Minimal)" presetId="-1500000002">
+	<versionInfo name="Resolume Arena" majorVersion="7" minorVersion="0" microVersion="0" revision="64474"/>
+	<ShortcutManager name="MIDIShortcutManagerShortcuts">
+
+		<!-- Face buttons (0..3, notes 60..65) -> Layer 1 clips 1..4 -->
+		<Shortcut name="Shortcut" uniqueId="1700000010001" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/clips/1/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/clips/1/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="InputSiblingPath" path="/composition/layers/1/clips/1/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<ShortcutPath name="OutputSiblingPath" path="/composition/layers/1/clips/1/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037943440" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000010002" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/clips/2/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/clips/2/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="InputSiblingPath" path="/composition/layers/1/clips/2/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<ShortcutPath name="OutputSiblingPath" path="/composition/layers/1/clips/2/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037943952" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000010003" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/clips/3/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/clips/3/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="InputSiblingPath" path="/composition/layers/1/clips/3/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<ShortcutPath name="OutputSiblingPath" path="/composition/layers/1/clips/3/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037944464" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000010004" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/clips/4/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/clips/4/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="InputSiblingPath" path="/composition/layers/1/clips/4/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<ShortcutPath name="OutputSiblingPath" path="/composition/layers/1/clips/4/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037944720" value="0" numSteps="128"/>
+		</Shortcut>
+
+		<!-- Left stick X (axis 0 -> CC 3) -> Layer 1 video opacity -->
+		<Shortcut name="Shortcut" uniqueId="1700000010005" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/video/opacity" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/video/opacity" translationType="1" allowedTranslationTypes="11"/>
+			<Subtarget type="5" optionIndex="-1"/>
+			<RawInputMessage name="RawInputMessage" key="144115188075856816" value="1" numSteps="128"/>
+		</Shortcut>
+
+		<!-- L2 trigger (axis 4 -> CC 1) -> master crossfader phase -->
+		<Shortcut name="Shortcut" uniqueId="1700000010006" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/crossfader/phase" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/crossfader/phase" translationType="1" allowedTranslationTypes="1"/>
+			<Subtarget type="5" optionIndex="-1"/>
+			<RawInputMessage name="RawInputMessage" key="144115188075856304" value="0.5" numSteps="128"/>
+		</Shortcut>
+
+	</ShortcutManager>
+</MidiShortcutPreset>

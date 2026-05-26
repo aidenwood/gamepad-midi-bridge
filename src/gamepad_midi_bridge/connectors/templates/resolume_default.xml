@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Gamepad MIDI Bridge - Resolume Arena default mapping.
+
+  Generated to match the default mapping in mapping.py.
+  Drop this file in:  ~/Documents/Resolume Arena 7/Shortcuts/MIDI/
+  Then in Resolume:  Shortcuts menu -> Edit MIDI -> select preset
+  (or quit & relaunch Resolume to pick it up on next scan).
+
+  All entries assume MIDI channel 1. Re-export from the bridge UI if you
+  change the channel in mapping.py (midi_channel=0 -> ch1).
+
+  Key field encoding (verified against Resolume 7 factory presets):
+    Note On  ch1: (1 << 56) | (note << 8) | 0x90
+    CC       ch1: (2 << 56) | (cc   << 8) | 0xB0
+-->
+<MidiShortcutPreset name="Gamepad MIDI Bridge" presetId="-1500000001">
+	<versionInfo name="Resolume Arena" majorVersion="7" minorVersion="0" microVersion="0" revision="64474"/>
+	<ShortcutManager name="MIDIShortcutManagerShortcuts">
+
+		<!-- Face buttons (0..3) -> Layer 1 clips 1..4 connect -->
+		<Shortcut name="Shortcut" uniqueId="1700000000001" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/clips/1/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/clips/1/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="InputSiblingPath" path="/composition/layers/1/clips/1/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<ShortcutPath name="OutputSiblingPath" path="/composition/layers/1/clips/1/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037943440" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000002" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/clips/2/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/clips/2/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="InputSiblingPath" path="/composition/layers/1/clips/2/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<ShortcutPath name="OutputSiblingPath" path="/composition/layers/1/clips/2/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037943952" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000003" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/clips/3/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/clips/3/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="InputSiblingPath" path="/composition/layers/1/clips/3/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<ShortcutPath name="OutputSiblingPath" path="/composition/layers/1/clips/3/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037944464" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000004" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/clips/4/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/clips/4/connect" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="InputSiblingPath" path="/composition/layers/1/clips/4/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<ShortcutPath name="OutputSiblingPath" path="/composition/layers/1/clips/4/connected" translationType="1" allowedTranslationTypes="-1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037944720" value="0" numSteps="128"/>
+		</Shortcut>
+
+		<!-- Shoulders L1/R1 (4,5) -> previous / next deck (layer up/down equivalent) -->
+		<Shortcut name="Shortcut" uniqueId="1700000000005" behaviour="1032">
+			<ShortcutPath name="InputPath" path="/composition/selectprevdeck" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/selectprevdeck" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037945232" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000006" behaviour="1032">
+			<ShortcutPath name="InputPath" path="/composition/selectnextdeck" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/selectnextdeck" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037945744" value="0" numSteps="128"/>
+		</Shortcut>
+
+		<!-- Triggers / Select (6,7) -> crossfader cut to A / cut to B -->
+		<Shortcut name="Shortcut" uniqueId="1700000000007" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/crossfader/sidea" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/crossfader/sidea" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037946256" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000008" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/crossfader/sideb" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/crossfader/sideb" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037946512" value="0" numSteps="128"/>
+		</Shortcut>
+
+		<!-- Start (8) -> tempo tap.  Stick clicks (9,10) -> master pause / resync -->
+		<Shortcut name="Shortcut" uniqueId="1700000000009" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/tempocontroller/tempotap" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/tempocontroller/tempotap" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037947024" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000010" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/bypassed" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/bypassed" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037947536" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000011" behaviour="1028">
+			<ShortcutPath name="InputPath" path="/composition/tempocontroller/resync" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/tempocontroller/resync" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037947792" value="0" numSteps="128"/>
+		</Shortcut>
+
+		<!-- Left stick X/Y (axes 0,1 -> CC 3,4) -> Layer 1 transform position X / Y -->
+		<Shortcut name="Shortcut" uniqueId="1700000000012" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/video/effects/transform/positionx" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/video/effects/transform/positionx" translationType="1" allowedTranslationTypes="11"/>
+			<Subtarget type="5" optionIndex="-1"/>
+			<RawInputMessage name="RawInputMessage" key="144115188075856816" value="0.5" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000013" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/video/effects/transform/positiony" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/video/effects/transform/positiony" translationType="1" allowedTranslationTypes="11"/>
+			<Subtarget type="5" optionIndex="-1"/>
+			<RawInputMessage name="RawInputMessage" key="144115188075857072" value="0.5" numSteps="128"/>
+		</Shortcut>
+
+		<!-- Right stick X/Y (axes 2,3 -> CC 5,6) -> Layer 1 transform scale.
+		     Resolume's Transform effect ships a single uniform scale, not separate
+		     width/height. Both axes drive the same scale here; remap one stick to
+		     /rotatez or a different effect parameter if you want independent control. -->
+		<Shortcut name="Shortcut" uniqueId="1700000000014" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/video/effects/transform/scale" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/video/effects/transform/scale" translationType="1" allowedTranslationTypes="11"/>
+			<Subtarget type="5" optionIndex="-1"/>
+			<RawInputMessage name="RawInputMessage" key="144115188075857328" value="0.5" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000015" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/layers/1/video/effects/transform/scale" translationType="1" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/layers/1/video/effects/transform/scale" translationType="1" allowedTranslationTypes="11"/>
+			<Subtarget type="5" optionIndex="-1"/>
+			<RawInputMessage name="RawInputMessage" key="144115188075857584" value="0.5" numSteps="128"/>
+		</Shortcut>
+
+		<!-- L2 trigger (axis 4 -> CC 1) -> Master speed -->
+		<Shortcut name="Shortcut" uniqueId="1700000000016" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/speed" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/speed" translationType="1" allowedTranslationTypes="1"/>
+			<Subtarget type="5" optionIndex="-1"/>
+			<RawInputMessage name="RawInputMessage" key="144115188075856304" value="0.5" numSteps="128"/>
+		</Shortcut>
+
+		<!-- R2 trigger (axis 5 -> CC 2) -> Master crossfader phase -->
+		<Shortcut name="Shortcut" uniqueId="1700000000017" behaviour="8">
+			<ShortcutPath name="InputPath" path="/composition/crossfader/phase" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/crossfader/phase" translationType="1" allowedTranslationTypes="1"/>
+			<Subtarget type="5" optionIndex="-1"/>
+			<RawInputMessage name="RawInputMessage" key="144115188075856560" value="0.5" numSteps="128"/>
+		</Shortcut>
+
+		<!-- D-pad: up/down -> prev/next clip on selected layer, left/right -> prev/next deck -->
+		<Shortcut name="Shortcut" uniqueId="1700000000018" behaviour="1032">
+			<ShortcutPath name="InputPath" path="/composition/selectedlayer/connectprevclip" translationType="8" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/selectedlayer/connectprevclip" translationType="8" allowedTranslationTypes="11"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037948048" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000019" behaviour="1032">
+			<ShortcutPath name="InputPath" path="/composition/selectedlayer/connectnextclip" translationType="8" allowedTranslationTypes="11"/>
+			<ShortcutPath name="OutputPath" path="/composition/selectedlayer/connectnextclip" translationType="8" allowedTranslationTypes="11"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037948304" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000020" behaviour="1032">
+			<ShortcutPath name="InputPath" path="/composition/selectprevdeck" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/selectprevdeck" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037948560" value="0" numSteps="128"/>
+		</Shortcut>
+		<Shortcut name="Shortcut" uniqueId="1700000000021" behaviour="1032">
+			<ShortcutPath name="InputPath" path="/composition/selectnextdeck" translationType="1" allowedTranslationTypes="1"/>
+			<ShortcutPath name="OutputPath" path="/composition/selectnextdeck" translationType="1" allowedTranslationTypes="1"/>
+			<RawInputMessage name="RawInputMessage" key="72057594037948816" value="0" numSteps="128"/>
+		</Shortcut>
+
+	</ShortcutManager>
+</MidiShortcutPreset>

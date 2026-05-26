@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Outer tile background: deep graphite with subtle vertical sheen -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1f232b"/>
+      <stop offset="55%" stop-color="#141619"/>
+      <stop offset="100%" stop-color="#0e0f12"/>
+    </linearGradient>
+
+    <!-- Inner well: recessed analog-stick socket -->
+    <radialGradient id="well" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0a0b0d"/>
+      <stop offset="70%" stop-color="#101216"/>
+      <stop offset="100%" stop-color="#1a1d23"/>
+    </radialGradient>
+
+    <!-- Teal stick dot: live, slightly hot toward top-left -->
+    <radialGradient id="dot" cx="38%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#7af0e0"/>
+      <stop offset="45%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#108a7c"/>
+    </radialGradient>
+
+    <!-- Warm highlight glint on the dot -->
+    <radialGradient id="glint" cx="35%" cy="30%" r="25%">
+      <stop offset="0%" stop-color="#f5c450" stop-opacity="0.95"/>
+      <stop offset="60%" stop-color="#f5c450" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#f5c450" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Soft teal glow under dot -->
+    <radialGradient id="dotGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#2dd4bf" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#2dd4bf" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Ring stroke gradient: teal fading at the orbit tail -->
+    <linearGradient id="ringStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#2dd4bf" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded tile -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg)"/>
+
+  <!-- Subtle inner rim highlight (1px-ish at 1024) -->
+  <rect x="6" y="6" width="1012" height="1012" rx="220" ry="220"
+        fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="2"/>
+
+  <!-- Recessed analog-stick well: large filled disc -->
+  <circle cx="512" cy="512" r="340" fill="url(#well)"/>
+  <!-- Well rim: thin teal-tinged darker outline -->
+  <circle cx="512" cy="512" r="340" fill="none" stroke="#0a0b0d" stroke-width="6"/>
+  <circle cx="512" cy="512" r="334" fill="none" stroke="#2dd4bf" stroke-opacity="0.12" stroke-width="2"/>
+
+  <!-- Travel-envelope ring: thin teal circle inside the well -->
+  <circle cx="512" cy="512" r="248" fill="none" stroke="url(#ringStroke)" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- Orbit motion arcs: three concentric dashed arcs trailing the dot -->
+  <!-- dot is offset to lower-right; arcs sweep behind it suggesting movement -->
+  <g stroke="#2dd4bf" fill="none" stroke-linecap="round">
+    <!-- outermost faint trail -->
+    <path d="M 760 512 A 248 248 0 0 0 512 264"
+          stroke-opacity="0.28" stroke-width="6" stroke-dasharray="4 22"/>
+    <!-- mid trail -->
+    <path d="M 720 600 A 220 220 0 0 1 460 740"
+          stroke-opacity="0.18" stroke-width="5" stroke-dasharray="2 18"/>
+  </g>
+
+  <!-- MIDI output ticks: short radial lines emerging from the ring on the right -->
+  <!-- evoke CC value streaming out of the controller -->
+  <g stroke="#2dd4bf" stroke-linecap="round" fill="none">
+    <line x1="780" y1="512" x2="836" y2="512" stroke-width="14" stroke-opacity="0.95"/>
+    <line x1="752" y1="430" x2="800" y2="402" stroke-width="10" stroke-opacity="0.7"/>
+    <line x1="752" y1="594" x2="800" y2="622" stroke-width="10" stroke-opacity="0.7"/>
+    <line x1="708" y1="362" x2="744" y2="332" stroke-width="8" stroke-opacity="0.5"/>
+    <line x1="708" y1="662" x2="744" y2="692" stroke-width="8" stroke-opacity="0.5"/>
+  </g>
+
+  <!-- One warm accent tick to break monochrome and signal "active value" -->
+  <line x1="780" y1="512" x2="836" y2="512" stroke="#f5c450" stroke-width="6" stroke-opacity="0.85" stroke-linecap="round"/>
+
+  <!-- Soft glow under the dot -->
+  <circle cx="612" cy="582" r="160" fill="url(#dotGlow)"/>
+
+  <!-- The dot: analog stick at full deflection (lower-right, mid-orbit) -->
+  <circle cx="612" cy="582" r="88" fill="url(#dot)"/>
+  <!-- Highlight glint -->
+  <circle cx="612" cy="582" r="88" fill="url(#glint)"/>
+  <!-- Crisp rim on dot -->
+  <circle cx="612" cy="582" r="88" fill="none" stroke="#0a0b0d" stroke-opacity="0.35" stroke-width="3"/>
+</svg>
