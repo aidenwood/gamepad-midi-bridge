@@ -20,7 +20,7 @@ Quick orientation for anyone forking, contributing, or just trying to understand
                                        (queued)        v
 +--------------+                         +----------------------------+
 |  PySide6 GUI | <----------- meter -----|  virtual MIDI port         |
-|  MainWindow  |   updates               |  "Gamepad MIDI Bridge"     |
+|  MainWindow  |   updates               |  "Universal Controller MIDI"     |
 +--------------+                         +-------------+--------------+
                                                        |
                                        +---------------+---------------+
@@ -50,7 +50,7 @@ Everything lives under `src/gamepad_midi_bridge/`.
 - **`calibration.py`** — Stick drift detection: captures rest position on Start, applies hysteresis around it.
 - **`corner_quantizer.py`** — Stick → sector detector with `r_enter` / `r_exit` hysteresis rings.
 - **`mapping.py`** — `Mapping` dataclass, schema, JSON serialisation. See [Mapping schema versioning](#mapping-schema-versioning).
-- **`midi_backend.py`** — `python-rtmidi` wrapper. Opens / closes virtual ports. Constant: `DEFAULT_PORT_NAME = "Gamepad MIDI Bridge"`.
+- **`midi_backend.py`** — `python-rtmidi` wrapper. Opens / closes virtual ports. Constant: `DEFAULT_PORT_NAME = "Universal Controller MIDI"`.
 - **`osc_backend.py`** — Hand-rolled OSC 1.0 sender over UDP (no `python-osc` dependency). `OscSender` is dataclass-style with `host`, `port` (default 7000), `send(address, *args)`.
 - **`multi.py`** — Multi-controller orchestrator. Holds 1..2 `BridgeController` instances, decides slot count from license tier + connected count + user mode (`MODE_OFF` / `MODE_AUTO` / `MODE_FORCE_TWO`). `port_name_for_slot(i)` suffixes the virtual port name so two bridges coexist.
 
@@ -157,9 +157,9 @@ All under `<user_data_dir>` (resolved by `paths.user_data_dir()`):
 
 Platform-specific roots:
 
-- macOS: `~/Library/Application Support/Gamepad MIDI Bridge/`
-- Windows: `%APPDATA%\Gamepad MIDI Bridge\`
-- Linux: `$XDG_DATA_HOME/Gamepad MIDI Bridge/` (default `~/.local/share/Gamepad MIDI Bridge/`)
+- macOS: `~/Library/Application Support/Universal Controller MIDI/`
+- Windows: `%APPDATA%\Universal Controller MIDI\`
+- Linux: `$XDG_DATA_HOME/Universal Controller MIDI/` (default `~/.local/share/Universal Controller MIDI/`)
 
 ---
 

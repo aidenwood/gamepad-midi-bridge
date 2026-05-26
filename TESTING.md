@@ -7,12 +7,12 @@ Aimed at the first real test session. ~20 minutes top to bottom.
 - macOS arm64 machine
 - DualSense controller (USB or Bluetooth) — Xbox works too but most Pro features are DualSense-only
 - A DAW or VJ app to point the MIDI at: Ableton, Resolume, GarageBand, etc.
-- The bundled .app at `dist/Gamepad MIDI Bridge.app` (or the zip in the same folder)
+- The bundled .app at `dist/Universal Controller MIDI.app` (or the zip in the same folder)
 
 ## Install
 
 ```
-open "dist/Gamepad MIDI Bridge.app"
+open "dist/Universal Controller MIDI.app"
 ```
 
 If macOS gripes about an unsigned app: System Settings → Privacy & Security → "Open Anyway". Codesigning ships in a later milestone.
@@ -23,11 +23,11 @@ If macOS gripes about an unsigned app: System Settings → Privacy & Security �
 - Walks through: welcome → controller detect → MIDI port test → connector picker → calibration prompt → done
 - Click "Start Bridging" on the last screen — main window should already be running the bridge
 
-**Expect:** Wizard finishes, status bar shows "Bridging DualSense Wireless Controller → Gamepad MIDI Bridge".
+**Expect:** Wizard finishes, status bar shows "Bridging DualSense Wireless Controller → Universal Controller MIDI".
 
 ## 2. Free tier sanity (3 min)
 
-In your DAW, route MIDI input from "Gamepad MIDI Bridge". You should see:
+In your DAW, route MIDI input from "Universal Controller MIDI". You should see:
 - Move L stick → CC 3 + CC 4 cycle 0→127
 - Move R stick → CC 5 + CC 6 cycle 0→127
 - L2 / R2 triggers → CC 1 + CC 2
@@ -81,8 +81,8 @@ Settings → Touchpad → tick "Enable touchpad as XY MIDI surface". Touch the D
 
 Connectors tab. If you have Resolume / Ableton / TouchDesigner / VDMX / MadMapper / Reaper installed, they'll show as detected. Click "Install" on one.
 
-- **Resolume** — opens Shortcuts menu → Application Map → pick "Gamepad MIDI Bridge"
-- **Ableton** — restart Live → Prefs → MIDI → Control Surface dropdown → pick "Gamepad MIDI Bridge"
+- **Resolume** — opens Shortcuts menu → Application Map → pick "Universal Controller MIDI"
+- **Ableton** — restart Live → Prefs → MIDI → Control Surface dropdown → pick "Universal Controller MIDI"
 
 ## 9. Portable config (1 min)
 
@@ -99,9 +99,9 @@ You'll need to bind the OSC addresses to Resolume parameters separately for now 
 From terminal:
 
 ```
-"dist/Gamepad MIDI Bridge.app/Contents/MacOS/Gamepad MIDI Bridge" --version
-"dist/Gamepad MIDI Bridge.app/Contents/MacOS/Gamepad MIDI Bridge" --log-path
-"dist/Gamepad MIDI Bridge.app/Contents/MacOS/Gamepad MIDI Bridge" --headless
+"dist/Universal Controller MIDI.app/Contents/MacOS/Universal Controller MIDI" --version
+"dist/Universal Controller MIDI.app/Contents/MacOS/Universal Controller MIDI" --log-path
+"dist/Universal Controller MIDI.app/Contents/MacOS/Universal Controller MIDI" --headless
 ```
 
 ## Things to watch for and report
@@ -110,7 +110,7 @@ From terminal:
 - Calibration handles your specific drift profile
 - Tray icon shows up in the macOS menu bar
 - Status bar `N/s` readout reflects what you're doing
-- No crashes; if anything dies, check `~/Library/Application Support/Gamepad MIDI Bridge/crashes/` and attach the file
+- No crashes; if anything dies, check `~/Library/Application Support/Universal Controller MIDI/crashes/` and attach the file
 
 ## Known gaps for V1.x
 
@@ -118,4 +118,4 @@ From terminal:
 - BT haptics: framing tested via CRC but not yet validated against a real DualSense over BT — feedback welcome
 - No app codesigning yet (manual "Open Anyway" required on first launch)
 - Xbox impulse-trigger haptics deferred to v2 (no Python binding for GameInput)
-- Mapping editor + preset editor UI is read-only until v1.1 — for now, edit preset JSON files directly in `~/Library/Application Support/Gamepad MIDI Bridge/presets/`
+- Mapping editor + preset editor UI is read-only until v1.1 — for now, edit preset JSON files directly in `~/Library/Application Support/Universal Controller MIDI/presets/`

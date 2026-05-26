@@ -1,6 +1,6 @@
-# Gamepad MIDI Bridge — Ableton Live Remote Script
+# Universal Controller MIDI — Ableton Live Remote Script
 
-Wires the default Gamepad MIDI Bridge MIDI map to native Live controls. No
+Wires the default Universal Controller MIDI MIDI map to native Live controls. No
 MIDI-learn needed — clip launch, scene nav, mixer, transport all light up the
 moment the surface is selected.
 
@@ -24,16 +24,16 @@ Live 11+ only. Python 3.
 
 ## Install
 
-Use the **Connectors** tab in Gamepad MIDI Bridge → click **Install** next to
+Use the **Connectors** tab in Universal Controller MIDI → click **Install** next to
 Ableton Live. The connector copies this folder to:
 
-- macOS: `~/Music/Ableton/User Library/Remote Scripts/Gamepad MIDI Bridge/`
-- Windows: `~/Documents/Ableton/User Library/Remote Scripts/Gamepad MIDI Bridge/`
+- macOS: `~/Music/Ableton/User Library/Remote Scripts/Universal Controller MIDI/`
+- Windows: `~/Documents/Ableton/User Library/Remote Scripts/Universal Controller MIDI/`
 
 Then in Live:
 
 1. Restart Ableton Live (or quit and reopen).
-2. Preferences → Link, Tempo & MIDI → Control Surface dropdown → pick **Gamepad MIDI Bridge**.
+2. Preferences → Link, Tempo & MIDI → Control Surface dropdown → pick **Universal Controller MIDI**.
 3. Set **Input** to the bridge's virtual MIDI port. Output not required.
 4. Save the Live set so the Control Surface assignment persists.
 

@@ -26,7 +26,7 @@ from typing import List, Optional
 from .base import Connector, HostInstallation, InstallResult
 
 
-REMOTE_SCRIPT_FOLDER = "Gamepad MIDI Bridge"
+REMOTE_SCRIPT_FOLDER = "Universal Controller MIDI"
 TEMPLATE_SUBDIR = "ableton_remote_script"
 MIN_MAJOR_VERSION = 11
 
@@ -72,7 +72,7 @@ class AbletonConnector(Connector):
         return InstallResult(
             True, dest,
             f"Installed for {host.name}. Restart Live, then pick "
-            "'Gamepad MIDI Bridge' in Preferences → Link, Tempo & MIDI.",
+            "'Universal Controller MIDI' in Preferences → Link, Tempo & MIDI.",
         )
 
     def uninstall(self, host: HostInstallation) -> InstallResult:
@@ -92,7 +92,7 @@ class AbletonConnector(Connector):
         return (
             "1. Restart Ableton Live (or quit and reopen).\n"
             "2. Preferences → Link, Tempo & MIDI → Control Surface dropdown → "
-            "pick 'Gamepad MIDI Bridge'.\n"
+            "pick 'Universal Controller MIDI'.\n"
             "3. Set Input to the bridge's virtual MIDI port. Output isn't needed.\n"
             "4. Save the Live set so the Control Surface assignment persists."
         )

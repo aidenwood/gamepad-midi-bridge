@@ -13,8 +13,10 @@ from typing import List, Optional
 import rtmidi
 
 
-DEFAULT_PORT_NAME = "Gamepad MIDI Bridge"
-WINDOWS_FALLBACK_NAME = "ps5-bridge"   # matches the original script for upgraders
+DEFAULT_PORT_NAME = "Universal Controller MIDI"
+# Legacy port names we'll auto-match on Windows so users upgrading from
+# beta/loopMIDI configurations don't have to rebuild their routing.
+WINDOWS_FALLBACK_NAMES = ("ps5-bridge", "Universal Controller MIDI")
 
 
 @dataclass
@@ -50,7 +52,9 @@ def open_port(preferred_name: str = DEFAULT_PORT_NAME) -> OpenedPort:
         ports = out.get_ports()
         for i, name in enumerate(ports):
             lowered = name.lower()
-            if preferred_name.lower() in lowered or WINDOWS_FALLBACK_NAME in lowered:
+            if preferred_name.lower() in lowered or any(
+                fb.lower() in lowered for fb in WINDOWS_FALLBACK_NAMES
+            ):
                 out.open_port(i)
                 return OpenedPort(port=out, name=name, virtual=False)
         del out

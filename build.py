@@ -22,7 +22,7 @@ SRC = ROOT / "src" / "gamepad_midi_bridge"
 ENTRY = ROOT / "scripts" / "app_entry.py"
 RESOURCES = SRC / "resources"
 QSS = SRC / "ui" / "styles.qss"
-APP_NAME = "Gamepad MIDI Bridge"
+APP_NAME = "Universal Controller MIDI"
 APP_ID = "design.aidxn.gamepad-midi-bridge"
 
 

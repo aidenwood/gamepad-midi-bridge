@@ -31,7 +31,7 @@ class TrayController(QObject):
         self.tray = QSystemTrayIcon(parent)
         if icon_path is not None and icon_path.exists():
             self.tray.setIcon(QIcon(str(icon_path)))
-        self.tray.setToolTip("Gamepad MIDI Bridge")
+        self.tray.setToolTip("Universal Controller MIDI")
 
         menu = QMenu()
         self._start = QAction("Start bridging", menu)
@@ -63,8 +63,8 @@ class TrayController(QObject):
         self._start.setEnabled(not running)
         self._stop.setEnabled(running)
         self.tray.setToolTip(
-            "Gamepad MIDI Bridge — bridging" if running
-            else "Gamepad MIDI Bridge — idle"
+            "Universal Controller MIDI — bridging" if running
+            else "Universal Controller MIDI — idle"
         )
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:

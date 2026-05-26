@@ -10,7 +10,7 @@ Detection: scan for an OBS install. We don't need OBS to be running at
 install time, just present.
 
 Install: write the helper script + a one-page README into a
-`Gamepad MIDI Bridge` subfolder of the user's Documents. The README
+`Universal Controller MIDI` subfolder of the user's Documents. The README
 tells them how to configure their obs-websocket password.
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import List
 from .base import Connector, HostInstallation, InstallResult, documents_dir
 
 
-SUBFOLDER = "Gamepad MIDI Bridge (OBS)"
+SUBFOLDER = "Universal Controller MIDI (OBS)"
 HELPER_NAME = "obs_bridge_helper.py"
 README_NAME = "README.md"
 TEMPLATE_FILENAME = "obs_helper.py"
@@ -126,9 +126,9 @@ class ObsConnector(Connector):
         )
 
 
-_README_BODY = """# Gamepad MIDI Bridge — OBS helper
+_README_BODY = """# Universal Controller MIDI — OBS helper
 
-This Python script bridges MIDI from "Gamepad MIDI Bridge" into your
+This Python script bridges MIDI from "Universal Controller MIDI" into your
 running OBS instance via obs-websocket v5.
 
 ## Prereqs
@@ -151,7 +151,7 @@ Optional flags:
 - `--host` — default 127.0.0.1
 - `--port` — default 4455 (obs-websocket default)
 - `--midi-port` — substring of the MIDI port name to listen on
-                   (default: "Gamepad MIDI Bridge")
+                   (default: "Universal Controller MIDI")
 
 ## What's mapped
 

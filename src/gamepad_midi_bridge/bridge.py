@@ -75,7 +75,7 @@ class BridgeWorker(QObject):
                  demo: bool = False) -> None:
         """Multi-controller plumbing — slot_index picks which pygame joystick
         this worker binds to, and midi_port_name overrides the virtual port so
-        two workers don't fight over a single "Gamepad MIDI Bridge" port name.
+        two workers don't fight over a single "Universal Controller MIDI" port name.
         `demo` swaps the pygame reader for a synthetic one so the bridge can
         be exercised end-to-end without hardware (recording demo videos, CI).
         Both default to the V1.1 single-controller behaviour.

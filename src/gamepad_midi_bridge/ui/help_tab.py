@@ -248,7 +248,7 @@ class HelpTab(QWidget):
             "Adaptive triggers not feeling anything on macOS? Install "
             "`pyobjc-framework-GameController` in your Python env.",
             "Bridge crashed? Find the report in "
-            "`~/Library/Application Support/Gamepad MIDI Bridge/crashes/` "
+            "`~/Library/Application Support/Universal Controller MIDI/crashes/` "
             "(mac) or equivalent on your OS — attach when filing a bug.",
         ]
         for text in bullets:

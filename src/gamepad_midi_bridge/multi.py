@@ -46,7 +46,7 @@ MAX_SLOTS = 2
 def port_name_for_slot(slot_index: int) -> str:
     """Suffix the virtual port so two bridges can coexist.
 
-    Slot 0 keeps the original "Gamepad MIDI Bridge" name so existing DAW
+    Slot 0 keeps the original "Universal Controller MIDI" name so existing DAW
     routings continue to work after upgrade.
     """
     if slot_index == 0:

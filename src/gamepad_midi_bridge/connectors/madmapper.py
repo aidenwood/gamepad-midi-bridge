@@ -4,12 +4,12 @@ MadMapper's .map workspace files own a project — surgically rewriting one
 would mangle the user's content. The safer integration is a custom MIDI
 device descriptor in MadMapper's Devices folder. MadMapper scans that folder
 on launch and exposes any device it finds in Preferences → MIDI, so our
-'Gamepad MIDI Bridge' shows up as a first-class controller the user can
+'Universal Controller MIDI' shows up as a first-class controller the user can
 right-click → Learn MIDI against.
 
 Install paths:
-    macOS  : ~/Documents/MadMapper/Devices/Gamepad MIDI Bridge.mmidi
-    Windows: %USERPROFILE%\\Documents\\MadMapper\\Devices\\Gamepad MIDI Bridge.mmidi
+    macOS  : ~/Documents/MadMapper/Devices/Universal Controller MIDI.mmidi
+    Windows: %USERPROFILE%\\Documents\\MadMapper\\Devices\\Universal Controller MIDI.mmidi
 
 Detection:
     macOS  : /Applications/MadMapper*.app, version from Info.plist
@@ -33,7 +33,7 @@ from typing import List, Optional
 from .base import Connector, HostInstallation, InstallResult, documents_dir
 
 
-DEVICE_FILENAME = "Gamepad MIDI Bridge.mmidi"
+DEVICE_FILENAME = "Universal Controller MIDI.mmidi"
 TEMPLATE_FILENAME = "madmapper_device.mmidi"
 MIN_MAJOR_VERSION = 5
 
@@ -80,7 +80,7 @@ class MadMapperConnector(Connector):
         return InstallResult(
             True, dest,
             f"Installed for {host.name}. Restart MadMapper — the gamepad now "
-            "appears in Preferences → MIDI as 'Gamepad MIDI Bridge'.",
+            "appears in Preferences → MIDI as 'Universal Controller MIDI'.",
         )
 
     def uninstall(self, host: HostInstallation) -> InstallResult:
@@ -99,7 +99,7 @@ class MadMapperConnector(Connector):
     def post_install_steps(self, host: HostInstallation) -> str:
         return (
             "1. Restart MadMapper (it scans Devices/ on launch).\n"
-            "2. Preferences → MIDI → the device 'Gamepad MIDI Bridge' "
+            "2. Preferences → MIDI → the device 'Universal Controller MIDI' "
             "appears in the list. Enable it.\n"
             "3. On any surface or control, right-click → Learn MIDI, then "
             "move the gamepad control you want to bind.\n"

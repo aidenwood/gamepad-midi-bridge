@@ -5,7 +5,7 @@ Version 1, dated 2026-05-26.
 1. PARTIES
    This agreement is between you ("You", the end user) and Aidxn Design
    ("We", an Australian sole trader operating from Queensland, Australia)
-   for the use of the Gamepad MIDI Bridge desktop application, its bundled
+   for the use of the Universal Controller MIDI desktop application, its bundled
    resources, and any associated host-connector files (the "Software").
 
 2. GRANT

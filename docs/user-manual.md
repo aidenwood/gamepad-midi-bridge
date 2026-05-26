@@ -1,4 +1,4 @@
-# Gamepad MIDI Bridge — User Manual
+# Universal Controller MIDI — User Manual
 
 Welcome. This manual covers everything from first plug-in to running headless on a stage rig. If you only have two minutes, the Quick Start gets you bridging in under a minute.
 
@@ -9,7 +9,7 @@ Welcome. This manual covers everything from first plug-in to running headless on
 1. **Plug in a controller.** PS5 DualSense or any Xbox controller over USB or Bluetooth. The Live tab shows it the moment SDL detects it.
 2. **Install the virtual MIDI port.** macOS and Linux create the port automatically the first time you click Start. On Windows, the app prompts you to install `loopMIDI` once — accept the prompt and relaunch.
 3. **Click Start.** The status badge turns green and the meter strip begins streaming values from sticks and buttons.
-4. **Point your DAW at the port.** Open the MIDI input list in Ableton, Logic, Reaper, FL Studio, Resolume, TouchDesigner — whichever — and enable the input named **Gamepad MIDI Bridge**.
+4. **Point your DAW at the port.** Open the MIDI input list in Ableton, Logic, Reaper, FL Studio, Resolume, TouchDesigner — whichever — and enable the input named **Universal Controller MIDI**.
 
 That's it. The default mapping is musically sensible out of the box, so you can be triggering clips or modulating filters within a minute of opening the app.
 
@@ -123,10 +123,10 @@ Installs an XML map verified against four factory presets. Drops into the Resolu
 
 Installs a Python 3 Remote Script to your User Library:
 
-- macOS: `~/Music/Ableton/User Library/Remote Scripts/Gamepad MIDI Bridge/`
-- Windows: `~/Documents/Ableton/User Library/Remote Scripts/Gamepad MIDI Bridge/`
+- macOS: `~/Music/Ableton/User Library/Remote Scripts/Universal Controller MIDI/`
+- Windows: `~/Documents/Ableton/User Library/Remote Scripts/Universal Controller MIDI/`
 
-After install: launch Live, open **Preferences → Link, Tempo & MIDI**, set Control Surface to "Gamepad MIDI Bridge" with Input set to our virtual port.
+After install: launch Live, open **Preferences → Link, Tempo & MIDI**, set Control Surface to "Universal Controller MIDI" with Input set to our virtual port.
 
 Live 10 and earlier are not supported (they ran Python 2).
 
@@ -180,7 +180,7 @@ Settings → **Active controllers** has three modes:
 - **Auto** — use both if Pro and two are connected
 - **Force two** — error if fewer than two controllers are present (rehearsal-safe)
 
-The second slot's virtual port appears as **Gamepad MIDI Bridge 2** in your DAW's MIDI input list.
+The second slot's virtual port appears as **Universal Controller MIDI 2** in your DAW's MIDI input list.
 
 ---
 
@@ -235,7 +235,7 @@ To opt out of update checks entirely: **Settings → Updates → Check for updat
 
 **Controller not detected.** Quit, reconnect, relaunch. SDL2's hot-plug detection on macOS occasionally misses connections that happen while the app is already running.
 
-**No sound from your DAW.** Open the DAW's MIDI input list and explicitly enable the **Gamepad MIDI Bridge** input. Ableton ships with all MIDI inputs off by default — the most common "it's not working" cause.
+**No sound from your DAW.** Open the DAW's MIDI input list and explicitly enable the **Universal Controller MIDI** input. Ableton ships with all MIDI inputs off by default — the most common "it's not working" cause.
 
 **Stick still drifts after calibration.** Auto-calibration handles fixed-offset drift. If your sticks jitter at rest, the hardware is worn — software can't compensate for a failing potentiometer.
 
@@ -279,9 +279,9 @@ Logs rotate at 2 MB × 3 files. License keys verify offline via Ed25519 — no o
 
 `<user_data_dir>` resolves to:
 
-- macOS: `~/Library/Application Support/Gamepad MIDI Bridge/`
-- Windows: `%APPDATA%\Gamepad MIDI Bridge\`
-- Linux: `$XDG_DATA_HOME/Gamepad MIDI Bridge/` (defaults to `~/.local/share/Gamepad MIDI Bridge/`)
+- macOS: `~/Library/Application Support/Universal Controller MIDI/`
+- Windows: `%APPDATA%\Universal Controller MIDI\`
+- Linux: `$XDG_DATA_HOME/Universal Controller MIDI/` (defaults to `~/.local/share/Universal Controller MIDI/`)
 
 ---
 

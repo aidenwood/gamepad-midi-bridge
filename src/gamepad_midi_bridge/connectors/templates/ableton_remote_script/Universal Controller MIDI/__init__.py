@@ -1,4 +1,4 @@
-"""Ableton Live Remote Script entry point for Gamepad MIDI Bridge.
+"""Ableton Live Remote Script entry point for Universal Controller MIDI.
 
 Live discovers Remote Scripts by importing the folder as a package and calling
 `create_instance(c_instance)`. The returned object must be a ControlSurface
@@ -41,7 +41,7 @@ def get_capabilities():
         CONTROLLER_ID_KEY: controller_id(
             vendor_id=0x0000,
             product_ids=[0x0000],
-            model_name=["Gamepad MIDI Bridge"],
+            model_name=["Universal Controller MIDI"],
         ),
         PORTS_KEY: [
             inport(props=[NOTES_CC, SCRIPT, REMOTE]),

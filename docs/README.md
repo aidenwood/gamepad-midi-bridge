@@ -1,4 +1,4 @@
-# Gamepad MIDI Bridge — Documentation
+# Universal Controller MIDI — Documentation
 
 Turn a PS5 DualSense or Xbox controller into a MIDI / OSC controller for VJ rigs, DAWs, and live performance.
 

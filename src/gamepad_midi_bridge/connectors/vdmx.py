@@ -6,7 +6,7 @@ File → Open Template menu and land on a workspace pre-wired to the bridge's
 virtual MIDI port.
 
 Install path:
-    ~/Documents/VDMX/Templates/Gamepad MIDI Bridge.vdmx5
+    ~/Documents/VDMX/Templates/Universal Controller MIDI.vdmx5
 
 VDMX5 files are plist-based XML. We build a minimal valid plist programmatically
 via `plistlib` rather than shipping a binary blob — easier to maintain and
@@ -25,7 +25,7 @@ from typing import List
 from .base import Connector, HostInstallation, InstallResult
 
 
-TEMPLATE_FILENAME = "Gamepad MIDI Bridge.vdmx5"
+TEMPLATE_FILENAME = "Universal Controller MIDI.vdmx5"
 
 
 class VDMXConnector(Connector):
@@ -102,11 +102,11 @@ class VDMXConnector(Connector):
     def post_install_steps(self, host: HostInstallation) -> str:
         return (
             "1. Open VDMX.\n"
-            "2. File → Open Template → pick 'Gamepad MIDI Bridge'.\n"
+            "2. File → Open Template → pick 'Universal Controller MIDI'.\n"
             "3. Workspace loads with the bridge virtual MIDI port as input "
             "and controls pre-mapped.\n"
             "4. If the port isn't auto-selected, open Workspace Inspector → "
-            "MIDI and pick 'Gamepad MIDI Bridge'."
+            "MIDI and pick 'Universal Controller MIDI'."
         )
 
 
@@ -117,7 +117,7 @@ def _build_workspace_plist() -> dict:
 
     VDMX5 files declare an array of "plugins" — each one a control surface,
     layer, MIDI input source, etc. We declare:
-      - one MIDI input source listening to 'Gamepad MIDI Bridge'
+      - one MIDI input source listening to 'Universal Controller MIDI'
       - one slider plugin with 8 sliders bound to CCs 1, 2, 3, 4, 5, 6, 16, 17
       - one Layer Source plugin with the first 4 clip slots bound to notes 60-65
 
@@ -127,8 +127,8 @@ def _build_workspace_plist() -> dict:
     """
     midi_source = {
         "pluginClass": "MIDIInputSourcePlugin",
-        "name": "Gamepad MIDI Bridge In",
-        "midiDeviceName": "Gamepad MIDI Bridge",
+        "name": "Universal Controller MIDI In",
+        "midiDeviceName": "Universal Controller MIDI",
         "midiChannel": 1,
     }
 
@@ -155,7 +155,7 @@ def _build_workspace_plist() -> dict:
                     "type": "cc",
                     "channel": 1,
                     "cc": s["cc"],
-                    "source": "Gamepad MIDI Bridge",
+                    "source": "Universal Controller MIDI",
                 },
             }
             for s in slider_bindings
@@ -173,7 +173,7 @@ def _build_workspace_plist() -> dict:
                     "type": "note",
                     "channel": 1,
                     "note": note,
-                    "source": "Gamepad MIDI Bridge",
+                    "source": "Universal Controller MIDI",
                 },
             }
             for i, note in enumerate(clip_notes)
@@ -182,7 +182,7 @@ def _build_workspace_plist() -> dict:
 
     return {
         "version": "5",
-        "name": "Gamepad MIDI Bridge",
-        "description": "Pre-wired workspace for the Gamepad MIDI Bridge.",
+        "name": "Universal Controller MIDI",
+        "description": "Pre-wired workspace for the Universal Controller MIDI.",
         "plugins": [midi_source, sliders_plugin, layer_plugin],
     }

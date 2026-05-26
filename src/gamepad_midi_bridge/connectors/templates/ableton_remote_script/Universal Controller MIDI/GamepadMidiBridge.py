@@ -1,8 +1,8 @@
-"""Gamepad MIDI Bridge — Ableton Live Remote Script (ControlSurface).
+"""Universal Controller MIDI — Ableton Live Remote Script (ControlSurface).
 
 WHAT THIS DOES
 ==============
-Binds the default gamepad MIDI map produced by Gamepad MIDI Bridge to native
+Binds the default gamepad MIDI map produced by Universal Controller MIDI to native
 Live controls so the user gets clip launch, transport, mixer, and scene
 navigation without manually MIDI-learning every button:
 
@@ -35,14 +35,14 @@ process, so no Ableton IP is redistributed.
 
 INSTALL
 =======
-Use Gamepad MIDI Bridge's "Connectors" tab and click Install for Ableton Live.
+Use Universal Controller MIDI's "Connectors" tab and click Install for Ableton Live.
 The connector copies this folder into:
 
-    macOS  : ~/Music/Ableton/User Library/Remote Scripts/Gamepad MIDI Bridge/
-    Windows: ~/Documents/Ableton/User Library/Remote Scripts/Gamepad MIDI Bridge/
+    macOS  : ~/Music/Ableton/User Library/Remote Scripts/Universal Controller MIDI/
+    Windows: ~/Documents/Ableton/User Library/Remote Scripts/Universal Controller MIDI/
 
 Then in Live: Preferences -> Link, Tempo & MIDI -> Control Surface dropdown ->
-pick "Gamepad MIDI Bridge". Set Input to the bridge's virtual MIDI port.
+pick "Universal Controller MIDI". Set Input to the bridge's virtual MIDI port.
 """
 from __future__ import absolute_import
 
@@ -100,13 +100,13 @@ class GamepadMidiBridge(ControlSurface):
     def __init__(self, c_instance):
         super(GamepadMidiBridge, self).__init__(c_instance)
         with self.component_guard():
-            self._suggested_input_port = "Gamepad MIDI Bridge"
-            self._suggested_output_port = "Gamepad MIDI Bridge"
+            self._suggested_input_port = "Universal Controller MIDI"
+            self._suggested_output_port = "Universal Controller MIDI"
             self._build_session()
             self._build_mixer()
             self._build_transport()
             self._build_scene_navigation()
-        self.log_message("Gamepad MIDI Bridge: loaded.")
+        self.log_message("Universal Controller MIDI: loaded.")
 
     # ------------------------------------------------------------------ session
     def _build_session(self):

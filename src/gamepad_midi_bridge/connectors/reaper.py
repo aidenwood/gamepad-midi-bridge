@@ -10,9 +10,9 @@ For MIDI bindings, flags include MIDI-mode bits (0xC1 for CC, 0xA1 for note),
 key holds the CC/note number, and section is 0 (main).
 
 Install paths:
-    macOS  : ~/Library/Application Support/REAPER/KeyMaps/Gamepad MIDI Bridge.ReaperKeyMap
-    Windows: %APPDATA%\\REAPER\\KeyMaps\\Gamepad MIDI Bridge.ReaperKeyMap
-    Linux  : ~/.config/REAPER/KeyMaps/Gamepad MIDI Bridge.ReaperKeyMap
+    macOS  : ~/Library/Application Support/REAPER/KeyMaps/Universal Controller MIDI.ReaperKeyMap
+    Windows: %APPDATA%\\REAPER\\KeyMaps\\Universal Controller MIDI.ReaperKeyMap
+    Linux  : ~/.config/REAPER/KeyMaps/Universal Controller MIDI.ReaperKeyMap
 
 Reaper has a native Linux build, so we handle all three platforms.
 
@@ -32,7 +32,7 @@ from typing import List, Optional
 from .base import Connector, HostInstallation, InstallResult
 
 
-KEYMAP_FILENAME = "Gamepad MIDI Bridge.ReaperKeyMap"
+KEYMAP_FILENAME = "Universal Controller MIDI.ReaperKeyMap"
 TEMPLATE_FILENAME = "reaper_default.ReaperKeyMap"
 
 

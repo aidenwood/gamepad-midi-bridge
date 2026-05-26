@@ -28,7 +28,7 @@ def write_report(
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     path = crash_dir() / f"crash-{stamp}.txt"
     with path.open("w", encoding="utf-8") as f:
-        f.write(f"Gamepad MIDI Bridge crash report\n")
+        f.write(f"Universal Controller MIDI crash report\n")
         f.write(f"version: {__version__}\n")
         f.write(f"python:  {sys.version}\n")
         f.write(f"platform:{sys.platform}\n")

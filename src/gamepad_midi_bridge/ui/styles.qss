@@ -1,4 +1,4 @@
-/* Gamepad MIDI Bridge — dark theme.
+/* Universal Controller MIDI — dark theme.
    Targets standard QWidget classes so the file works without per-widget objectName. */
 
 QWidget {

@@ -56,7 +56,7 @@ git push
 
 ## 2. Stripe (15 min)
 
-1. Stripe Dashboard → Products → Create product "Gamepad MIDI Bridge Pro" → one-time payment, currency = AUD or USD as you prefer, $49.
+1. Stripe Dashboard → Products → Create product "Universal Controller MIDI Pro" → one-time payment, currency = AUD or USD as you prefer, $49.
 2. Copy the **price ID** (`price_...`) from the new price.
 3. Stripe Dashboard → Settings → Tax → enable **Stripe Tax** (handles AU GST + EU VAT + US sales tax automatically). Add your ABN.
 4. Stripe Dashboard → Payment Links → New → pick the Pro product → set success URL to `https://store.aidxn.com/success?session_id={CHECKOUT_SESSION_ID}` → copy the resulting `https://buy.stripe.com/...` URL.

@@ -24,7 +24,7 @@ from typing import List
 from .base import Connector, HostInstallation, InstallResult, documents_dir
 
 
-SHORTCUT_FILENAME = "Gamepad MIDI Bridge.xml"
+SHORTCUT_FILENAME = "Universal Controller MIDI.xml"
 TEMPLATE_FILENAME = "resolume_default.xml"
 MINIMAL_TEMPLATE_FILENAME = "resolume_minimal.xml"
 
@@ -89,7 +89,7 @@ class ResolumeConnector(Connector):
         return InstallResult(
             True, dest,
             f"Installed for {host.name}. Open Resolume and pick "
-            "'Gamepad MIDI Bridge' from Shortcuts → Application Map.",
+            "'Universal Controller MIDI' from Shortcuts → Application Map.",
         )
 
     def uninstall(self, host: HostInstallation) -> InstallResult:
@@ -109,7 +109,7 @@ class ResolumeConnector(Connector):
         return (
             "1. Open Resolume.\n"
             "2. Go to Shortcuts → Application Map.\n"
-            "3. Pick 'Gamepad MIDI Bridge'.\n"
+            "3. Pick 'Universal Controller MIDI'.\n"
             "4. Make sure Resolume's MIDI input is set to the bridge "
             "virtual port (Preferences → MIDI)."
         )
