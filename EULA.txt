@@ -1,0 +1,87 @@
+END USER LICENSE AGREEMENT — GAMEPAD MIDI BRIDGE
+
+Version 1, dated 2026-05-26.
+
+1. PARTIES
+   This agreement is between you ("You", the end user) and Aidxn Design
+   ("We", an Australian sole trader operating from Queensland, Australia)
+   for the use of the Gamepad MIDI Bridge desktop application, its bundled
+   resources, and any associated host-connector files (the "Software").
+
+2. GRANT
+   We grant You a non-exclusive, non-transferable license to install and
+   use the Software on any number of personal devices that You own or
+   control, subject to the terms below.
+
+3. FREE TIER vs PRO TIER
+   The Software is distributed at no cost with a base set of features
+   ("Free Tier"). Additional features ("Pro Tier") are unlocked by a
+   per-purchase license key issued after payment. Pro features include,
+   without limitation: custom mapping editor, preset library, multi-
+   controller mode, adaptive trigger haptics, touchpad XY surface,
+   stick-corner quantizer, OSC output, and marketplace publishing.
+
+4. LICENSE KEYS
+   Pro license keys are cryptographically signed and verified offline by
+   the Software. You may install the same key on multiple personal
+   devices. You may not redistribute, resell, or share Your license key.
+   We may revoke a key if it has been shared, leaked, or used in violation
+   of this agreement.
+
+5. PROHIBITED USES
+   You may not:
+   (a) reverse engineer, decompile, or disassemble the Software except to
+       the extent permitted by Australian law;
+   (b) remove, alter, or obscure any copyright, trademark, or license
+       notices;
+   (c) circumvent or attempt to circumvent the Free vs Pro tier checks
+       in the Software;
+   (d) use the Software to violate any applicable law in Your jurisdiction.
+
+6. PRIVACY AND DATA
+   The Software does not collect or transmit personal data by default.
+   If You opt into anonymous usage statistics in Settings, the data sent
+   is limited to application version, operating system name and version,
+   and connector install events. We do not collect controller serial
+   numbers, IP addresses, mapping contents, preset contents, or any
+   personally identifying information. See `/privacy` on the store
+   website for the current policy in full.
+
+7. THIRD-PARTY SOFTWARE
+   The Software is built on top of open-source libraries including but not
+   limited to PySide6 (LGPL), python-rtmidi (MIT), pygame-ce (LGPL),
+   hidapi (BSD), cryptography (BSD/Apache), and PyObjC (MIT). Their
+   licenses ship alongside the application.
+
+8. DISCLAIMERS
+   THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT,
+   TO THE EXTENT PERMITTED BY APPLICABLE LAW.
+
+9. CONSUMER GUARANTEES
+   Nothing in this agreement excludes, restricts, or modifies any consumer
+   guarantee or right under the Australian Consumer Law (Schedule 2 of
+   the Competition and Consumer Act 2010) that cannot be lawfully
+   excluded. If You purchased the Pro tier and the Software does not
+   meet a consumer guarantee, You are entitled to a refund or replacement
+   per that law.
+
+10. REFUNDS
+    You may request a full refund within fourteen (14) days of purchase
+    via support@aidxn.com. After fourteen days refunds are at our
+    discretion.
+
+11. TERMINATION
+    This license terminates automatically if You materially breach it.
+    On termination You must cease using the Software and destroy all
+    copies under Your control. Sections 5, 8, 9, and 12 survive
+    termination.
+
+12. GOVERNING LAW
+    This agreement is governed by the laws of Queensland, Australia.
+    The courts of Queensland have non-exclusive jurisdiction over any
+    dispute arising from or relating to this agreement.
+
+13. CONTACT
+    Aidxn Design — support@aidxn.com
