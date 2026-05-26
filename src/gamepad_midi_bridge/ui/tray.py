@@ -1,0 +1,78 @@
+"""System tray / menu bar icon.
+
+Lets users keep the bridge running with no main window taking up space.
+Right-click → Start / Stop / Show window / Quit. Double-click brings the
+main window forward.
+
+On macOS this lives in the menu bar (top right). On Windows it's the
+system tray (bottom right). On Linux it depends on the DE — works on KDE
++ Gnome with TopIcons / equivalent.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable, Optional
+
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+
+class TrayController(QObject):
+    """Tray icon + menu. Hands events back to the main window via signals."""
+
+    start_requested = Signal()
+    stop_requested = Signal()
+    show_requested = Signal()
+    quit_requested = Signal()
+
+    def __init__(self, icon_path: Optional[Path], parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self.tray = QSystemTrayIcon(parent)
+        if icon_path is not None and icon_path.exists():
+            self.tray.setIcon(QIcon(str(icon_path)))
+        self.tray.setToolTip("Gamepad MIDI Bridge")
+
+        menu = QMenu()
+        self._start = QAction("Start bridging", menu)
+        self._start.triggered.connect(self.start_requested.emit)
+        menu.addAction(self._start)
+
+        self._stop = QAction("Stop bridging", menu)
+        self._stop.triggered.connect(self.stop_requested.emit)
+        self._stop.setEnabled(False)
+        menu.addAction(self._stop)
+
+        menu.addSeparator()
+
+        show = QAction("Show window", menu)
+        show.triggered.connect(self.show_requested.emit)
+        menu.addAction(show)
+
+        menu.addSeparator()
+
+        quit_act = QAction("Quit", menu)
+        quit_act.triggered.connect(self.quit_requested.emit)
+        menu.addAction(quit_act)
+
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self._on_activated)
+        self.tray.show()
+
+    def set_running(self, running: bool) -> None:
+        self._start.setEnabled(not running)
+        self._stop.setEnabled(running)
+        self.tray.setToolTip(
+            "Gamepad MIDI Bridge — bridging" if running
+            else "Gamepad MIDI Bridge — idle"
+        )
+
+    def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        # Double-click on Win/Linux, single click on mac's menu-bar item.
+        if reason in (QSystemTrayIcon.DoubleClick, QSystemTrayIcon.Trigger):
+            self.show_requested.emit()
+
+
+def is_available() -> bool:
+    """Some Linux desktops have no tray support — gate visibility on this."""
+    return QSystemTrayIcon.isSystemTrayAvailable()

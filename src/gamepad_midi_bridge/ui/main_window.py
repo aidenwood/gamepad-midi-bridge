@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from typing import Optional
+
 from .. import APP_NAME, __version__, telemetry
 from ..bridge import BridgeController
 from ..license import activate_from_string, is_pro, state as license_state
@@ -24,6 +26,7 @@ from .marketplace_tab import MarketplaceTab
 from .onboarding import OnboardingWizard, is_first_launch, mark_complete
 from .preset_manager import PresetManager
 from .settings_panel import SettingsPanel
+from .tray import TrayController, is_available as tray_available
 
 
 UPGRADE_URL = "https://store.aidxn.com/gamepad-midi-bridge"
@@ -74,6 +77,17 @@ class MainWindow(QMainWindow):
         self._updater = UpdateChecker(self)
         self._updater.update_available.connect(self._on_update_available)
         QTimer.singleShot(1500, self._updater.check_async)
+
+        # Tray icon — optional, depends on platform support.
+        self._tray: Optional[TrayController] = None
+        if tray_available():
+            from pathlib import Path
+            icon = Path(__file__).resolve().parent.parent / "resources" / "icon.png"
+            self._tray = TrayController(icon, self)
+            self._tray.start_requested.connect(self._on_start)
+            self._tray.stop_requested.connect(self._on_stop)
+            self._tray.show_requested.connect(self._show_from_tray)
+            self._tray.quit_requested.connect(self._quit_from_tray)
 
         # First-launch onboarding. Deferred so the main window paints before the
         # modal appears — keeps the welcome moment from feeling like a blocker.
@@ -333,6 +347,8 @@ class MainWindow(QMainWindow):
         self._status_sub.setText(f"{controller_name}  →  {port_name}")
         telemetry.send_event("bridge_started",
                              controller=_anonymise(controller_name))
+        if self._tray is not None:
+            self._tray.set_running(True)
         if self._calibration_dialog and not self._calibration_dialog.isVisible():
             # Dialog already closed by user — nothing to do.
             self._calibration_dialog = None
@@ -342,6 +358,8 @@ class MainWindow(QMainWindow):
         self._stop_btn.setEnabled(False)
         self._refresh_status_idle()
         self._meter.set_connected(False)
+        if self._tray is not None:
+            self._tray.set_running(False)
 
     def _on_error(self, message: str) -> None:
         QMessageBox.critical(self, "Bridge error", message)
@@ -445,6 +463,18 @@ class MainWindow(QMainWindow):
             )
 
     # ============================================================== misc
+
+    # ============================================================== tray helpers
+
+    def _show_from_tray(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self) -> None:
+        from PySide6.QtWidgets import QApplication
+        self._bridge.shutdown()
+        QApplication.instance().quit()
 
     # ============================================================== portable config
 
