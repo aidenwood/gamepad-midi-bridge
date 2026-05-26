@@ -53,14 +53,24 @@ def looks_like_controller(name: str) -> bool:
 
 
 def _mac_list_devices() -> List[BluetoothDevice]:
-    """Query IOBluetooth via PyObjC. Returns [] if PyObjC isn't installed."""
+    """Query IOBluetooth via PyObjC. Returns [] if PyObjC isn't installed or
+    macOS hasn't granted the app Bluetooth permission yet."""
     try:
         from IOBluetooth import IOBluetoothDevice  # type: ignore
     except Exception:
         return []
 
     devices: List[BluetoothDevice] = []
-    paired_array = IOBluetoothDevice.pairedDevices()
+    try:
+        # macOS will SIGABRT the process at this call if the bundle's
+        # Info.plist is missing NSBluetoothAlwaysUsageDescription. We
+        # patch the plist in build.py — but if a stray dev build sneaks
+        # through, the wrapping try/except at least logs the failure
+        # rather than tearing the GUI down.
+        paired_array = IOBluetoothDevice.pairedDevices()
+    except Exception as exc:  # pragma: no cover — hardware-dependent path
+        print(f"IOBluetooth pairedDevices() failed: {exc}")
+        return []
     if paired_array is None:
         return devices
     for d in paired_array:
