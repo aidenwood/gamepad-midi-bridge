@@ -57,11 +57,14 @@ git push
 ## 2. Stripe (15 min)
 
 1. Stripe Dashboard → Products → Create product "Universal Controller MIDI Pro" → one-time payment, currency = AUD or USD as you prefer, $49.
-2. Copy the **price ID** (`price_...`) from the new price.
-3. Stripe Dashboard → Settings → Tax → enable **Stripe Tax** (handles AU GST + EU VAT + US sales tax automatically). Add your ABN.
-4. Stripe Dashboard → Payment Links → New → pick the Pro product → set success URL to `https://store.aidxn.com/success?session_id={CHECKOUT_SESSION_ID}` → copy the resulting `https://buy.stripe.com/...` URL.
-5. Stripe Dashboard → Developers → API keys → copy the **live secret key** (`sk_live_...`).
-6. Stripe Dashboard → Developers → Webhooks → Add endpoint → URL = `https://store.aidxn.com/api/stripe-webhook` → event = `checkout.session.completed` → after creating, click into it and copy the **signing secret** (`whsec_...`).
+2. Copy the **price ID** (`price_...`) — used by the webhook to sanity-check that incoming sessions are for this product.
+3. Stripe Dashboard → Settings → Tax → enable **Stripe Tax**. Add your ABN.
+4. Stripe Dashboard → Payment Links → New → pick the Pro product. In **"After payment"**, choose "Don't show confirmation page" and set the custom URL to:
+   `https://store.aidxn.com/success?session_id={CHECKOUT_SESSION_ID}`
+   Copy the resulting `https://buy.stripe.com/...` URL.
+5. Paste the Payment Link URL into the four `https://buy.stripe.com/...` strings in `src/pages/index.astro` + `src/components/Nav.astro` (already wired for the V1 link).
+6. Stripe Dashboard → Developers → API keys → copy the **live secret key** (`sk_live_...`).
+7. Stripe Dashboard → Developers → Webhooks → Add endpoint → URL = `https://store.aidxn.com/api/stripe-webhook` → event = `checkout.session.completed` → copy the **signing secret** (`whsec_...`).
 
 ## 3. Resend (5 min)
 
@@ -88,8 +91,9 @@ Open https://app.netlify.com/projects/gamepad-midi-bridge-store → Site setting
 | Key | Value source |
 |---|---|
 | `LICENSE_PRIV_KEY_V1` | base64'd `scripts/private_key.pem` from step 1 |
-| `STRIPE_API_KEY` | `sk_live_...` from step 2.5 |
-| `STRIPE_WEBHOOK_SECRET` | `whsec_...` from step 2.6 |
+| `STRIPE_API_KEY` | `sk_live_...` from step 2.6 |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_...` from step 2.7 |
+| `STRIPE_PRICE_ID` | `price_...` from step 2.2 (defensive sanity check, optional but recommended) |
 | `RESEND_API_KEY` | `re_...` from step 3.4 |
 | `RECOVERY_EMAIL_FROM` | e.g. `noreply@aidxn.com` |
 | `SUPABASE_URL` | from step 4.2 |
