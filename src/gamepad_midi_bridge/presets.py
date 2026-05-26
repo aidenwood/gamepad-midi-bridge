@@ -1,12 +1,42 @@
-"""Preset save/load. Pro feature — gated by license.py at the UI layer."""
+"""Preset save/load. Pro feature — gated by license.py at the UI layer.
+
+First launch copies a handful of bundled starter presets into the user
+presets dir so the Presets tab has something to show on day one.
+"""
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import List
 
 from .mapping import Mapping
 from .paths import presets_dir
+
+
+_BUNDLED_DIR = Path(__file__).parent / "resources" / "presets"
+_SEED_MARKER = ".seeded"
+
+
+def seed_user_presets_once() -> int:
+    """Copy bundled presets into the user dir on first launch. Idempotent.
+
+    Returns the number of files copied. Marker file prevents re-seeding so
+    a user who deletes a starter preset doesn't get it back next launch.
+    """
+    target = presets_dir()
+    marker = target / _SEED_MARKER
+    if marker.exists() or not _BUNDLED_DIR.exists():
+        return 0
+    copied = 0
+    for bundled in _BUNDLED_DIR.glob("*.json"):
+        dest = target / bundled.name
+        if dest.exists():
+            continue
+        shutil.copy2(bundled, dest)
+        copied += 1
+    marker.write_text("", encoding="utf-8")
+    return copied
 
 
 def list_presets() -> List[str]:

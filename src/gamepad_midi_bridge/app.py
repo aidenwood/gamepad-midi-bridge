@@ -10,6 +10,7 @@ from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
 from . import APP_ID, APP_NAME
+from .presets import seed_user_presets_once
 from .ui.main_window import MainWindow
 
 
@@ -47,6 +48,8 @@ def run(argv: Optional[List[str]] = None) -> int:
     QCoreApplication.setOrganizationName("Aidxn Design")
     QCoreApplication.setOrganizationDomain("aidxn.com")
     QGuiApplication.setDesktopFileName(APP_ID)
+
+    seed_user_presets_once()
 
     app = QApplication(argv)
     app.setStyleSheet(_load_stylesheet())
