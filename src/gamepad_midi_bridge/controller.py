@@ -27,25 +27,40 @@ class ControllerInfo:
 
 
 class ControllerReader:
-    """Polls the first connected joystick. One reader per bridge."""
+    """Polls one connected joystick by pygame index. One reader per bridge.
 
-    def __init__(self) -> None:
+    `slot_index` lets the multi-controller path bind reader 0 → joystick 0 and
+    reader 1 → joystick 1 without the two stomping on each other. The default
+    keeps the single-controller path byte-identical to V1.1.
+    """
+
+    def __init__(self, slot_index: int = 0) -> None:
         if not pygame.get_init():
             pygame.init()
         if not pygame.joystick.get_init():
             pygame.joystick.init()
+        self._slot_index = max(0, int(slot_index))
         self._joystick: Optional[pygame.joystick.JoystickType] = None
 
     # ------------------------------------------------------------------ lifecycle
 
     def detect(self) -> Optional[ControllerInfo]:
-        """Pick up the first connected joystick. Returns None if none present."""
-        pygame.joystick.quit()
-        pygame.joystick.init()
-        if pygame.joystick.get_count() == 0:
+        """Pick up the joystick at `slot_index`. Returns None if not present.
+
+        We avoid a global `pygame.joystick.quit()` here when slot_index > 0 —
+        re-initialising the subsystem would invalidate any joystick handle held
+        by another reader running in parallel.
+        """
+        if self._slot_index == 0:
+            # Preserves V1.1 behaviour: a fresh init guarantees a clean count.
+            pygame.joystick.quit()
+            pygame.joystick.init()
+        elif not pygame.joystick.get_init():
+            pygame.joystick.init()
+        if pygame.joystick.get_count() <= self._slot_index:
             self._joystick = None
             return None
-        js = pygame.joystick.Joystick(0)
+        js = pygame.joystick.Joystick(self._slot_index)
         js.init()
         self._joystick = js
         return ControllerInfo(
@@ -66,7 +81,10 @@ class ControllerReader:
             except Exception:
                 pass
             self._joystick = None
-        pygame.joystick.quit()
+        # Only the slot-0 reader tears down the subsystem — otherwise the
+        # second reader's joystick handle would dangle on the first stop.
+        if self._slot_index == 0:
+            pygame.joystick.quit()
 
     # ------------------------------------------------------------------ polling
 
@@ -92,6 +110,19 @@ class ControllerReader:
 
     def num_hats(self) -> int:
         return self._joystick.get_numhats() if self._joystick else 0
+
+
+def available_count() -> int:
+    """Return the number of joysticks pygame currently sees.
+
+    Cheap helper so the multi-controller path can decide whether to spin up a
+    second bridge without doing the full name-listing dance.
+    """
+    if not pygame.get_init():
+        pygame.init()
+    pygame.joystick.quit()
+    pygame.joystick.init()
+    return pygame.joystick.get_count()
 
 
 def available_controllers() -> List[str]:

@@ -7,15 +7,16 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QTabWidget, QVBoxLayout, QWidget,
+    QPushButton, QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from typing import Optional
 
 from .. import APP_NAME, __version__, telemetry
-from ..bridge import BridgeController
+from ..controller import available_count
 from ..license import activate_from_string, is_pro, state as license_state
 from ..mapping import Mapping
+from ..multi import MultiBridgeController, desired_slot_count
 from ..portable import export_pack, import_pack
 from ..updater import UpdateChecker, UpdateInfo
 from .calibration_dialog import CalibrationDialog
@@ -77,7 +78,10 @@ class MainWindow(QMainWindow):
         self.resize(820, 640)
 
         self._mapping = _load_last_mapping()
-        self._bridge = BridgeController(self)
+        # MultiBridgeController behaves identically to the old single
+        # BridgeController when only one slot is active — see multi.py.
+        self._multi = MultiBridgeController(self)
+        self._bridge = self._multi.primary()
         self._calibration_dialog = None
         self._activity_timer = QTimer(self)
         self._activity_timer.setSingleShot(True)
@@ -221,8 +225,32 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
 
+        # Live tab — primary meter always present. Secondary meter + Pro
+        # nudge banner are hidden until a second controller is wired in.
         self._meter = ControllerMeter()
-        tabs.addTab(self._wrap_padded(self._meter), "Live")
+        self._meter2 = ControllerMeter()
+        self._meter2.setVisible(False)
+        self._live_splitter = QSplitter(Qt.Horizontal)
+        self._live_splitter.addWidget(self._meter)
+        self._live_splitter.addWidget(self._meter2)
+        self._live_splitter.setChildrenCollapsible(False)
+
+        live_wrap = QWidget()
+        live_v = QVBoxLayout(live_wrap)
+        live_v.setContentsMargins(20, 20, 20, 20)
+        live_v.setSpacing(8)
+        self._pro_nudge = QLabel(
+            "Pro: a 2nd controller is connected — unlock multi-controller "
+            "to use both at once."
+        )
+        self._pro_nudge.setStyleSheet(
+            "color: #facc15; background: #2a2410; padding: 8px 12px; "
+            "border-radius: 6px; font-size: 12px;"
+        )
+        self._pro_nudge.setVisible(False)
+        live_v.addWidget(self._pro_nudge)
+        live_v.addWidget(self._live_splitter, 1)
+        tabs.addTab(live_wrap, "Live")
 
         self._mapping_editor = MappingEditor(self._mapping)
         self._mapping_editor.upgrade_clicked.connect(self._open_upgrade)
@@ -247,6 +275,7 @@ class MainWindow(QMainWindow):
         self._settings = SettingsPanel(self._mapping)
         self._settings.settings_changed.connect(self._on_settings_changed)
         self._settings.recalibrate_clicked.connect(self._on_recalibrate)
+        self._settings.multi_mode_changed.connect(self._on_multi_mode_changed)
         tabs.addTab(self._settings, "Settings")
 
         about_tab = self._build_about_tab()
@@ -337,28 +366,57 @@ class MainWindow(QMainWindow):
     # ============================================================== signal wiring
 
     def _wire_signals(self) -> None:
-        w = self._bridge.worker
-        w.status.connect(self._on_status)
-        w.started.connect(self._on_started)
-        w.stopped.connect(self._on_stopped)
-        w.error.connect(self._on_error)
-        w.controller_info.connect(self._on_controller_info)
-        w.calibration_progress.connect(self._on_calibration_progress)
-        w.calibration_done.connect(self._on_calibration_done)
-        w.axis_value.connect(self._meter.on_axis)
-        w.button_state.connect(self._meter.on_button)
-        w.hat_state.connect(self._meter.on_hat)
+        # Slot 0 wiring is byte-identical to V1.1 — keeps the single-controller
+        # path unchanged. Slot 1 wiring is deferred until configure() actually
+        # spins up a second bridge.
+        self._wire_bridge_to_meter(self._bridge, self._meter, primary=True)
+
+    def _wire_bridge_to_meter(self, bridge, meter, primary: bool) -> None:
+        w = bridge.worker
+        # Only the primary bridge feeds the shared status header — otherwise
+        # slot 2's chatter would overwrite slot 1's title text. Slot 2 still
+        # owns its own meter + activity dot via midi_sent.
+        if primary:
+            w.status.connect(self._on_status)
+            w.started.connect(self._on_started)
+            w.stopped.connect(self._on_stopped)
+            w.error.connect(self._on_error)
+            w.calibration_progress.connect(self._on_calibration_progress)
+            w.calibration_done.connect(self._on_calibration_done)
+            w.corner_triggered.connect(self._on_corner_triggered)
+            w.controller_info.connect(self._on_controller_info)
+        else:
+            # Secondary still surfaces errors as toasts so a misbehaving slot
+            # isn't silently dropped on the floor.
+            w.error.connect(self._on_error)
+            w.controller_info.connect(
+                lambda info, m=meter: m.set_connected(info is not None,
+                                                     info.name if info else "")
+            )
+        w.axis_value.connect(meter.on_axis)
+        w.button_state.connect(meter.on_button)
+        w.hat_state.connect(meter.on_hat)
         w.midi_sent.connect(self._on_midi_sent)
         # V1.1 DualSense extras — meter setters are defined in controller_meter.py
-        w.battery_changed.connect(self._meter.on_battery)
-        w.touchpad_xy.connect(self._meter.on_touchpad)
-        w.transport_changed.connect(self._meter.on_transport)
-        w.corner_triggered.connect(self._on_corner_triggered)
+        w.battery_changed.connect(meter.on_battery)
+        w.touchpad_xy.connect(meter.on_touchpad)
+        w.transport_changed.connect(meter.on_transport)
 
     # ============================================================== slots
 
     def _on_start(self) -> None:
-        self._bridge.worker.set_mapping(self._mapping)
+        # Re-evaluate slot count every start — handles "user plugged in a 2nd
+        # controller and switched the mode without restarting the app".
+        try:
+            slot_count = self._multi.configure(
+                self._mapping, self._settings.current_multi_mode(),
+            )
+        except RuntimeError as e:
+            QMessageBox.warning(self, "Multi-controller error", str(e))
+            return
+        self._bridge = self._multi.primary()
+        self._sync_live_layout(slot_count)
+
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._status_title.setText("Starting…")
@@ -366,11 +424,41 @@ class MainWindow(QMainWindow):
 
         # Calibration dialog shows immediately and follows worker signals.
         self._calibration_dialog = CalibrationDialog(self)
-        self._bridge.start()
+        self._multi.start()
 
     def _on_stop(self) -> None:
-        self._bridge.stop()
+        self._multi.stop()
         self._stop_btn.setEnabled(False)
+
+    def _sync_live_layout(self, slot_count: int) -> None:
+        """Show/hide the secondary meter + Pro nudge based on hardware + tier.
+
+        Called from _on_start (after configure) and from the multi-mode combo.
+        Wires slot-1 signals lazily on the first activation so the wiring code
+        runs exactly once per BridgeController instance.
+        """
+        secondary = self._multi.secondary()
+        if secondary is not None and not getattr(secondary, "_wired", False):
+            self._wire_bridge_to_meter(secondary, self._meter2, primary=False)
+            secondary._wired = True  # type: ignore[attr-defined]
+
+        show_two = slot_count >= 2
+        self._meter2.setVisible(show_two)
+        # Pro nudge: free tier sees 2 controllers but only the first activates.
+        detected = available_count()
+        self._pro_nudge.setVisible(
+            (not is_pro()) and detected >= 2 and slot_count == 1
+        )
+
+    def _on_multi_mode_changed(self, _mode: str) -> None:
+        """Re-evaluate slot visibility live so users see immediate feedback
+        when flipping the combo, even while the bridge is stopped."""
+        try:
+            target = desired_slot_count(_mode)
+        except RuntimeError:
+            # force_two with <2 controllers — surfaced on Start, not here.
+            target = 1
+        self._sync_live_layout(target if self._stop_btn.isEnabled() else 1)
 
     def _on_started(self, controller_name: str, port_name: str) -> None:
         self._status_title.setText("Bridging")
@@ -418,9 +506,10 @@ class MainWindow(QMainWindow):
         self._status_sub.setText(text)
 
     def _on_settings_changed(self, mapping: Mapping) -> None:
-        # Live-apply to the worker so changes take effect without restart.
+        # Live-apply to every active slot so multi-controller users see edits
+        # propagate without restarting the bridge.
         self._mapping = mapping
-        self._bridge.worker.set_mapping(mapping)
+        self._multi.apply_mapping(mapping)
         _save_last_mapping(mapping)
 
     def _on_recalibrate(self) -> None:
@@ -432,11 +521,11 @@ class MainWindow(QMainWindow):
             )
             return
         self._calibration_dialog = CalibrationDialog(self)
-        self._bridge.recalibrate()
+        self._multi.recalibrate()
 
     def _on_preset_loaded(self, mapping: Mapping) -> None:
         self._mapping = mapping
-        self._bridge.worker.set_mapping(mapping)
+        self._multi.apply_mapping(mapping)
         self._mapping_editor.set_mapping(mapping)
         _save_last_mapping(mapping)
         QMessageBox.information(self, "Preset loaded", f"Loaded '{mapping.name}'.")
@@ -496,6 +585,14 @@ class MainWindow(QMainWindow):
 
     # ============================================================== misc
 
+    # ============================================================== multi-controller
+
+    def _on_multi_mode_changed(self, mode: str) -> None:
+        """User flipped the 'Active controllers' combo in Settings."""
+        slots = self._multi.configure(self._mapping, mode)
+        self._bridge = self._multi.primary()
+        telemetry.send_event("multi_mode_set", mode=mode, slots=slots)
+
     # ============================================================== shortcuts
 
     def _toggle_bridge(self) -> None:
@@ -513,7 +610,7 @@ class MainWindow(QMainWindow):
 
     def _quit_from_tray(self) -> None:
         from PySide6.QtWidgets import QApplication
-        self._bridge.shutdown()
+        self._multi.shutdown()
         QApplication.instance().quit()
 
     # ============================================================== portable config
@@ -644,5 +741,5 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         _save_last_mapping(self._mapping)
-        self._bridge.shutdown()
+        self._multi.shutdown()
         event.accept()

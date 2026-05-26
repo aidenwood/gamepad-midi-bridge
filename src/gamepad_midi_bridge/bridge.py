@@ -21,7 +21,7 @@ from .calibration import calibrate
 from .controller import ControllerInfo, ControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
 from .mapping import Mapping, STICK_AXES
-from .midi_backend import MidiPortError, OpenedPort, close_port, open_port
+from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
 
 # macOS-only PyObjC fallback for adaptive triggers. Imported lazily so
 # non-mac users don't even attempt to load the framework.
@@ -65,8 +65,16 @@ class BridgeWorker(QObject):
     # --- MIDI sent (for the "MIDI activity" indicator)
     midi_sent = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, slot_index: int = 0,
+                 midi_port_name: Optional[str] = None) -> None:
+        """Multi-controller plumbing — slot_index picks which pygame joystick
+        this worker binds to, and midi_port_name overrides the virtual port so
+        two workers don't fight over a single "Gamepad MIDI Bridge" port name.
+        Both default to the V1.1 single-controller behaviour.
+        """
         super().__init__()
+        self._slot_index = max(0, int(slot_index))
+        self._midi_port_name = midi_port_name or DEFAULT_PORT_NAME
         self._state = BridgeState()
         self._reader: Optional[ControllerReader] = None
         self._midi: Optional[OpenedPort] = None
@@ -99,7 +107,7 @@ class BridgeWorker(QObject):
     @Slot()
     def start(self) -> None:
         """Entry point — invoked once when the worker's thread starts."""
-        self._reader = ControllerReader()
+        self._reader = ControllerReader(slot_index=self._slot_index)
         info = self._reader.detect()
         self.controller_info.emit(info)
         if info is None:
@@ -107,7 +115,7 @@ class BridgeWorker(QObject):
             return
 
         try:
-            self._midi = open_port()
+            self._midi = open_port(self._midi_port_name)
         except MidiPortError as e:
             self.error.emit(str(e))
             return
@@ -482,9 +490,15 @@ class BridgeWorker(QObject):
 class BridgeController(QObject):
     """Thin GUI-side wrapper that owns the worker and its thread."""
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: Optional[QObject] = None,
+                 slot_index: int = 0,
+                 midi_port_name: Optional[str] = None) -> None:
         super().__init__(parent)
-        self.worker = BridgeWorker()
+        self.slot_index = max(0, int(slot_index))
+        self.worker = BridgeWorker(
+            slot_index=self.slot_index,
+            midi_port_name=midi_port_name,
+        )
         self.thread = QThread()
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.start)

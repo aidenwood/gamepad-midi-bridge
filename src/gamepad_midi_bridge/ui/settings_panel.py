@@ -31,9 +31,47 @@ def _read_update_opt_in() -> bool:
         return True
 
 
+def _read_multi_mode() -> str:
+    """Persisted "Active controllers" choice — defaults to off so the V1.1
+    single-controller flow is preserved for everyone, free or Pro."""
+    path = config_path()
+    if not path.exists():
+        return "off"
+    try:
+        return str(json.loads(path.read_text(encoding="utf-8")).get(
+            "multi_controller_mode", "off",
+        ))
+    except Exception:
+        return "off"
+
+
+def _write_multi_mode(mode: str) -> None:
+    path = config_path()
+    data: dict = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["multi_controller_mode"] = mode
+    try:
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 class SettingsPanel(QWidget):
     settings_changed = Signal(Mapping)
     recalibrate_clicked = Signal()
+    multi_mode_changed = Signal(str)  # "off" | "auto" | "force_two"
+
+    # Stored on the user's config file so the choice persists across launches.
+    _MULTI_MODE_KEY = "multi_controller_mode"
+    _MULTI_MODE_LABELS = [
+        ("Off (single controller)", "off"),
+        ("Auto (use both if Pro)",  "auto"),
+        ("Force two (Pro-only)",    "force_two"),
+    ]
 
     def __init__(self, mapping: Mapping, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -72,8 +110,32 @@ class SettingsPanel(QWidget):
         self._poll.valueChanged.connect(self._emit)
         input_form.addRow("Poll rate", self._poll)
 
+        # Multi-controller group — Pro feature. Lives near the MIDI block so
+        # users discover it next to the channel selector.
+        pro = is_pro()
+        pro_suffix = "" if pro else " — Pro"
+        multi_group = QGroupBox(f"Multi-controller{pro_suffix}")
+        multi_form = QFormLayout(multi_group)
+        self._multi_mode = QComboBox()
+        for label, _ in self._MULTI_MODE_LABELS:
+            self._multi_mode.addItem(label)
+        current_mode = _read_multi_mode()
+        for i, (_, value) in enumerate(self._MULTI_MODE_LABELS):
+            if value == current_mode:
+                self._multi_mode.setCurrentIndex(i)
+                break
+        self._multi_mode.currentIndexChanged.connect(self._on_multi_mode_changed)
+        multi_form.addRow("Active controllers", self._multi_mode)
+        multi_note = QLabel(
+            "Auto turns on a second slot when a second controller is "
+            "detected. Each slot gets its own MIDI port + channel."
+        )
+        multi_note.setStyleSheet("color: #5a606b; font-size: 11px;")
+        multi_note.setWordWrap(True)
+        multi_form.addRow(multi_note)
+        multi_group.setEnabled(pro)
+
         # Stick corners group — Pro feature, edge-quantized stick buttons.
-        pro_suffix = "" if is_pro() else " — Pro"
         corners_group = QGroupBox(f"Stick corners{pro_suffix}")
         corners_form = QFormLayout(corners_group)
         self._left_corners = self._build_corner_combo(mapping.left_stick_corners)
@@ -150,6 +212,7 @@ class SettingsPanel(QWidget):
         calib_layout.addLayout(row)
 
         outer.addWidget(midi_group)
+        outer.addWidget(multi_group)
         outer.addWidget(input_group)
         outer.addWidget(corners_group)
         outer.addWidget(touchpad_group)
@@ -159,7 +222,6 @@ class SettingsPanel(QWidget):
         outer.addStretch(1)
 
         # Gate Pro-only groups when no license is active.
-        pro = is_pro()
         corners_group.setEnabled(pro)
         touchpad_group.setEnabled(pro)
         haptics_group.setEnabled(pro)
@@ -237,6 +299,16 @@ class SettingsPanel(QWidget):
         if self._building:
             return
         telemetry.set_enabled(checked)
+
+    def _on_multi_mode_changed(self, _idx: int) -> None:
+        if self._building:
+            return
+        mode = self._MULTI_MODE_LABELS[self._multi_mode.currentIndex()][1]
+        _write_multi_mode(mode)
+        self.multi_mode_changed.emit(mode)
+
+    def current_multi_mode(self) -> str:
+        return self._MULTI_MODE_LABELS[self._multi_mode.currentIndex()][1]
 
     @staticmethod
     def _apply_corner_combo(combo: QComboBox, cfg) -> None:
