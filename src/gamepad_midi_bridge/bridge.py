@@ -22,6 +22,7 @@ from .controller import ControllerInfo, ControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
 from .mapping import Mapping, STICK_AXES
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
+from .osc_backend import OscSender
 
 # macOS-only PyObjC fallback for adaptive triggers. Imported lazily so
 # non-mac users don't even attempt to load the framework.
@@ -80,6 +81,8 @@ class BridgeWorker(QObject):
         self._midi: Optional[OpenedPort] = None
         self._ds_handle: Optional[ds.DualSenseHandle] = None
         self._mac_haptic_handle = None     # set on darwin if mac_haptics opens
+        self._osc: Optional[OscSender] = None
+        self._prev_osc_axes: Dict[int, int] = {}   # last sent value as MIDI 0-127
         self._left_corner: Optional[CornerDetector] = None
         self._right_corner: Optional[CornerDetector] = None
         self._last_haptic_pair: tuple = (None, None)   # (l2, r2) last applied
@@ -103,6 +106,7 @@ class BridgeWorker(QObject):
         self._state.mapping = mapping
         self._sync_corner_detectors()
         self._apply_haptics()
+        self._sync_osc_sender()
 
     @Slot()
     def start(self) -> None:
@@ -123,6 +127,7 @@ class BridgeWorker(QObject):
         self._maybe_open_dualsense(info)
         self._sync_corner_detectors()
         self._apply_haptics()
+        self._sync_osc_sender()
 
         # Auto-calibrate on first start. UI may also trigger recalibration.
         self._run_calibration()
@@ -176,6 +181,42 @@ class BridgeWorker(QObject):
                 self._mac_haptic_handle = _mac_haptics.MacHapticsHandle.open()
             except Exception as e:
                 self.status.emit(f"macOS haptics unavailable: {e}")
+
+    def _sync_osc_sender(self) -> None:
+        """Open or close the OSC UDP sender to match the mapping's OscConfig."""
+        cfg = self._state.mapping.osc
+        if not cfg.enabled:
+            if self._osc is not None:
+                self._osc.close()
+                self._osc = None
+            return
+        # Reopen on host/port change so we don't keep stale state.
+        if self._osc is None or self._osc.host != cfg.host or self._osc.port != cfg.port:
+            if self._osc is not None:
+                self._osc.close()
+            self._osc = OscSender(host=cfg.host, port=cfg.port)
+        self._prev_osc_axes.clear()
+
+    def _send_osc_axis(self, axis_idx: int, value_0_to_1: float) -> None:
+        if self._osc is None:
+            return
+        cfg = self._state.mapping.osc
+        addr = cfg.axis_addresses.get(axis_idx)
+        if addr:
+            self._osc.send(addr, float(value_0_to_1))
+
+    def _send_osc_button(self, btn_idx: int, pressed: bool) -> None:
+        if self._osc is None:
+            return
+        cfg = self._state.mapping.osc
+        addr = cfg.button_addresses.get(btn_idx)
+        if addr:
+            # OSC convention for triggers: send 1.0 on press, 0.0 on release.
+            self._osc.send(addr, 1.0 if pressed else 0.0)
+
+    def _osc_only(self) -> bool:
+        return (self._state.mapping.osc.enabled
+                and self._state.mapping.osc.mode == "only")
 
     def _sync_corner_detectors(self) -> None:
         m = self._state.mapping
@@ -279,22 +320,28 @@ class BridgeWorker(QObject):
     # ---------------------------------------------------------- inner-loop chunks
 
     def _poll_buttons(self, reader, mapping, midi, note_on, note_off, n_buttons) -> None:
+        osc_only = self._osc_only()
         for btn_idx, note in mapping.buttons.items():
             if btn_idx >= n_buttons:
                 continue
             pressed = reader.get_button(btn_idx)
             was = self._prev_buttons.get(btn_idx, False)
             if pressed and not was:
-                midi.port.send_message([note_on, note, 127])
-                self.midi_sent.emit()
+                if not osc_only:
+                    midi.port.send_message([note_on, note, 127])
+                    self.midi_sent.emit()
+                self._send_osc_button(btn_idx, True)
             elif not pressed and was:
-                midi.port.send_message([note_off, note, 0])
-                self.midi_sent.emit()
+                if not osc_only:
+                    midi.port.send_message([note_off, note, 0])
+                    self.midi_sent.emit()
+                self._send_osc_button(btn_idx, False)
             if pressed != was:
                 self._prev_buttons[btn_idx] = pressed
                 self.button_state.emit(btn_idx, pressed)
 
     def _poll_axes(self, reader, mapping, offsets, deadzone, midi, cc, n_axes) -> None:
+        osc_only = self._osc_only()
         for axis_idx, cc_num in mapping.axes.items():
             if axis_idx >= n_axes:
                 continue
@@ -306,8 +353,14 @@ class BridgeWorker(QObject):
             val = int(round((raw + 1.0) * 63.5))
             val = max(0, min(127, val))
             if self._prev_cc.get(axis_idx) != val:
-                midi.port.send_message([cc, cc_num, val])
-                self.midi_sent.emit()
+                if not osc_only:
+                    midi.port.send_message([cc, cc_num, val])
+                    self.midi_sent.emit()
+                # OSC sends a 0..1 float, MIDI a 0..127 int — keep both
+                # streams in lock-step but de-dup against last-sent 0..127.
+                if self._osc is not None and self._prev_osc_axes.get(axis_idx) != val:
+                    self._send_osc_axis(axis_idx, val / 127.0)
+                    self._prev_osc_axes[axis_idx] = val
                 self._prev_cc[axis_idx] = val
                 self._emit_axis(axis_idx, raw)
 
@@ -447,6 +500,10 @@ class BridgeWorker(QObject):
     def _cleanup(self) -> None:
         close_port(self._midi)
         self._midi = None
+        if self._osc is not None:
+            self._osc.close()
+            self._osc = None
+        self._prev_osc_axes.clear()
         # Reset triggers to neutral before we hand the controller back to the
         # OS — otherwise the last-applied effect lingers until something else
         # talks to the controller.
