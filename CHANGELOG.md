@@ -4,9 +4,11 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 ## [Unreleased]
 
-The full V1 surface — built ahead of the first public release. Everything below
-ships in the same `.app` / `.exe` / AppImage and either runs end-to-end today
-or is wired and waiting on a credential.
+(Nothing yet.)
+
+## [1.0.0] - 2026-05-26
+
+**First public release.** Turn any PS5 or Xbox controller into a cross-platform MIDI controller — calibration, mapping, marketplace, seven DAW/VJ connectors, and adaptive trigger haptics. Free tier covers live bridging end-to-end; Pro tier unlocks the editor, multi-controller, OSC, and the marketplace publisher.
 
 ### Engine
 - DualSense parallel HID layer — battery, touchpad XY (both fingers), wired vs
