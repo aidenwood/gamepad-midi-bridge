@@ -72,7 +72,9 @@ class _Sparkline(QWidget):
         super().__init__(parent)
         self._label = label
         self._buf: Deque[float] = deque(maxlen=SPARKLINE_SAMPLES)
-        self.setMinimumHeight(60)
+        # Tiny floor so the strip can collapse when the window narrows —
+        # the parent scroll area handles overflow.
+        self.setMinimumHeight(28)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def push(self, value: float) -> None:
@@ -110,7 +112,7 @@ class _Heatmap(QWidget):
         super().__init__(parent)
         self._stamps: Dict[object, float] = {}
         self._held: Dict[object, bool] = {}
-        self.setMinimumHeight(120)
+        self.setMinimumHeight(60)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
     def flash(self, key: object, pressed: bool) -> None:
@@ -164,7 +166,11 @@ class _DualSenseDiagram(QWidget):
         # Diagram repaints fade the marker over `HEATMAP_DECAY_S` so users
         # see a brief teal dot next to each trigger when MIDI fires haptics.
         self._haptic_stamps: Dict[str, float] = {}
-        self.setMinimumSize(560, 360)
+        # Old floor was 560×360 which forced a horizontal scrollbar on
+        # narrow windows. Drop both axes; the QScrollArea wrapping the
+        # tab handles overflow and the QPainter scales its drawing space
+        # to whatever it's given.
+        self.setMinimumSize(220, 160)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def on_haptic(self, side: str, _effect: str, _intensity: float) -> None:

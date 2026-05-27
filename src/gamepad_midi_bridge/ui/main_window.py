@@ -80,7 +80,10 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
+        # Default size for first launch; the actual floor is enforced below
+        # so users can collapse the window into a thin status strip.
         self.resize(820, 640)
+        self.setMinimumSize(380, 280)
 
         self._mapping = _load_last_mapping()
         # MultiBridgeController behaves identically to the old single
@@ -258,6 +261,13 @@ class MainWindow(QMainWindow):
     def _build_tabs(self) -> QTabWidget:
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
+        # On narrow windows the 11-tab strip would overflow — Qt's tab bar
+        # adds left/right scroll arrows automatically once we opt in here.
+        tabs.setUsesScrollButtons(True)
+        # Elide tab labels if the strip is still tight after scrolling.
+        from PySide6.QtCore import Qt as _Qt
+        tabs.tabBar().setElideMode(_Qt.ElideRight)
+        tabs.tabBar().setExpanding(False)
 
         # Live tab — primary meter always present. Secondary meter + Pro
         # nudge banner are hidden until a second controller is wired in.
@@ -290,25 +300,25 @@ class MainWindow(QMainWindow):
         # Sits between Live (minimal) and Mapping (configuration) so the
         # natural left-to-right reading order is observe → analyse → configure.
         self._visualise = VisualiseTab()
-        tabs.addTab(self._visualise, "Visualise")
+        tabs.addTab(self._scrollable(self._visualise), "Visualise")
 
         self._mapping_editor = MappingEditor(self._mapping)
         self._mapping_editor.upgrade_clicked.connect(self._open_upgrade)
         self._mapping_editor.activate_clicked.connect(self._enter_license_key)
-        tabs.addTab(self._mapping_editor, "Mapping")
+        tabs.addTab(self._scrollable(self._mapping_editor), "Mapping")
 
         # Templates — visual mapping builder + multi-format exporter.
         # Sits between Mapping (Pro table view) and Presets so users can
         # iterate visually then save the result alongside their named presets.
         self._template_builder = TemplateBuilderTab(self._mapping)
         self._template_builder.mapping_changed.connect(self._on_template_mapping_changed)
-        tabs.addTab(self._template_builder, "Templates")
+        tabs.addTab(self._scrollable(self._template_builder), "Templates")
 
         self._presets = PresetManager(lambda: self._mapping)
         self._presets.upgrade_clicked.connect(self._open_upgrade)
         self._presets.activate_clicked.connect(self._enter_license_key)
         self._presets.preset_loaded.connect(self._on_preset_loaded)
-        tabs.addTab(self._presets, "Presets")
+        tabs.addTab(self._scrollable(self._presets), "Presets")
 
         self._marketplace = MarketplaceTab()
         self._marketplace.preset_chosen.connect(self._on_preset_loaded)
@@ -327,7 +337,7 @@ class MainWindow(QMainWindow):
         self._settings.settings_changed.connect(self._on_settings_changed)
         self._settings.recalibrate_clicked.connect(self._on_recalibrate)
         self._settings.multi_mode_changed.connect(self._on_multi_mode_changed)
-        tabs.addTab(self._settings, "Settings")
+        tabs.addTab(self._scrollable(self._settings), "Settings")
 
         # Help tab — owns its own QShortcut instances and signals them back
         # up so MainWindow keeps a single source of truth for app actions.
@@ -344,6 +354,19 @@ class MainWindow(QMainWindow):
         tabs.addTab(about_tab, "About")
 
         return tabs
+
+    def _scrollable(self, widget: QWidget) -> QWidget:
+        """Wrap a tab in a scroll area so it shrinks gracefully on narrow
+        windows. Tabs that already self-scroll (Marketplace, Connectors,
+        Bluetooth) opt out by being added directly with `addTab`.
+        """
+        from PySide6.QtWidgets import QScrollArea
+        area = QScrollArea()
+        area.setWidget(widget)
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.NoFrame)
+        # Horizontal scrollbar as needed — vertical always available.
+        return area
 
     def _wrap_padded(self, widget: QWidget) -> QWidget:
         wrap = QWidget()

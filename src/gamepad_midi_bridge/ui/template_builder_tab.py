@@ -98,7 +98,9 @@ class DualSenseDiagram(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(420, 360)
+        # Drop the old 420×360 floor — the parent scroll area handles
+        # overflow, and the diagram paints to whatever space it's given.
+        self.setMinimumSize(180, 140)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
         self._hit_rects: Dict[str, QRectF] = {}

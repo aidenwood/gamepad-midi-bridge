@@ -25,7 +25,11 @@ class ControllerMeter(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setMinimumHeight(460)
+        # 460 was the old hard floor — keeping it as the preferred height
+        # via sizeHint while leaving the minimum at 0 so the parent
+        # QScrollArea can shrink past it when the window is collapsed.
+        self.setMinimumHeight(0)
+        self.setMinimumWidth(200)
         self._axes: Dict[int, float] = {}
         self._buttons: Dict[int, bool] = {}
         self._hats: Dict[str, bool] = {}
