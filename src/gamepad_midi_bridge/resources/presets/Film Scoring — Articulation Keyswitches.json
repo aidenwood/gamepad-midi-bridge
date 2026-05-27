@@ -1,0 +1,67 @@
+{
+  "name": "Film Scoring \u2014 Articulation Keyswitches",
+  "schema_version": 2,
+  "midi_channel": 0,
+  "deadzone": 0.05,
+  "poll_hz": 100,
+  "buttons": {
+    "0": 24,
+    "1": 25,
+    "2": 26,
+    "3": 27,
+    "4": 28,
+    "5": 29,
+    "6": 30,
+    "7": 31,
+    "8": 32,
+    "9": 33,
+    "10": 34
+  },
+  "axes": {
+    "0": 1,
+    "1": 11,
+    "2": 21,
+    "3": 17,
+    "4": 7,
+    "5": 64
+  },
+  "hats": {
+    "up": 78,
+    "down": 79,
+    "left": 80,
+    "right": 81
+  },
+  "left_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "right_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "touchpad": {
+    "enabled": false,
+    "x_cc": 16,
+    "y_cc": 17,
+    "b_x_cc": 18,
+    "b_y_cc": 19,
+    "two_finger": false,
+    "require_contact": true
+  },
+  "osc": {
+    "enabled": false,
+    "mode": "alongside",
+    "host": "127.0.0.1",
+    "port": 7000,
+    "button_addresses": {},
+    "axis_addresses": {}
+  },
+  "l2_haptic_effect": null,
+  "r2_haptic_effect": null
+}

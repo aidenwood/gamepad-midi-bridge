@@ -58,7 +58,10 @@ def state() -> LicenseState:
 
 
 def is_pro() -> bool:
-    return state().is_pro
+    # TESTING UNLOCK — all Pro features open during the PS5 controller
+    # bring-up. Revert this line to `return state().is_pro` before any
+    # release build goes out, otherwise the signed-license gate is bypassed.
+    return True
 
 
 def feature_enabled(feature: str) -> bool:

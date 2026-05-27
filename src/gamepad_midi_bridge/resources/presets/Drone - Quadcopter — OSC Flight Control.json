@@ -1,0 +1,86 @@
+{
+  "name": "Drone / Quadcopter \u2014 OSC Flight Control",
+  "schema_version": 2,
+  "midi_channel": 0,
+  "deadzone": 0.08,
+  "poll_hz": 100,
+  "buttons": {
+    "0": 60,
+    "1": 62,
+    "2": 64,
+    "3": 65,
+    "4": 67,
+    "5": 69,
+    "6": 71,
+    "7": 72,
+    "8": 74,
+    "9": 76,
+    "10": 77
+  },
+  "axes": {
+    "0": 3,
+    "1": 4,
+    "2": 5,
+    "3": 6,
+    "4": 1,
+    "5": 2
+  },
+  "hats": {
+    "up": 78,
+    "down": 79,
+    "left": 80,
+    "right": 81
+  },
+  "left_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "right_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "touchpad": {
+    "enabled": false,
+    "x_cc": 16,
+    "y_cc": 17,
+    "b_x_cc": 18,
+    "b_y_cc": 19,
+    "two_finger": false,
+    "require_contact": true
+  },
+  "osc": {
+    "enabled": true,
+    "mode": "only",
+    "host": "192.168.1.50",
+    "port": 9000,
+    "button_addresses": {
+      "0": "/drone/arm",
+      "1": "/drone/takeoff",
+      "2": "/drone/land",
+      "3": "/drone/return",
+      "4": "/drone/photo",
+      "5": "/drone/record",
+      "6": "/drone/gimbal/up",
+      "7": "/drone/gimbal/down",
+      "8": "/drone/gimbal/center",
+      "9": "/drone/mode/sport",
+      "10": "/drone/mode/cine"
+    },
+    "axis_addresses": {
+      "0": "/drone/yaw",
+      "1": "/drone/throttle",
+      "2": "/drone/roll",
+      "3": "/drone/pitch",
+      "4": "/drone/gimbal/pitch",
+      "5": "/drone/zoom"
+    }
+  },
+  "l2_haptic_effect": null,
+  "r2_haptic_effect": null
+}

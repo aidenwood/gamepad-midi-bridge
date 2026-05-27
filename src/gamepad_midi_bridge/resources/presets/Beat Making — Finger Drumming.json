@@ -1,0 +1,85 @@
+{
+  "name": "Beat Making \u2014 Finger Drumming",
+  "schema_version": 2,
+  "midi_channel": 0,
+  "deadzone": 0.05,
+  "poll_hz": 100,
+  "buttons": {
+    "0": 36,
+    "1": 38,
+    "2": 42,
+    "3": 46,
+    "4": 49,
+    "5": 51,
+    "6": 41,
+    "7": 43,
+    "8": 45,
+    "9": 39,
+    "10": 37
+  },
+  "axes": {
+    "0": 3,
+    "1": 4,
+    "2": 5,
+    "3": 6,
+    "4": 1,
+    "5": 2
+  },
+  "hats": {
+    "up": 78,
+    "down": 79,
+    "left": 80,
+    "right": 81
+  },
+  "left_stick_corners": {
+    "enabled": true,
+    "n": 8,
+    "notes": [
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71
+    ],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "right_stick_corners": {
+    "enabled": true,
+    "n": 8,
+    "notes": [
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79
+    ],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "touchpad": {
+    "enabled": false,
+    "x_cc": 16,
+    "y_cc": 17,
+    "b_x_cc": 18,
+    "b_y_cc": 19,
+    "two_finger": false,
+    "require_contact": true
+  },
+  "osc": {
+    "enabled": false,
+    "mode": "alongside",
+    "host": "127.0.0.1",
+    "port": 7000,
+    "button_addresses": {},
+    "axis_addresses": {}
+  },
+  "l2_haptic_effect": null,
+  "r2_haptic_effect": null
+}

@@ -1,0 +1,67 @@
+{
+  "name": "Notch Block \u2014 Real-Time Graphics",
+  "schema_version": 2,
+  "midi_channel": 0,
+  "deadzone": 0.05,
+  "poll_hz": 100,
+  "buttons": {
+    "0": 60,
+    "1": 62,
+    "2": 64,
+    "3": 65,
+    "4": 67,
+    "5": 69,
+    "6": 71,
+    "7": 72,
+    "8": 74,
+    "9": 76,
+    "10": 77
+  },
+  "axes": {
+    "0": 20,
+    "1": 21,
+    "2": 22,
+    "3": 23,
+    "4": 24,
+    "5": 25
+  },
+  "hats": {
+    "up": 78,
+    "down": 79,
+    "left": 80,
+    "right": 81
+  },
+  "left_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "right_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "touchpad": {
+    "enabled": false,
+    "x_cc": 16,
+    "y_cc": 17,
+    "b_x_cc": 18,
+    "b_y_cc": 19,
+    "two_finger": false,
+    "require_contact": true
+  },
+  "osc": {
+    "enabled": false,
+    "mode": "alongside",
+    "host": "127.0.0.1",
+    "port": 7000,
+    "button_addresses": {},
+    "axis_addresses": {}
+  },
+  "l2_haptic_effect": null,
+  "r2_haptic_effect": null
+}

@@ -1,0 +1,67 @@
+{
+  "name": "Pro Tools \u2014 HUI Transport",
+  "schema_version": 2,
+  "midi_channel": 0,
+  "deadzone": 0.05,
+  "poll_hz": 100,
+  "buttons": {
+    "0": 94,
+    "1": 93,
+    "2": 95,
+    "3": 91,
+    "4": 92,
+    "5": 90,
+    "6": 76,
+    "7": 77,
+    "8": 80,
+    "9": 87,
+    "10": 118
+  },
+  "axes": {
+    "0": 3,
+    "1": 4,
+    "2": 5,
+    "3": 6,
+    "4": 1,
+    "5": 2
+  },
+  "hats": {
+    "up": 78,
+    "down": 79,
+    "left": 80,
+    "right": 81
+  },
+  "left_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "right_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75
+  },
+  "touchpad": {
+    "enabled": false,
+    "x_cc": 16,
+    "y_cc": 17,
+    "b_x_cc": 18,
+    "b_y_cc": 19,
+    "two_finger": false,
+    "require_contact": true
+  },
+  "osc": {
+    "enabled": false,
+    "mode": "alongside",
+    "host": "127.0.0.1",
+    "port": 7000,
+    "button_addresses": {},
+    "axis_addresses": {}
+  },
+  "l2_haptic_effect": null,
+  "r2_haptic_effect": null
+}
