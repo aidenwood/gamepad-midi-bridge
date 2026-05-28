@@ -23,6 +23,16 @@ from .. import APP_NAME, __version__
 from ..crash_reporter import crash_dir
 from ..logger import log_path
 
+# 3D logo widget — optional. QtWebEngineWidgets isn't a hard dep on every
+# build platform; wrap the import so a missing module doesn't take the
+# whole Help tab down.
+try:
+    from .logo_view_3d import Logo3DView
+    _LOGO_3D_AVAILABLE = True
+except Exception:
+    Logo3DView = None  # type: ignore[assignment]
+    _LOGO_3D_AVAILABLE = False
+
 
 CHANGELOG_URL = "https://store.aidxn.com/changelog"
 ISSUES_URL = "https://github.com/aidenwood/gamepad-midi-bridge/issues"
@@ -144,17 +154,41 @@ class HelpTab(QWidget):
         v.setContentsMargins(28, 28, 28, 28)
         v.setSpacing(18)
 
+        # Hero row: title + sub on the left, rotating 3D logo on the right
+        # (when WebEngine is available). Falls back to title-only otherwise.
+        hero = QHBoxLayout()
+        hero.setContentsMargins(0, 0, 0, 0)
+        hero.setSpacing(20)
+
+        hero_text = QVBoxLayout()
+        hero_text.setSpacing(8)
         title = QLabel("Help")
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f5f7fa;")
-        v.addWidget(title)
-
+        hero_text.addWidget(title)
         sub = QLabel(
             "Answers to the questions we hear most. If something is missing, "
             "email support — we read every message."
         )
         sub.setStyleSheet("color: #8a9099;")
         sub.setWordWrap(True)
-        v.addWidget(sub)
+        hero_text.addWidget(sub)
+        hero_text.addStretch(1)
+        hero.addLayout(hero_text, stretch=1)
+
+        if _LOGO_3D_AVAILABLE and Logo3DView is not None:
+            try:
+                self._logo3d = Logo3DView()
+                self._logo3d.setFixedSize(220, 200)
+                self._logo3d.setStyleSheet("background: transparent; border: 0;")
+                hero.addWidget(self._logo3d, alignment=Qt.AlignTop | Qt.AlignRight)
+            except Exception:
+                # Widget construction can fail on systems where QtWebEngine
+                # is present but the Chromium runtime isn't initialised yet
+                # (e.g. running before QApplication is fully set up). Quietly
+                # skip — the rest of the Help tab still renders.
+                self._logo3d = None
+
+        v.addLayout(hero)
 
         v.addWidget(self._build_shortcuts_card())
         v.addWidget(self._build_faq_card())

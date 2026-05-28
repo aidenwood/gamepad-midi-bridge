@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Logo 3D</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+    body { overflow: hidden; }
+    #c { display: block; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <!--
+    Standalone 3D logo viewer for the desktop app's QWebEngineView.
+
+    Loaded by `logo_view_3d.py`. Three.js + GLTFLoader + DRACOLoader come
+    from the unpkg CDN — the desktop user has internet on first launch
+    every time we'd be showing this (Bluetooth probe etc.), so on-demand
+    is fine. If we ever need an offline build we can bundle the modules.
+
+    The GLB itself ships locally inside `resources/3d/logo.glb` and is
+    served via a custom QWebEngineUrlSchemeHandler (`gmb://logo.glb`).
+  -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.167.1/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.167.1/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+    renderer.setClearColor(0x000000, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+    camera.position.set(0, 0, 6);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    const key = new THREE.DirectionalLight(0xeaf6ff, 0.85);
+    key.position.set(3, 4, 5);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0x5eead4, 0.55);
+    rim.position.set(-3, -2, -4);
+    scene.add(rim);
+
+    const stage = new THREE.Group();
+    scene.add(stage);
+
+    function fitToBox(obj, target) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const longest = Math.max(size.x, size.y, size.z) || 1;
+      obj.scale.setScalar(target / longest);
+      const recentred = new THREE.Box3().setFromObject(obj);
+      const centre = new THREE.Vector3();
+      recentred.getCenter(centre);
+      obj.position.sub(centre);
+    }
+
+    const loader = new GLTFLoader();
+    const draco = new DRACOLoader();
+    draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+    draco.setDecoderConfig({ type: 'js' });
+    loader.setDRACOLoader(draco);
+    // gmb:// scheme is registered in logo_view_3d.py and serves the
+    // bundled GLB out of the app's resources dir at runtime.
+    loader.load('gmb://logo.glb', (gltf) => {
+      const g = gltf.scene;
+      g.traverse((node) => {
+        if (node.isMesh && node.material) {
+          const mats = Array.isArray(node.material) ? node.material : [node.material];
+          for (const m of mats) {
+            if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
+            m.metalness = 0.55;
+            m.roughness = 0.38;
+            m.needsUpdate = true;
+          }
+        }
+      });
+      fitToBox(g, 2.8);
+      stage.add(g);
+    });
+
+    function resize() {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      renderer.setSize(w, h, false);
+      camera.aspect = Math.max(0.1, w / Math.max(1, h));
+      camera.updateProjectionMatrix();
+    }
+    new ResizeObserver(resize).observe(canvas);
+    resize();
+
+    // Calm idle rotation — no scroll, just a gentle continuous turn so
+    // the app's logo feels alive without competing with the UI.
+    let last = performance.now();
+    function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      stage.rotation.y += dt * 0.4;
+      stage.rotation.x = Math.sin(now * 0.0006) * 0.18;
+      renderer.render(scene, camera);
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
