@@ -14,6 +14,6 @@ dist/
 *.spec
 
 # License issuer secret — must never be committed
-scripts/private_key.pem
-scripts/public_key.pem
+# License issuer keypairs (prod + test) — must never be committed.
+scripts/*.pem
 .DS_Store
