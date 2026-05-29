@@ -8,7 +8,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
+    QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
@@ -22,6 +22,7 @@ from ..updater import set_opt_in as set_update_opt_in
 from .. import telemetry
 from ..crash_reporter import export_bundle
 from .haptic_input_dialog import HapticInputDialog
+from .theme import apply_theme
 
 
 def _read_update_opt_in() -> bool:
@@ -271,6 +272,21 @@ class SettingsPanel(QWidget):
         privacy_note.setWordWrap(True)
         privacy_form.addRow(privacy_note)
 
+        # Appearance group — theme switcher
+        appearance_group = QGroupBox("Appearance")
+        appearance_form = QFormLayout(appearance_group)
+        self._theme = QComboBox()
+        self._theme.addItem("System", "system")
+        self._theme.addItem("Dark", "dark")
+        self._theme.addItem("Light", "light")
+        current_theme = mapping.theme
+        for i in range(self._theme.count()):
+            if self._theme.itemData(i) == current_theme:
+                self._theme.setCurrentIndex(i)
+                break
+        self._theme.currentIndexChanged.connect(self._on_theme_changed)
+        appearance_form.addRow("Theme", self._theme)
+
         # Calibration group
         calib_group = QGroupBox("Calibration")
         calib_layout = QVBoxLayout(calib_group)
@@ -301,6 +317,7 @@ class SettingsPanel(QWidget):
         outer.addWidget(haptics_group)
         outer.addWidget(osc_group)
         outer.addWidget(privacy_group)
+        outer.addWidget(appearance_group)
         outer.addWidget(calib_group)
         outer.addStretch(1)
 
@@ -431,6 +448,17 @@ class SettingsPanel(QWidget):
         mode = self._MULTI_MODE_LABELS[self._multi_mode.currentIndex()][1]
         _write_multi_mode(mode)
         self.multi_mode_changed.emit(mode)
+
+    def _on_theme_changed(self, _idx: int) -> None:
+        if self._building:
+            return
+        theme = self._theme.currentData()
+        if theme:
+            self._mapping.theme = theme
+            app = QApplication.instance()
+            if app:
+                apply_theme(app, theme)
+            self._emit()
 
     def current_multi_mode(self) -> str:
         return self._MULTI_MODE_LABELS[self._multi_mode.currentIndex()][1]

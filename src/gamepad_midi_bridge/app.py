@@ -12,11 +12,7 @@ from PySide6.QtWidgets import QApplication
 from . import APP_ID, APP_NAME
 from .presets import seed_user_presets_once
 from .ui.main_window import MainWindow
-
-
-def _load_stylesheet() -> str:
-    qss = Path(__file__).parent / "ui" / "styles.qss"
-    return qss.read_text(encoding="utf-8") if qss.exists() else ""
+from .ui.theme import apply_theme
 
 
 class _MacOpenUrlFilter(QObject):
@@ -52,7 +48,10 @@ def run(argv: Optional[List[str]] = None) -> int:
     seed_user_presets_once()
 
     app = QApplication(argv)
-    app.setStyleSheet(_load_stylesheet())
+
+    # Load the default theme (system). Will be overridden by MainWindow
+    # after loading the current preset's theme preference.
+    apply_theme(app, "system")
 
     # Install keyboard event filter if requested
     import os

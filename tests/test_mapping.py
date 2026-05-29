@@ -941,3 +941,83 @@ def test_touchpad_zone_grid_4x4_has_16_default_notes():
     # Notes are preserved (not padded by loader)
     assert m.touchpad.zone_notes == [36, 38]
     assert m.touchpad.zone_grid == 4
+
+
+def test_touchpad_gesture_config_defaults():
+    """Gesture fields default to disabled with sensible note + velocity values."""
+    cfg = TouchpadConfig()
+    assert cfg.gesture_enabled is False
+    assert cfg.swipe_up_note == 60
+    assert cfg.swipe_down_note == 61
+    assert cfg.swipe_left_note == 62
+    assert cfg.swipe_right_note == 63
+    assert cfg.pinch_in_note == 64
+    assert cfg.pinch_out_note == 65
+    assert cfg.gesture_velocity == 100
+    assert cfg.swipe_min_distance == 0.3
+
+
+def test_touchpad_gesture_round_trip():
+    """Gesture config fields preserve through serialisation."""
+    m = Mapping(name="GestureTest")
+    m.touchpad = TouchpadConfig(
+        enabled=True,
+        gesture_enabled=True,
+        swipe_up_note=72,
+        swipe_down_note=73,
+        swipe_left_note=74,
+        swipe_right_note=75,
+        pinch_in_note=76,
+        pinch_out_note=77,
+        gesture_velocity=110,
+        swipe_min_distance=0.25,
+    )
+    
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.touchpad.gesture_enabled is True
+    assert restored.touchpad.swipe_up_note == 72
+    assert restored.touchpad.swipe_down_note == 73
+    assert restored.touchpad.swipe_left_note == 74
+    assert restored.touchpad.swipe_right_note == 75
+    assert restored.touchpad.pinch_in_note == 76
+    assert restored.touchpad.pinch_out_note == 77
+    assert restored.touchpad.gesture_velocity == 110
+    assert restored.touchpad.swipe_min_distance == pytest.approx(0.25, abs=1e-6)
+
+
+def test_touchpad_gesture_clamping():
+    """Gesture note values clamp to MIDI range 0..127."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "gesture_enabled": True,
+            "swipe_up_note": 150,      # over-range
+            "swipe_down_note": -10,    # under-range
+            "gesture_velocity": 200,   # over-range
+            "swipe_min_distance": 1.5, # over-range
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.swipe_up_note == 127
+    assert m.touchpad.swipe_down_note == 0
+    assert m.touchpad.gesture_velocity == 127
+    assert m.touchpad.swipe_min_distance == 1.0
+
+
+def test_touchpad_gesture_independent_of_zone_mode():
+    """Gesture and zone_mode are independent fields."""
+    m = Mapping(name="BothModes")
+    m.touchpad = TouchpadConfig(
+        enabled=True,
+        gesture_enabled=True,
+        zone_mode=True,  # both can be True; gesture wins
+        swipe_up_note=60,
+        zone_grid=2,
+        zone_notes=[36, 38, 40, 42],
+    )
+    
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.touchpad.gesture_enabled is True
+    assert restored.touchpad.zone_mode is True
+    assert restored.touchpad.swipe_up_note == 60
+    assert restored.touchpad.zone_grid == 2

@@ -207,6 +207,31 @@ class OscConfig:
 
 
 @dataclass
+class MidiClockConfig:
+    """MIDI clock send + tap-tempo config.
+
+    When `enabled=True` the bridge emits MIDI clock pulses (0xF8) at 24 PPQN
+    calculated from `bpm`. The controller can also drive tempo via tap-tempo
+    and optionally send MIDI Start (0xFA) / Stop (0xFC) messages.
+
+    Fields:
+      - `enabled`         : master switch (default False so existing presets
+                            are completely unaffected).
+      - `bpm`             : current clock tempo in beats per minute (60..240).
+      - `send_start_stop` : if True, designated buttons send 0xFA / 0xFC.
+      - `tap_button`      : button index that records tap timestamps. -1 = off.
+      - `start_button`    : button index that sends MIDI Start. -1 = off.
+      - `stop_button`     : button index that sends MIDI Stop. -1 = off.
+    """
+    enabled: bool = False
+    bpm: float = 120.0
+    send_start_stop: bool = True
+    tap_button: int = -1       # -1 = no tap-tempo
+    start_button: int = -1
+    stop_button: int = -1
+
+
+@dataclass
 class ProgramChangeConfig:
     """Bind incoming MIDI Program Change messages to preset loads.
 
@@ -244,6 +269,31 @@ class HapticInputBinding:
     midi_id: int = 36
     effect: str = "vibration"
     intensity_scale: float = 1.0
+
+
+
+@dataclass
+class MacroEvent:
+    """One recorded MIDI message with a relative timestamp."""
+    delay_ms: int           # ms since macro start (0 on first event)
+    status: int             # MIDI status byte (message type | channel)
+    data1: int              # note / CC number
+    data2: int              # velocity / CC value
+
+
+@dataclass
+class Macro:
+    """A recorded sequence of MIDI messages that can be replayed on a button press.
+
+    events are ordered by delay_ms — playback schedules each send at its
+    absolute offset from the start of replay so the original inter-event
+    timing is preserved exactly.
+    duration_ms mirrors the delay_ms of the last event so callers can easily
+    check the total replay length without iterating.
+    """
+    name: str
+    events: List[MacroEvent] = field(default_factory=list)
+    duration_ms: int = 0
 
 
 # Default bindings the user gets when they flip `enabled` on for the first
@@ -335,6 +385,15 @@ class TouchpadConfig:
     zone_grid: int = 2            # grid size N (1..4)
     zone_notes: List[int] = field(default_factory=lambda: [36, 38, 40, 42])  # default 2x2 grid notes
     zone_velocity: int = 100       # velocity for zone notes
+    gesture_enabled: bool = False  # detect swipes/pinches
+    swipe_up_note: int = 60        # note fired on swipe up
+    swipe_down_note: int = 61      # note fired on swipe down
+    swipe_left_note: int = 62      # note fired on swipe left
+    swipe_right_note: int = 63     # note fired on swipe right
+    pinch_in_note: int = 64        # note fired on pinch inward
+    pinch_out_note: int = 65       # note fired on pinch outward
+    gesture_velocity: int = 100    # velocity for gesture notes
+    swipe_min_distance: float = 0.3  # 0..1 normalised, min distance to register
 
 
 @dataclass
@@ -360,6 +419,16 @@ class Mapping:
         0: 3, 1: 4, 2: 5, 3: 6,    # sticks
         4: 1, 5: 2,                # triggers
     })
+
+    gesture_enabled: bool = False  # detect swipes/pinches
+    swipe_up_note: int = 60        # note fired on swipe up
+    swipe_down_note: int = 61      # note fired on swipe down
+    swipe_left_note: int = 62      # note fired on swipe left
+    swipe_right_note: int = 63     # note fired on swipe right
+    pinch_in_note: int = 64        # note fired on pinch inward
+    pinch_out_note: int = 65       # note fired on pinch outward
+    gesture_velocity: int = 100    # velocity for gesture notes
+    swipe_min_distance: float = 0.3  # 0..1 normalised, min distance to register
 
     # Hat direction -> MIDI note number
     hats: Dict[str, int] = field(default_factory=lambda: {
@@ -431,6 +500,19 @@ class Mapping:
     # existing users don't get DAW PC messages hijacking their controller config.
     program_change: ProgramChangeConfig = field(default_factory=ProgramChangeConfig)
 
+    # MIDI clock send + tap-tempo. Off by default so existing presets are
+    # completely unaffected. When enabled, the bridge emits 0xF8 at 24 PPQN.
+    midi_clock: MidiClockConfig = field(default_factory=MidiClockConfig)
+
+    # Theme preference — "dark", "light", or "system" (detect OS preference).
+    # Defaults to "system" for automatic OS-aware theming.
+    theme: str = "system"
+
+    # V1.4 — macro recorder. macros is the library of recorded sequences;
+    # macro_bindings maps button index → macro name for one-press replay.
+    macros: List[Macro] = field(default_factory=list)
+    macro_bindings: Dict[int, str] = field(default_factory=dict)
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -484,6 +566,10 @@ class Mapping:
             always_background_on_launch=bool(data.get("always_background_on_launch", False)),
             port_name_override=data.get("port_name_override") or None,
             program_change=_program_change_from_dict(data.get("program_change")),
+            midi_clock=_midi_clock_from_dict(data.get("midi_clock")),
+            theme=str(data.get("theme", "system")),
+            macros=_macros_from_dict(data.get("macros")),
+            macro_bindings={int(k): str(v) for k, v in data.get("macro_bindings", {}).items()},
         )
 
 
@@ -670,6 +756,15 @@ def _touchpad_from_dict(d: Optional[dict]) -> TouchpadConfig:
         zone_grid=max(1, min(4, int(d.get("zone_grid", 2)))),
         zone_notes=zone_notes,
         zone_velocity=max(0, min(127, int(d.get("zone_velocity", 100)))),
+        gesture_enabled=bool(d.get("gesture_enabled", False)),
+        swipe_up_note=max(0, min(127, int(d.get("swipe_up_note", 60)))),
+        swipe_down_note=max(0, min(127, int(d.get("swipe_down_note", 61)))),
+        swipe_left_note=max(0, min(127, int(d.get("swipe_left_note", 62)))),
+        swipe_right_note=max(0, min(127, int(d.get("swipe_right_note", 63)))),
+        pinch_in_note=max(0, min(127, int(d.get("pinch_in_note", 64)))),
+        pinch_out_note=max(0, min(127, int(d.get("pinch_out_note", 65)))),
+        gesture_velocity=max(0, min(127, int(d.get("gesture_velocity", 100)))),
+        swipe_min_distance=max(0.0, min(1.0, float(d.get("swipe_min_distance", 0.3)))),
     )
 
 
@@ -733,6 +828,20 @@ def _shift_layer_from_dict(d: Optional[dict]) -> ShiftLayerConfig:
     )
 
 
+def _midi_clock_from_dict(d: Optional[dict]) -> MidiClockConfig:
+    """Hydrate a MidiClockConfig from raw dict, defaulting to disabled."""
+    if not d:
+        return MidiClockConfig()
+    return MidiClockConfig(
+        enabled=bool(d.get("enabled", False)),
+        bpm=max(60.0, min(240.0, float(d.get("bpm", 120.0)))),
+        send_start_stop=bool(d.get("send_start_stop", True)),
+        tap_button=int(d.get("tap_button", -1)),
+        start_button=int(d.get("start_button", -1)),
+        stop_button=int(d.get("stop_button", -1)),
+    )
+
+
 def _program_change_from_dict(d: Optional[dict]) -> ProgramChangeConfig:
     """Hydrate a ProgramChangeConfig from raw dict, defaulting to disabled.
 
@@ -755,3 +864,44 @@ def _program_change_from_dict(d: Optional[dict]) -> ProgramChangeConfig:
         listen_channel=int(d.get("listen_channel", -1)),
         bindings=bindings,
     )
+
+
+def _macro_event_from_dict(d: dict) -> MacroEvent:
+    """Hydrate one MacroEvent from a raw dict. Missing fields default to 0."""
+    return MacroEvent(
+        delay_ms=max(0, int(d.get("delay_ms", 0))),
+        status=max(0, min(255, int(d.get("status", 0)))),
+        data1=max(0, min(127, int(d.get("data1", 0)))),
+        data2=max(0, min(127, int(d.get("data2", 0)))),
+    )
+
+
+def _macro_from_dict(d: dict) -> Macro:
+    """Hydrate a Macro from a raw dict. Missing events list → empty macro."""
+    name = str(d.get("name", "Unnamed"))
+    raw_events = d.get("events") or []
+    events: List[MacroEvent] = []
+    for entry in raw_events:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            events.append(_macro_event_from_dict(entry))
+        except (TypeError, ValueError):
+            continue
+    duration_ms = max(0, int(d.get("duration_ms", events[-1].delay_ms if events else 0)))
+    return Macro(name=name, events=events, duration_ms=duration_ms)
+
+
+def _macros_from_dict(raw: object) -> List[Macro]:
+    """Hydrate the macros list from raw JSON. Returns empty list on missing/bad data."""
+    if not isinstance(raw, list):
+        return []
+    result: List[Macro] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            result.append(_macro_from_dict(entry))
+        except (TypeError, ValueError):
+            continue
+    return result

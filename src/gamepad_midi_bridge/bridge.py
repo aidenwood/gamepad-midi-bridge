@@ -26,7 +26,7 @@ from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import HapticInputBinding, L2_AXIS, Mapping, R2_AXIS, STICK_AXES
+from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, R2_AXIS, STICK_AXES
 from . import shaping
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
 from . import presets as _presets
@@ -138,6 +138,10 @@ class BridgeWorker(QObject):
         self._running = False
         self._prev_buttons: Dict[int, bool] = {}
         self._prev_cc: Dict[int, int] = {}
+        # MIDI clock state
+        self._clock_thread: Optional[threading.Thread] = None
+        self._clock_running: bool = False
+        self._tap_times: List[float] = []   # timestamps of last ≤4 taps
         # Per-trigger latch state, only consulted by `shaping.apply_trigger`
         # when the trigger config mode is "latch". Stateless modes ignore.
         self._trigger_states: Dict[int, shaping.TriggerState] = {
@@ -162,6 +166,10 @@ class BridgeWorker(QObject):
         self._prev_touchpad_zone: Optional[int] = None  # zone index for hysteresis
         self._touchpad_zone_bias: Dict[int, float] = {}  # hysteresis bias per zone
         self._prev_battery: Optional[tuple] = None
+        # Gesture tracking — per-finger touch start position + two-finger distance
+        self._touch_start_xy: Optional[Tuple[float, float]] = None  # first contact XY
+        self._touch_last_xy: Optional[Tuple[float, float]] = None  # last recorded touch position
+        self._touch_start_two_finger_distance: Optional[float] = None  # initial 2-finger separation
         self._battery_alert_fired: bool = False  # track if alert has fired for current low state
         # Telemetry throttle — emit GUI updates at ~30Hz max even at 100Hz polling
         self._last_telemetry: float = 0.0
@@ -176,6 +184,10 @@ class BridgeWorker(QObject):
         # Deque of (channel, cc_number, value, timestamp) tuples, max 50 entries
         self._recent_outbound_cc: deque = deque(maxlen=50)
         self._feedback_guard_window_ms = 50  # Drop messages within 50ms of send
+        # Macro recorder state — capture MIDI sends with relative timestamps.
+        self._recording: bool = False
+        self._recording_start_ms: float = 0.0
+        self._recording_events: List[MacroEvent] = []
 
     # ---------------------------------------------------------------- public API
 
@@ -192,6 +204,7 @@ class BridgeWorker(QObject):
         self._apply_haptics()
         self._sync_osc_sender()
         self._sync_haptic_input()
+        self._sync_midi_clock()
 
     @Slot()
     def start(self) -> None:
@@ -242,6 +255,71 @@ class BridgeWorker(QObject):
         if was_running:
             self._running = True
             self._loop()
+
+    # ---------------------------------------------------------------- macro recorder
+
+    def start_recording(self) -> None:
+        """Begin capturing outbound MIDI messages as a macro.
+
+        Any previous partial recording is discarded. Call stop_recording() to
+        finalise and retrieve the Macro object.
+        """
+        self._recording_events = []
+        self._recording_start_ms = time.time() * 1000.0
+        self._recording = True
+
+    def stop_recording(self) -> Macro:
+        """Stop capturing and return the recorded Macro.
+
+        Returns an unnamed Macro with all captured events. The caller should
+        assign a name and append it to mapping.macros.
+        """
+        self._recording = False
+        events = list(self._recording_events)
+        self._recording_events = []
+        duration = events[-1].delay_ms if events else 0
+        return Macro(name="", events=events, duration_ms=duration)
+
+    def cancel_recording(self) -> None:
+        """Discard the current recording without returning a Macro."""
+        self._recording = False
+        self._recording_events = []
+
+    def _record_midi_send(self, status: int, data1: int, data2: int) -> None:
+        """Capture one outbound MIDI message if recording is active.
+
+        Called from every send site. Cheap no-op when _recording is False.
+        """
+        if not self._recording:
+            return
+        delay_ms = int((time.time() * 1000.0) - self._recording_start_ms)
+        self._recording_events.append(MacroEvent(
+            delay_ms=max(0, delay_ms),
+            status=status,
+            data1=data1,
+            data2=data2,
+        ))
+
+    def _play_macro(self, macro: "Macro", midi: "OpenedPort") -> None:
+        """Replay a recorded macro sequence using QTimer for timing.
+
+        Each event is scheduled at its absolute delay_ms offset from now.
+        Multiple simultaneous playbacks are independent — each call creates
+        its own timer chain so they don't interfere with each other.
+        """
+        from PySide6.QtCore import QTimer as _QTimer
+        for event in macro.events:
+            timer = _QTimer(self)
+            timer.setSingleShot(True)
+            # Capture event bytes in the closure
+            status, d1, d2 = event.status, event.data1, event.data2
+            timer.timeout.connect(
+                lambda s=status, d1_=d1, d2_=d2: (
+                    midi.port.send_message([s, d1_, d2_]),
+                    self.midi_sent.emit(),
+                )
+            )
+            timer.start(event.delay_ms)
 
     # ---------------------------------------------------------------- internals
 
@@ -807,6 +885,11 @@ class BridgeWorker(QObject):
         return mapping.buttons, mapping.axes, mapping.hats
 
     def _poll_buttons(self, reader, mapping, midi, note_on, note_off, n_buttons) -> None:
+        # --- MIDI clock button handling (tap-tempo, start, stop) ---
+        clk = mapping.midi_clock
+        if clk.enabled:
+            self._poll_clock_buttons(reader, midi, clk, n_buttons)
+
         buttons, _axes, _hats = self._active_mappings_view(mapping)
         osc_only = self._osc_only()
         for btn_idx, note in buttons.items():
@@ -844,13 +927,23 @@ class BridgeWorker(QObject):
                     continue
 
             if pressed and not was:
+                # Macro playback: if this button is bound to a macro, play it
+                # instead of (or in addition to) the normal note. Each playback
+                # gets its own QTimer chain so simultaneous macros work fine.
+                macro_name = mapping.macro_bindings.get(btn_idx)
+                if macro_name:
+                    macro = next((m for m in mapping.macros if m.name == macro_name), None)
+                    if macro:
+                        self._play_macro(macro, midi)
                 if not osc_only:
                     midi.port.send_message([btn_note_on, note, 127])
+                    self._record_midi_send(btn_note_on, note, 127)
                     self.midi_sent.emit()
                 self._send_osc_button(btn_idx, True)
             elif not pressed and was:
                 if not osc_only:
                     midi.port.send_message([btn_note_off, note, 0])
+                    self._record_midi_send(btn_note_off, note, 0)
                     self.midi_sent.emit()
                 self._send_osc_button(btn_idx, False)
             if pressed != was:
@@ -932,6 +1025,7 @@ class BridgeWorker(QObject):
                     axis_cc = 0xB0 | axis_channel
                     midi.port.send_message([axis_cc, cc_num, val])
                     self._record_outbound_cc(axis_channel, cc_num, val)
+                    self._record_midi_send(axis_cc, cc_num, val)
                     self.midi_sent.emit()
                 # OSC sends a 0..1 float, MIDI a 0..127 int — keep both
                 # streams in lock-step but de-dup against last-sent 0..127.
@@ -1102,12 +1196,87 @@ class BridgeWorker(QObject):
 
             ta = state.touch_a
 
+            # Gesture mode: swipes + pinches (feature #8). Gesture wins if both
+            # gesture_enabled and zone_mode are True.
+            # Gesture mode: swipes + pinches (feature #8). Gesture wins if both
+            # gesture_enabled and zone_mode are True.
+            use_gesture = tp_cfg.gesture_enabled
+            use_zone = tp_cfg.zone_mode and not tp_cfg.gesture_enabled
+
+            # Track gesture state: touch start position + two-finger distance
+            if use_gesture:
+                if ta.active:
+                    x_norm, y_norm = ta.normalized()
+                    # Finger down: record start position if not already set
+                    if self._touch_start_xy is None:
+                        self._touch_start_xy = (x_norm, y_norm)
+                        # Two-finger pinch: track initial separation
+                        tb = state.touch_b
+                        if tb.active and tp_cfg.two_finger:
+                            bx, by = tb.normalized()
+                            dist = ((x_norm - bx) ** 2 + (y_norm - by) ** 2) ** 0.5
+                            self._touch_start_two_finger_distance = dist
+                    
+                    # Always update last position for swipe detection on release
+                    self._touch_last_xy = (x_norm, y_norm)
+                    
+                    # Check for pinch in two-finger mode
+                    if tp_cfg.two_finger:
+                        tb = state.touch_b
+                        if tb.active and self._touch_start_two_finger_distance is not None:
+                            bx, by = tb.normalized()
+                            dist = ((x_norm - bx) ** 2 + (y_norm - by) ** 2) ** 0.5
+                            self._detect_pinch(midi, mapping.midi_channel, tp_cfg, dist,
+                                              self._touch_start_two_finger_distance)
+                else:
+                    # Finger lifted: detect swipe using tracked start and end positions
+                    if self._touch_start_xy is not None and self._touch_last_xy is not None:
+                        self._detect_swipe(midi, mapping.midi_channel, tp_cfg, 
+                                          self._touch_start_xy, self._touch_last_xy)
+                    self._touch_start_xy = None
+                    self._touch_last_xy = None
+                    self._touch_start_two_finger_distance = None
+                    self.touchpad_xy.emit(False, 0.0, 0.0)
+
+            use_zone = tp_cfg.zone_mode and not tp_cfg.gesture_enabled
+
+            # Track gesture state: touch start position + two-finger distance
+            if use_gesture:
+                if ta.active:
+                    # Finger down: record start position
+                    if self._touch_start_xy is None:
+                        x_norm, y_norm = ta.normalized()
+                        self._touch_start_xy = (x_norm, y_norm)
+                        # Two-finger pinch: track initial separation
+                        tb = state.touch_b
+                        if tb.active and tp_cfg.two_finger:
+                            bx, by = tb.normalized()
+                            dist = ((x_norm - bx) ** 2 + (y_norm - by) ** 2) ** 0.5
+                            self._touch_start_two_finger_distance = dist
+                else:
+                    # Finger lifted: detect swipe
+                    if self._touch_start_xy is not None:
+                        self._detect_swipe(midi, mapping.midi_channel, tp_cfg)
+                    self._touch_start_xy = None
+                    self._touch_start_two_finger_distance = None
+                    self.touchpad_xy.emit(False, 0.0, 0.0)
+                
+                # Two-finger pinch detection
+                if tp_cfg.two_finger:
+                    tb = state.touch_b
+                    if tb.active and self._touch_start_two_finger_distance is not None:
+                        bx, by = tb.normalized()
+                        x_norm, y_norm = ta.normalized()
+                        dist = ((x_norm - bx) ** 2 + (y_norm - by) ** 2) ** 0.5
+                        self._detect_pinch(midi, mapping.midi_channel, tp_cfg, dist,
+                                          self._touch_start_two_finger_distance)
+
             # Zone mode: drum pad-style grid (feature #9)
-            if tp_cfg.zone_mode and ta.active:
+            if use_zone and ta.active:
                 x_norm, y_norm = ta.normalized()
                 self.touchpad_xy.emit(True, x_norm, y_norm)
                 self._send_zone_note(midi, cc, mapping.midi_channel, tp_cfg, x_norm, y_norm)
-            elif tp_cfg.zone_mode and not ta.active:
+            elif use_zone and not ta.active:
                 # Zone mode: finger lifted → note-off for current zone
                 if self._prev_touchpad_zone is not None:
                     channel = mapping.midi_channel & 0x0F
@@ -1122,7 +1291,7 @@ class BridgeWorker(QObject):
                     self.midi_sent.emit()
                     self._prev_touchpad_zone = None
                 self.touchpad_xy.emit(False, 0.0, 0.0)
-            elif not tp_cfg.zone_mode:
+            elif not use_zone:
                 # Original CC mode (not zone mode)
                 should_send = (ta.active or not tp_cfg.require_contact)
                 if tp_cfg.click_to_arm:
@@ -1299,6 +1468,120 @@ class BridgeWorker(QObject):
             self.midi_sent.emit()
             self._prev_touchpad_zone = zone_idx
 
+    # ---------------------------------------------------------- MIDI clock
+
+    def _sync_midi_clock(self) -> None:
+        """Start or stop the clock thread to match the current mapping config."""
+        clk = self._state.mapping.midi_clock
+        if clk.enabled and self._midi is not None:
+            self._start_midi_clock(clk.bpm)
+        else:
+            self._stop_midi_clock()
+
+    def _start_midi_clock(self, bpm: float) -> None:
+        """Spin up a daemon thread that emits 0xF8 at 24 PPQN for bpm."""
+        bpm = max(60.0, min(240.0, float(bpm)))
+        if self._clock_running and self._clock_thread is not None:
+            if getattr(self._clock_thread, "_clock_bpm", None) == bpm:
+                return
+            self._stop_midi_clock()
+        self._clock_running = True
+        t = threading.Thread(target=self._run_midi_clock_loop, args=(bpm,),
+                             daemon=True, name="midi-clock")
+        t._clock_bpm = bpm  # type: ignore[attr-defined]
+        self._clock_thread = t
+        t.start()
+
+    def _stop_midi_clock(self) -> None:
+        """Signal the clock thread to stop and wait for it to exit."""
+        if not self._clock_running:
+            return
+        self._clock_running = False
+        t = self._clock_thread
+        if t is not None and t.is_alive():
+            t.join(timeout=0.5)
+        self._clock_thread = None
+
+    def _run_midi_clock_loop(self, bpm: float) -> None:
+        """Clock thread body: sends 0xF8 at 24 PPQN for bpm with drift correction."""
+        interval = 60.0 / (bpm * 24.0)
+        next_tick = time.perf_counter()
+        while self._clock_running:
+            midi = self._midi
+            if midi is not None:
+                try:
+                    midi.port.send_message([0xF8])
+                except Exception:
+                    pass
+            next_tick += interval
+            now = time.perf_counter()
+            remaining = next_tick - now
+            if remaining > 0:
+                time.sleep(remaining)
+
+    def _poll_clock_buttons(self, reader, midi, clk,
+                            n_buttons: int) -> None:
+        """Check tap, start, and stop buttons on each poll tick (press-edge only)."""
+        # Tap-tempo
+        if 0 <= clk.tap_button < n_buttons:
+            tap_btn = clk.tap_button
+            pressed = bool(reader.get_button(tap_btn))
+            was = self._prev_buttons.get(tap_btn, False)
+            if pressed and not was:
+                self._record_tap(clk)
+            self._prev_buttons[tap_btn] = pressed
+
+        # Start button
+        if clk.send_start_stop and 0 <= clk.start_button < n_buttons:
+            start_btn = clk.start_button
+            pressed = bool(reader.get_button(start_btn))
+            was = self._prev_buttons.get(start_btn, False)
+            if pressed and not was:
+                if midi is not None:
+                    try:
+                        midi.port.send_message([0xFA])
+                    except Exception:
+                        pass
+                self._start_midi_clock(clk.bpm)
+            self._prev_buttons[start_btn] = pressed
+
+        # Stop button
+        if clk.send_start_stop and 0 <= clk.stop_button < n_buttons:
+            stop_btn = clk.stop_button
+            pressed = bool(reader.get_button(stop_btn))
+            was = self._prev_buttons.get(stop_btn, False)
+            if pressed and not was:
+                self._stop_midi_clock()
+                if midi is not None:
+                    try:
+                        midi.port.send_message([0xFC])
+                    except Exception:
+                        pass
+            self._prev_buttons[stop_btn] = pressed
+
+    def _record_tap(self, clk) -> None:
+        """Record a tap and recompute BPM from the last 4 taps.
+
+        Formula: BPM = 60 / mean(inter-tap intervals). Clamped 60..240.
+        Restarts the clock immediately at the new tempo.
+        """
+        now = time.perf_counter()
+        self._tap_times.append(now)
+        if len(self._tap_times) > 4:
+            self._tap_times = self._tap_times[-4:]
+        if len(self._tap_times) < 2:
+            return
+        diffs = [
+            self._tap_times[i] - self._tap_times[i - 1]
+            for i in range(1, len(self._tap_times))
+        ]
+        avg_diff = sum(diffs) / len(diffs)
+        if avg_diff <= 0:
+            return
+        new_bpm = max(60.0, min(240.0, 60.0 / avg_diff))
+        clk.bpm = new_bpm
+        self._start_midi_clock(new_bpm)
+
     # ---------------------------------------------------------- shutdown
 
     def _silence_all(self, midi: OpenedPort, mapping: Mapping, channel: int) -> None:
@@ -1324,6 +1607,9 @@ class BridgeWorker(QObject):
                     pass
 
     def _cleanup(self) -> None:
+        # Stop MIDI clock thread before anything else so it doesn't write to
+        # a port we're about to close.
+        self._stop_midi_clock()
         # Close the input port FIRST so no more callback writes land while
         # we're tearing the HID handle down. cancel_callback inside
         # close_input_port blocks until any in-flight callback returns.
@@ -1376,6 +1662,77 @@ class BridgeWorker(QObject):
         self._prev_battery = None
         for k in self._prev_hat:
             self._prev_hat[k] = False
+
+    def _detect_swipe(self, midi, channel: int, cfg, start_xy, end_xy) -> None:
+        """Detect swipe gesture (up/down/left/right) and fire MIDI note.
+
+        Compares end vs start position. If |dx| > swipe_min_distance and
+        |dx| > |dy|, fire left/right. If |dy| > swipe_min_distance and
+        |dy| > |dx|, fire up/down.
+        """
+        start_x, start_y = start_xy
+        end_x, end_y = end_xy
+        
+        dx = end_x - start_x
+        dy = end_y - start_y
+        
+        # Check which direction has the largest displacement
+        abs_dx = abs(dx)
+        abs_dy = abs(dy)
+        
+        # Require minimum distance to register
+        if abs_dx < cfg.swipe_min_distance and abs_dy < cfg.swipe_min_distance:
+            return
+        
+        channel_byte = channel & 0x0F
+        note_on = 0x90 | channel_byte
+        note = 0
+        
+        # Determine primary swipe direction (whichever exceeds min_distance most)
+        if abs_dx > abs_dy and abs_dx >= cfg.swipe_min_distance:
+            # Horizontal swipe
+            note = cfg.swipe_right_note if dx > 0 else cfg.swipe_left_note
+        elif abs_dy >= cfg.swipe_min_distance:
+            # Vertical swipe (note: Y increases downward, so negative dy = up)
+            note = cfg.swipe_up_note if dy < 0 else cfg.swipe_down_note
+        else:
+            return
+        
+        try:
+            midi.port.send_message([note_on, note, cfg.gesture_velocity])
+            self.midi_sent.emit()
+        except Exception:
+            pass
+
+    def _detect_pinch(self, midi, channel: int, cfg, current_dist: float,
+                      start_dist: float) -> None:
+        """Detect pinch gesture (in/out) and fire MIDI note.
+
+        current_dist < start_dist * 0.7 -> pinch_in
+        current_dist > start_dist * 1.4 -> pinch_out
+        """
+        if start_dist is None or start_dist == 0:
+            return
+        
+        ratio = current_dist / start_dist
+        channel_byte = channel & 0x0F
+        note_on = 0x90 | channel_byte
+        
+        if ratio < 0.7:
+            # Pinch inward
+            note = cfg.pinch_in_note
+        elif ratio > 1.4:
+            # Pinch outward
+            note = cfg.pinch_out_note
+        else:
+            return  # Not far enough to register as pinch
+        
+        try:
+            midi.port.send_message([note_on, note, cfg.gesture_velocity])
+            self.midi_sent.emit()
+        except Exception:
+            pass
+
 
     # ---------------------------------------------------------- telemetry
 

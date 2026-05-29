@@ -1,0 +1,230 @@
+/* Universal Controller MIDI — light theme.
+   Targets standard QWidget classes so the file works without per-widget objectName. */
+
+QWidget {
+    background-color: #f5f7fa;
+    color: #0e0f12;
+    font-family: -apple-system, "Segoe UI", "SF Pro Text", "Inter", sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow {
+    background-color: #f5f7fa;
+}
+
+QFrame#StatusBar {
+    background-color: #ffffff;
+    border-bottom: 1px solid #d4d8de;
+    padding: 14px 18px;
+}
+
+QLabel#StatusTitle {
+    font-size: 15px;
+    font-weight: 600;
+    color: #0e0f12;
+}
+
+QLabel#StatusSub {
+    color: #5a606b;
+    font-size: 12px;
+}
+
+QLabel#ActivityDot {
+    color: #0f766e;
+    font-size: 18px;
+}
+
+QPushButton {
+    background-color: #ffffff;
+    border: 1px solid #d4d8de;
+    border-radius: 6px;
+    padding: 8px 16px;
+    color: #0e0f12;
+    font-weight: 500;
+}
+
+QPushButton:hover {
+    background-color: #f0f1f4;
+    border-color: #b8c1cc;
+}
+
+QPushButton:pressed {
+    background-color: #e8ecf0;
+}
+
+QPushButton:disabled {
+    color: #b8c1cc;
+    background-color: #f5f7fa;
+}
+
+QPushButton#PrimaryButton {
+    background-color: #2dd4bf;
+    color: #ffffff;
+    border: none;
+}
+
+QPushButton#PrimaryButton:hover {
+    background-color: #14b8a6;
+}
+
+QPushButton#PrimaryButton:disabled {
+    background-color: #c3e9e4;
+    color: #b8c1cc;
+}
+
+QPushButton#StopButton {
+    background-color: #ef4444;
+    color: #ffffff;
+    border: none;
+}
+
+QPushButton#StopButton:hover {
+    background-color: #dc2626;
+}
+
+/* Figma-style layout toggles — flat chips in the right side of the header.
+   Sit alongside Start/Stop but feel less primary, more like editor tools. */
+QPushButton#LayoutToggle {
+    background-color: transparent;
+    color: #5a606b;
+    border: 1px solid #d4d8de;
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+QPushButton#LayoutToggle:hover {
+    color: #0e0f12;
+    border-color: #8a9099;
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+QPushButton#LayoutToggle:checked {
+    color: #0f766e;
+    border-color: rgba(15, 118, 110, 0.4);
+    background-color: rgba(15, 118, 110, 0.10);
+}
+
+QPushButton#LayoutToggle:checked:hover {
+    background-color: rgba(15, 118, 110, 0.16);
+}
+
+QTabWidget::pane {
+    border: none;
+    background-color: #f5f7fa;
+}
+
+QTabBar::tab {
+    background-color: transparent;
+    color: #5a606b;
+    padding: 10px 18px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-right: 4px;
+}
+
+QTabBar::tab:selected {
+    color: #0e0f12;
+    border-bottom: 2px solid #0f766e;
+}
+
+QTabBar::tab:hover {
+    color: #0e0f12;
+}
+
+QLabel#ProLockTitle {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0e0f12;
+}
+
+QLabel#ProLockSub {
+    color: #5a606b;
+    font-size: 13px;
+}
+
+QFrame#ProBadge {
+    background-color: #2dd4bf;
+    color: #ffffff;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+QGroupBox {
+    border: 1px solid #d4d8de;
+    border-radius: 8px;
+    margin-top: 18px;
+    padding-top: 12px;
+    color: #0e0f12;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 6px;
+    color: #5a606b;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+QProgressBar {
+    border: 1px solid #d4d8de;
+    border-radius: 4px;
+    background-color: #ffffff;
+    text-align: center;
+    color: #0e0f12;
+}
+
+QProgressBar::chunk {
+    background-color: #0f766e;
+    border-radius: 3px;
+}
+
+QSpinBox, QDoubleSpinBox, QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #d4d8de;
+    border-radius: 4px;
+    padding: 6px 8px;
+    color: #0e0f12;
+}
+
+QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
+    border-color: #2dd4bf;
+}
+
+QListWidget {
+    background-color: #ffffff;
+    border: 1px solid #d4d8de;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QListWidget::item {
+    padding: 8px 10px;
+    border-radius: 4px;
+}
+
+QListWidget::item:selected {
+    background-color: #d1f4f0;
+    color: #0f766e;
+}
+
+QTableWidget {
+    background-color: #ffffff;
+    border: 1px solid #d4d8de;
+    border-radius: 6px;
+    gridline-color: #d4d8de;
+}
+
+QHeaderView::section {
+    background-color: #f0f1f4;
+    color: #5a606b;
+    border: none;
+    padding: 8px;
+    font-weight: 600;
+}

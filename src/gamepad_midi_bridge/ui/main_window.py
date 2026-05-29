@@ -456,6 +456,26 @@ class MainWindow(QMainWindow):
         self._3d_btn.setMinimumWidth(50)
         h.addWidget(self._3d_btn)
 
+        divider2 = QFrame()
+        divider2.setFrameShape(QFrame.VLine)
+        divider2.setStyleSheet("color: #2c313b;")
+        h.addWidget(divider2)
+
+        self._record_btn = QPushButton("● Record")
+        self._record_btn.setObjectName("RecordButton")
+        self._record_btn.setCheckable(True)
+        self._record_btn.setToolTip(
+            "Record a macro — captures every MIDI message you send. "
+            "Click again to stop and name the macro."
+        )
+        self._record_btn.setMinimumWidth(90)
+        self._record_btn.setStyleSheet(
+            "QPushButton#RecordButton { color: #8a9099; }"
+            "QPushButton#RecordButton:checked { color: #ef4444; font-weight: 700; }"
+        )
+        self._record_btn.clicked.connect(self._on_record_toggled)
+        h.addWidget(self._record_btn)
+
         return bar
 
     def _build_update_banner(self) -> QFrame:
@@ -958,6 +978,40 @@ class MainWindow(QMainWindow):
             w.preset_change_requested.connect(self._on_pc_preset_requested)
 
     # ============================================================== slots
+
+    # ============================================================== macro recorder
+
+    def _on_record_toggled(self) -> None:
+        """Toggle macro recording on/off via the status-bar Record button."""
+        if self._record_btn.isChecked():
+            # Start recording
+            self._bridge.worker.start_recording()
+            self._on_status("Recording macro — perform your actions now")
+        else:
+            # Stop — ask for a name and save
+            macro = self._bridge.worker.stop_recording()
+            if not macro.events:
+                self._record_btn.setChecked(False)
+                self._on_status("Recording cancelled — no MIDI messages captured")
+                return
+            name, ok = QInputDialog.getText(
+                self,
+                "Save Macro",
+                "Macro name:",
+                text=f"Macro {len(self._mapping.macros) + 1}",
+            )
+            if ok and name.strip():
+                macro.name = name.strip()
+                self._mapping.macros.append(macro)
+                self._on_mapping_changed()
+                self._on_status(
+                    f"Macro \"{macro.name}\" saved — "
+                    f"{len(macro.events)} events, {macro.duration_ms} ms"
+                )
+            else:
+                self._on_status("Macro discarded")
+
+    # ============================================================== bridge start/stop
 
     def _on_start(self) -> None:
         # Re-evaluate slot count every start — handles "user plugged in a 2nd
