@@ -1,7 +1,8 @@
 """First-launch onboarding wizard.
 
-Six-step modal: welcome, controller detect, MIDI probe, connector picker,
-calibration primer, done. Why isolated module: one-shot UI that PyInstaller
+Ten-step modal: welcome, controller detect, MIDI probe, connector picker,
+calibration primer, trigger modes, adaptive haptics, polar stick mode,
+multi-zone touchpad, done. Why isolated module: one-shot UI that PyInstaller
 can drop from hot paths, keeps main_window focused on steady-state UX.
 """
 from __future__ import annotations
@@ -58,13 +59,17 @@ def mark_complete() -> None:
 # ============================================================== wizard
 
 class OnboardingWizard(QDialog):
-    """Modal six-step wizard. Emits `onboarding_complete` when done and
+    """Modal ten-step wizard. Emits `onboarding_complete` when done and
     `start_requested` if the user wants the bridge to fire immediately."""
 
     onboarding_complete = Signal()
     start_requested = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        worker=None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Welcome to {APP_NAME}")
         self.setModal(True)
@@ -75,6 +80,9 @@ class OnboardingWizard(QDialog):
         self._installed_slugs: List[str] = []
         # Probe port lives until cleanup so the bridge can claim a fresh one.
         self._test_port = None
+        # Optional reference to the running bridge worker — used by "Try it
+        # now" callbacks in the v2/v3/v4/v5 feature steps.
+        self._worker = worker
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -84,7 +92,10 @@ class OnboardingWizard(QDialog):
         root.addWidget(self._stack, 1)
         for builder in (
             self._build_welcome, self._build_controller, self._build_midi,
-            self._build_connectors, self._build_calibration, self._build_done,
+            self._build_connectors, self._build_calibration,
+            self._build_trigger_modes, self._build_adaptive_haptics,
+            self._build_polar_stick, self._build_multizone_touchpad,
+            self._build_done,
         ):
             self._stack.addWidget(builder())
 
@@ -235,6 +246,175 @@ class OnboardingWizard(QDialog):
             "If a stick is too far gone for software compensation, we'll flag it.",
         )
 
+    def _build_trigger_modes(self) -> QWidget:
+        page, v = self._page_shell("Try the new trigger modes")
+        intro = QLabel(
+            "L2 and R2 now have four output modes — pick per-trigger in the "
+            "Mapping tab:"
+        )
+        intro.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        intro.setWordWrap(True)
+        v.addWidget(intro)
+
+        modes = [
+            ("linear",   "0 → 127 as you depress (default). Direct, musical."),
+            ("ceiling",  "Jumps to 127 at a configurable threshold. Great for "
+                         "on/off switches that live on a trigger."),
+            ("inverted", "127 → 0 as you depress. Feed reverse-swell "
+                         "effects or upward filter sweeps."),
+            ("latch",    "Each full press toggles between 0 and 127. Use it to "
+                         "hold a sustain pedal note hands-free."),
+        ]
+        for slug, desc in modes:
+            row = QFrame()
+            row.setStyleSheet(
+                "QFrame { background-color: #16181d; border: 1px solid #24262d; "
+                "border-radius: 6px; }"
+            )
+            h = QHBoxLayout(row)
+            h.setContentsMargins(12, 8, 12, 8)
+            h.setSpacing(10)
+            name_lbl = QLabel(slug)
+            name_lbl.setStyleSheet(
+                "color: #2dd4bf; font-size: 12px; font-weight: 600;"
+            )
+            name_lbl.setFixedWidth(64)
+            h.addWidget(name_lbl)
+            desc_lbl = QLabel(desc)
+            desc_lbl.setStyleSheet("color: #8a9099; font-size: 12px;")
+            desc_lbl.setWordWrap(True)
+            h.addWidget(desc_lbl, 1)
+            v.addWidget(row)
+
+        v.addStretch(1)
+        btn_row = QHBoxLayout()
+        skip = QPushButton("Skip")
+        skip.setFlat(True)
+        skip.setStyleSheet("color: #8a9099;")
+        skip.clicked.connect(self._go_next)
+        btn_row.addWidget(skip)
+        btn_row.addStretch(1)
+        try_btn = QPushButton("Try it now — open L2 in Mapping editor")
+        try_btn.setObjectName("PrimaryButton")
+        try_btn.clicked.connect(self._try_trigger_modes)
+        btn_row.addWidget(try_btn)
+        v.addLayout(btn_row)
+        return page
+
+    def _build_adaptive_haptics(self) -> QWidget:
+        page, v = self._page_shell("Adaptive triggers feel music")
+        body = QLabel(
+            "New in v1.1 — the bridge is now bidirectional. Incoming MIDI notes "
+            "can drive adaptive-trigger resistance on a PS5 DualSense in real time. "
+            "A kick on channel 10 thumps your L2; a snare hits your R2.\n\n"
+            "Enable it under Settings → Haptics → MIDI → Trigger. Works over USB "
+            "and Bluetooth. Your DAW plays the notes; your hands feel them."
+        )
+        body.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        body.setWordWrap(True)
+        v.addWidget(body)
+
+        tip = QLabel("Requires a PS5 DualSense controller. Xbox and generic pads receive no haptic signal.")
+        tip.setStyleSheet("color: #8a9099; font-size: 12px;")
+        tip.setWordWrap(True)
+        v.addWidget(tip)
+
+        v.addStretch(1)
+        btn_row = QHBoxLayout()
+        skip = QPushButton("Skip")
+        skip.setFlat(True)
+        skip.setStyleSheet("color: #8a9099;")
+        skip.clicked.connect(self._go_next)
+        btn_row.addWidget(skip)
+        btn_row.addStretch(1)
+        try_btn = QPushButton("Try it now — open Haptics settings")
+        try_btn.setObjectName("PrimaryButton")
+        try_btn.clicked.connect(self._try_adaptive_haptics)
+        btn_row.addWidget(try_btn)
+        v.addLayout(btn_row)
+        return page
+
+    def _build_polar_stick(self) -> QWidget:
+        page, v = self._page_shell("Polar stick mode")
+        body = QLabel(
+            "Instead of cartesian X/Y axes, you can read either stick in polar "
+            "coordinates — the angle drives one CC and the magnitude drives another. "
+            "Sweep a filter by rotating the stick; control wet/dry by how far you "
+            "push it."
+        )
+        body.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        body.setWordWrap(True)
+        v.addWidget(body)
+
+        # Simple ASCII diagram as a styled label
+        diagram = QLabel(
+            "  angle  →  CC 1  (0 – 127, full rotation)\n"
+            "  magnitude  →  CC 2  (0 = centre, 127 = full push)"
+        )
+        diagram.setStyleSheet(
+            "background-color: #16181d; border: 1px solid #24262d; "
+            "border-radius: 6px; padding: 10px; "
+            "color: #2dd4bf; font-family: monospace; font-size: 12px;"
+        )
+        v.addWidget(diagram)
+
+        hint = QLabel(
+            "Enable per-stick in Mapping → Axes → Left Stick / Right Stick → "
+            "Mode → Polar."
+        )
+        hint.setStyleSheet("color: #8a9099; font-size: 12px;")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+
+        v.addStretch(1)
+        btn_row = QHBoxLayout()
+        skip = QPushButton("Skip")
+        skip.setFlat(True)
+        skip.setStyleSheet("color: #8a9099;")
+        skip.clicked.connect(self._go_next)
+        btn_row.addWidget(skip)
+        btn_row.addStretch(1)
+        try_btn = QPushButton("Try it now — open Axes editor")
+        try_btn.setObjectName("PrimaryButton")
+        try_btn.clicked.connect(self._try_polar_stick)
+        btn_row.addWidget(try_btn)
+        v.addLayout(btn_row)
+        return page
+
+    def _build_multizone_touchpad(self) -> QWidget:
+        page, v = self._page_shell("Multi-zone touchpad")
+        body = QLabel(
+            "The DualSense touchpad can now be split into a drum-pad grid. "
+            "Touch top-left, top-right, bottom-left, or bottom-right — each zone "
+            "fires its own MIDI note."
+        )
+        body.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        body.setWordWrap(True)
+        v.addWidget(body)
+
+        tip = QLabel(
+            "Tip — load the Drum Pad template and map the zones to ride + "
+            "open hi-hat + crash for a hands-free cymbal extension."
+        )
+        tip.setStyleSheet("color: #8a9099; font-size: 12px;")
+        tip.setWordWrap(True)
+        v.addWidget(tip)
+
+        v.addStretch(1)
+        btn_row = QHBoxLayout()
+        skip = QPushButton("Skip")
+        skip.setFlat(True)
+        skip.setStyleSheet("color: #8a9099;")
+        skip.clicked.connect(self._go_next)
+        btn_row.addWidget(skip)
+        btn_row.addStretch(1)
+        try_btn = QPushButton("Try it now — load Drum Pad template")
+        try_btn.setObjectName("PrimaryButton")
+        try_btn.clicked.connect(self._try_drum_pad_template)
+        btn_row.addWidget(try_btn)
+        v.addLayout(btn_row)
+        return page
+
     def _build_done(self) -> QWidget:
         page, v = self._page_shell("You're ready.", big=True)
         body = QLabel(
@@ -375,6 +555,50 @@ class OnboardingWizard(QDialog):
         self.onboarding_complete.emit()
         self.start_requested.emit()
         self.accept()
+
+    # ============================================================= feature CTAs
+
+    def _try_trigger_modes(self) -> None:
+        """Open the mapping editor pre-selected on the L2 trigger axis (index 4)."""
+        send_event("onboarding_try_trigger_modes")
+        self._go_next()
+        if self._worker is not None:
+            try:
+                self._worker.open_axis_editor(axis_index=4)
+            except Exception:
+                pass  # Worker not in a state to handle it — no crash
+
+    def _try_adaptive_haptics(self) -> None:
+        """Open the Haptics settings panel."""
+        send_event("onboarding_try_adaptive_haptics")
+        self._go_next()
+        if self._worker is not None:
+            try:
+                self._worker.open_settings(tab="haptics")
+            except Exception:
+                pass
+
+    def _try_polar_stick(self) -> None:
+        """Open the Axes editor for the left stick."""
+        send_event("onboarding_try_polar_stick")
+        self._go_next()
+        if self._worker is not None:
+            try:
+                self._worker.open_axis_editor(axis_index=0)
+            except Exception:
+                pass
+
+    def _try_drum_pad_template(self) -> None:
+        """Load the Drum Pad template via the worker."""
+        from ..templates import TEMPLATES_BY_SLUG
+        send_event("onboarding_try_drum_pad_template")
+        self._go_next()
+        if self._worker is not None:
+            try:
+                mapping = TEMPLATES_BY_SLUG["drum-pad"].build_mapping()
+                self._worker.load_mapping(mapping)
+            except Exception:
+                pass
 
     def _emit_complete_event(self) -> None:
         send_event(

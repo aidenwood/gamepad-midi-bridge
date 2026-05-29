@@ -8,6 +8,9 @@ reflects what is actually wired.
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import webbrowser
 from pathlib import Path
 from typing import Callable, List, Tuple
@@ -22,6 +25,8 @@ from PySide6.QtWidgets import (
 from .. import APP_NAME, __version__
 from ..crash_reporter import crash_dir
 from ..logger import log_path
+from ..paths import user_data_dir
+from ..updater import UpdateChecker
 
 # 3D logo widget — optional. QtWebEngineWidgets isn't a hard dep on every
 # build platform; wrap the import so a missing module doesn't take the
@@ -37,6 +42,14 @@ except Exception:
 CHANGELOG_URL = "https://store.aidxn.com/changelog"
 ISSUES_URL = "https://github.com/aidenwood/gamepad-midi-bridge/issues"
 SUPPORT_EMAIL = "support@aidxn.com"
+
+DOCS_LINKS = {
+    "Getting started": "https://store.aidxn.com/docs/getting-started",
+    "Connect a controller": "https://store.aidxn.com/docs/connect-controller",
+    "Map your first preset": "https://store.aidxn.com/docs/map-preset",
+    "Stage performance tips": "https://store.aidxn.com/docs/stage-performance",
+    "Troubleshoot Bluetooth": "https://store.aidxn.com/docs/troubleshoot-bluetooth",
+}
 
 
 # Card chrome reused across all sections. Keeping the colours inline (rather
@@ -131,9 +144,11 @@ class HelpTab(QWidget):
     open_settings_requested = Signal()
     hide_window_requested = Signal()
     recalibrate_requested = Signal()
+    run_test_wizard_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
+        self._updater: UpdateChecker | None = None
         self._build_ui()
         self._install_shortcuts()
 
@@ -190,12 +205,45 @@ class HelpTab(QWidget):
 
         v.addLayout(hero)
 
+        v.addWidget(self._build_quick_links_card())
         v.addWidget(self._build_shortcuts_card())
         v.addWidget(self._build_faq_card())
         v.addWidget(self._build_troubleshooting_card())
         v.addWidget(self._build_links_card())
+        v.addWidget(self._build_actions_card())
+        v.addWidget(self._build_version_card())
 
         v.addStretch(1)
+
+    def _build_quick_links_card(self) -> QFrame:
+        card, layout = _make_card()
+        layout.addWidget(_section_title("QUICK LINKS"))
+
+        # 5 doc links as a grid (2x3)
+        grid = QHBoxLayout()
+        grid.setSpacing(10)
+        for i, (label, url) in enumerate(DOCS_LINKS.items()):
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda checked=False, u=url: webbrowser.open(u))
+            btn.setStyleSheet(
+                "QPushButton { "
+                "  background-color: #11131a; border: 1px solid #1f232b; "
+                "  border-radius: 6px; padding: 8px 12px; color: #e6e8eb; "
+                "  font-size: 11px; "
+                "} "
+                "QPushButton:hover { background-color: #16181d; border-color: #2dd4bf; }"
+            )
+            grid.addWidget(btn)
+            if (i + 1) % 3 == 0:
+                layout.addLayout(grid)
+                grid = QHBoxLayout()
+                grid.setSpacing(10)
+        # Add remaining buttons if any
+        if (len(DOCS_LINKS) % 3) != 0:
+            grid.addStretch(1)
+            layout.addLayout(grid)
+
+        return card
 
     def _build_shortcuts_card(self) -> QFrame:
         card, layout = _make_card()
@@ -339,6 +387,62 @@ class HelpTab(QWidget):
 
         return card
 
+    def _build_actions_card(self) -> QFrame:
+        card, layout = _make_card()
+        layout.addWidget(_section_title("ACTIONS"))
+
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        row1.addWidget(self._link_button(
+            "Open user data folder", self._open_user_data_folder
+        ))
+        row1.addWidget(self._link_button(
+            "Open log file", lambda: self._open_log_file()
+        ))
+        row1.addStretch(1)
+        layout.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        row2.addWidget(self._link_button(
+            "Run controller test wizard", lambda: self.run_test_wizard_requested.emit()
+        ))
+        row2.addWidget(self._link_button(
+            "Check for updates", self._check_for_updates
+        ))
+        row2.addStretch(1)
+        layout.addLayout(row2)
+
+        return card
+
+    def _build_version_card(self) -> QFrame:
+        card, layout = _make_card()
+        layout.addWidget(_section_title("VERSION INFO"))
+
+        import platform
+        from PySide6 import __version__ as pyside_version
+
+        rows: List[Tuple[str, str]] = [
+            ("App version", __version__),
+            ("Python", f"{sys.version.split()[0]}"),
+            ("Qt", pyside_version),
+            ("Platform", platform.platform().split("-")[0]),
+        ]
+        for label, value in rows:
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(14)
+            lbl = QLabel(label)
+            lbl.setStyleSheet("color: #8a9099; font-weight: 500; min-width: 100px;")
+            row.addWidget(lbl)
+            val = QLabel(value)
+            val.setStyleSheet("color: #e6e8eb; font-family: 'SF Mono', Menlo, Consolas, monospace;")
+            row.addWidget(val)
+            row.addStretch(1)
+            layout.addLayout(row)
+
+        return card
+
     def _link_button(self, text: str, handler: Callable[[], None]) -> QPushButton:
         btn = QPushButton(text)
         btn.clicked.connect(handler)
@@ -393,3 +497,56 @@ class HelpTab(QWidget):
         subject = f"{APP_NAME} - v{__version__}"
         # `webbrowser.open` handles mailto: on every platform we ship to.
         webbrowser.open(f"mailto:{SUPPORT_EMAIL}?subject={subject}")
+
+    @staticmethod
+    def _open_user_data_folder() -> bool:
+        """Open the user data directory in the system file manager.
+        Returns True on success, False on failure."""
+        try:
+            path = str(user_data_dir())
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            elif sys.platform == "win32":
+                os.startfile(path)
+            else:
+                subprocess.Popen(["xdg-open", path])
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _open_log_file() -> bool:
+        """Open the log file in the system default text editor.
+        Returns True on success, False on failure."""
+        try:
+            path = log_path()
+            # If log doesn't exist, open parent folder instead
+            if not path.exists():
+                if sys.platform == "darwin":
+                    subprocess.Popen(["open", str(path.parent)])
+                elif sys.platform == "win32":
+                    os.startfile(str(path.parent))
+                else:
+                    subprocess.Popen(["xdg-open", str(path.parent)])
+                return True
+
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            elif sys.platform == "win32":
+                os.startfile(str(path))
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+            return True
+        except Exception:
+            return False
+
+    def _check_for_updates(self) -> None:
+        """Manually trigger an update check."""
+        try:
+            if self._updater is None:
+                self._updater = UpdateChecker()
+            self._updater.check()
+        except Exception:
+            # If UpdateChecker fails to instantiate or check, just open the
+            # changelog URL so user can check manually.
+            webbrowser.open(CHANGELOG_URL)

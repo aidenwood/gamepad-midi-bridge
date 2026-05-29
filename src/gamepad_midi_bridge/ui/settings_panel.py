@@ -1,28 +1,49 @@
-"""Settings tab — MIDI channel, deadzone, poll rate, calibrate button.
+"""Settings tab — restructured into five clear QGroupBox sections.
 
-These are free-tier features; the heavier customisation lives in the mapping editor.
+Sections:
+  1. APPEARANCE      — theme, font size, reduce motion
+  2. AUDIO + MIDI    — channel, poll rate, feedback-loop guard
+  3. CONTROLLER      — auto-reconnect, test wizard, deadzone
+  4. PRIVACY         — telemetry, update-check, license info, export crash bundle
+  5. DANGER ZONE     — clear snapshots, clear autosaves, reset to defaults, sign out
 """
 from __future__ import annotations
 
+import json
+import shutil
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
-import json
-
-from ..license import is_pro
+from ..license import is_pro, state as license_state, deactivate as license_deactivate
 from ..mapping import Mapping
 from ..midi_input import INPUT_PORT_NAME
-from ..paths import config_path
+from ..paths import config_path, user_data_dir
 from ..updater import set_opt_in as set_update_opt_in
 from .. import telemetry
 from ..crash_reporter import export_bundle
 from .haptic_input_dialog import HapticInputDialog
 from .theme import apply_theme
+
+_QSETTINGS_ORG = "ucmd"
+_QSETTINGS_APP = "gamepad-midi-bridge"
 
 
 def _read_update_opt_in() -> bool:
@@ -36,8 +57,6 @@ def _read_update_opt_in() -> bool:
 
 
 def _read_multi_mode() -> str:
-    """Persisted "Active controllers" choice — defaults to off so the V1.1
-    single-controller flow is preserved for everyone, free or Pro."""
     path = config_path()
     if not path.exists():
         return "off"
@@ -64,12 +83,18 @@ def _write_multi_mode(mode: str) -> None:
         pass
 
 
+def _note(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet("color: #5a606b; font-size: 11px;")
+    lbl.setWordWrap(True)
+    return lbl
+
+
 class SettingsPanel(QWidget):
     settings_changed = Signal(Mapping)
     recalibrate_clicked = Signal()
     multi_mode_changed = Signal(str)  # "off" | "auto" | "force_two"
 
-    # Stored on the user's config file so the choice persists across launches.
     _MULTI_MODE_KEY = "multi_controller_mode"
     _MULTI_MODE_LABELS = [
         ("Off (single controller)", "off"),
@@ -77,34 +102,88 @@ class SettingsPanel(QWidget):
         ("Force two (Pro-only)",    "force_two"),
     ]
 
+    _EFFECT_LABELS = [
+        ("Off",       None),
+        ("Feedback",  "feedback"),
+        ("Weapon",    "weapon"),
+        ("Vibration", "vibration"),
+        ("Bow",       "bow"),
+        ("Galloping", "galloping"),
+        ("Machine",   "machine"),
+    ]
+
+    _FONT_SIZES = [
+        ("Small",  10),
+        ("Medium", 12),
+        ("Large",  14),
+    ]
+
     def __init__(self, mapping: Mapping, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._mapping = mapping
         self._building = True
+        self._qs = QSettings(_QSETTINGS_ORG, _QSETTINGS_APP)
 
-        outer = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        root.addWidget(scroll)
+
+        inner = QWidget()
+        outer = QVBoxLayout(inner)
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(16)
+        scroll.setWidget(inner)
 
-        # MIDI group
-        midi_group = QGroupBox("MIDI")
+        pro = is_pro()
+        pro_suffix = "" if pro else " — Pro"
+
+        # ── 1. APPEARANCE ──────────────────────────────────────────────────
+        app_group = QGroupBox("Appearance")
+        app_form = QFormLayout(app_group)
+
+        self._theme = QComboBox()
+        self._theme.addItem("System", "system")
+        self._theme.addItem("Dark",   "dark")
+        self._theme.addItem("Light",  "light")
+        for i in range(self._theme.count()):
+            if self._theme.itemData(i) == mapping.theme:
+                self._theme.setCurrentIndex(i)
+                break
+        self._theme.currentIndexChanged.connect(self._on_theme_changed)
+        app_form.addRow("Theme", self._theme)
+
+        self._font_size = QComboBox()
+        saved_pt = int(self._qs.value("appearance/font_pt", 12))
+        for label, pt in self._FONT_SIZES:
+            self._font_size.addItem(label, pt)
+        for i, (_, pt) in enumerate(self._FONT_SIZES):
+            if pt == saved_pt:
+                self._font_size.setCurrentIndex(i)
+                break
+        self._font_size.currentIndexChanged.connect(self._on_font_size_changed)
+        app_form.addRow("Font size", self._font_size)
+
+        self._reduce_motion = QCheckBox("Reduce motion / animations")
+        self._reduce_motion.setChecked(
+            self._qs.value("appearance/reduce_motion", False, type=bool)
+        )
+        self._reduce_motion.toggled.connect(self._on_reduce_motion_changed)
+        app_form.addRow(self._reduce_motion)
+
+        # ── 2. AUDIO + MIDI ────────────────────────────────────────────────
+        midi_group = QGroupBox("Audio + MIDI")
         midi_form = QFormLayout(midi_group)
+
         self._channel = QSpinBox()
         self._channel.setRange(1, 16)
         self._channel.setValue(mapping.midi_channel + 1)
         self._channel.valueChanged.connect(self._emit)
-        midi_form.addRow("Channel", self._channel)
-
-        # Input group
-        input_group = QGroupBox("Input")
-        input_form = QFormLayout(input_group)
-        self._deadzone = QDoubleSpinBox()
-        self._deadzone.setRange(0.0, 0.5)
-        self._deadzone.setSingleStep(0.01)
-        self._deadzone.setDecimals(2)
-        self._deadzone.setValue(mapping.deadzone)
-        self._deadzone.valueChanged.connect(self._emit)
-        input_form.addRow("Stick deadzone", self._deadzone)
+        midi_form.addRow("Default MIDI channel", self._channel)
 
         self._poll = QSpinBox()
         self._poll.setRange(30, 500)
@@ -112,13 +191,18 @@ class SettingsPanel(QWidget):
         self._poll.setValue(mapping.poll_hz)
         self._poll.setSuffix(" Hz")
         self._poll.valueChanged.connect(self._emit)
-        input_form.addRow("Poll rate", self._poll)
+        midi_form.addRow("Default poll rate", self._poll)
 
-        # Multi-controller group — Pro feature. Lives near the MIDI block so
-        # users discover it next to the channel selector.
-        pro = is_pro()
-        pro_suffix = "" if pro else " — Pro"
-        multi_group = QGroupBox(f"Multi-controller{pro_suffix}")
+        self._feedback_guard = QCheckBox("MIDI feedback-loop guard")
+        self._feedback_guard.setChecked(mapping.haptic_input.guard_feedback_loop)
+        self._feedback_guard.toggled.connect(self._emit)
+        midi_form.addRow(self._feedback_guard)
+        midi_form.addRow(_note(
+            "Ignores incoming CCs that match what we just sent — prevents "
+            "runaway loops when the DAW echoes back on port %r." % INPUT_PORT_NAME
+        ))
+
+        multi_group = QGroupBox("Multi-controller%s" % pro_suffix)
         multi_form = QFormLayout(multi_group)
         self._multi_mode = QComboBox()
         for label, _ in self._MULTI_MODE_LABELS:
@@ -130,25 +214,95 @@ class SettingsPanel(QWidget):
                 break
         self._multi_mode.currentIndexChanged.connect(self._on_multi_mode_changed)
         multi_form.addRow("Active controllers", self._multi_mode)
-        multi_note = QLabel(
-            "Auto turns on a second slot when a second controller is "
-            "detected. Each slot gets its own MIDI port + channel."
-        )
-        multi_note.setStyleSheet("color: #5a606b; font-size: 11px;")
-        multi_note.setWordWrap(True)
-        multi_form.addRow(multi_note)
+        multi_form.addRow(_note(
+            "Auto turns on a second slot when a second controller is detected. "
+            "Each slot gets its own MIDI port + channel."
+        ))
         multi_group.setEnabled(pro)
 
-        # Stick corners group — Pro feature, edge-quantized stick buttons.
-        corners_group = QGroupBox(f"Stick corners{pro_suffix}")
+        osc_group = QGroupBox("OSC output%s" % pro_suffix)
+        osc_form = QFormLayout(osc_group)
+        self._osc_enabled = QCheckBox("Send OSC packets alongside MIDI")
+        self._osc_enabled.setChecked(mapping.osc.enabled)
+        self._osc_enabled.toggled.connect(self._emit)
+        osc_form.addRow(self._osc_enabled)
+
+        self._osc_mode = QComboBox()
+        for label, value in (("Alongside MIDI", "alongside"), ("OSC only", "only")):
+            self._osc_mode.addItem(label, value)
+        idx = max(0, [self._osc_mode.itemData(i) for i in range(self._osc_mode.count())]
+                     .index(mapping.osc.mode) if mapping.osc.mode in
+                     ("alongside", "only") else 0)
+        self._osc_mode.setCurrentIndex(idx)
+        self._osc_mode.currentIndexChanged.connect(self._emit)
+        osc_form.addRow("Mode", self._osc_mode)
+
+        self._osc_host = QLineEdit(mapping.osc.host)
+        self._osc_host.setPlaceholderText("127.0.0.1")
+        self._osc_host.editingFinished.connect(self._emit)
+        osc_form.addRow("Host", self._osc_host)
+
+        self._osc_port = QSpinBox()
+        self._osc_port.setRange(1, 65535)
+        self._osc_port.setValue(mapping.osc.port)
+        self._osc_port.valueChanged.connect(self._emit)
+        osc_form.addRow("Port", self._osc_port)
+
+        osc_form.addRow(_note(
+            "Address-per-control mapping lives in your preset JSON. "
+            "Resolume listens on 7000 by default; TouchDesigner / MadMapper are user-configured."
+        ))
+        ping_btn = QPushButton("Send /gmb/ping (test the route)")
+        ping_btn.clicked.connect(self._on_osc_ping)
+        osc_form.addRow(ping_btn)
+        osc_group.setEnabled(pro)
+
+        # ── 3. CONTROLLER ──────────────────────────────────────────────────
+        ctrl_group = QGroupBox("Controller")
+        ctrl_form = QFormLayout(ctrl_group)
+
+        self._auto_reconnect = QCheckBox("Auto-reconnect on disconnect")
+        self._auto_reconnect.setChecked(mapping.auto_reconnect_enabled)
+        self._auto_reconnect.toggled.connect(self._emit)
+        ctrl_form.addRow(self._auto_reconnect)
+
+        self._test_wizard = QCheckBox("Run controller-test wizard on first connect")
+        self._test_wizard.setChecked(
+            self._qs.value("controller/test_wizard_on_first_connect", True, type=bool)
+        )
+        self._test_wizard.toggled.connect(self._on_test_wizard_changed)
+        ctrl_form.addRow(self._test_wizard)
+
+        dz_row = QHBoxLayout()
+        self._deadzone_slider = QSlider(Qt.Orientation.Horizontal)
+        self._deadzone_slider.setRange(0, 200)   # /1000 → 0..0.200
+        self._deadzone_slider.setValue(int(mapping.deadzone * 1000))
+        self._deadzone_spin = QDoubleSpinBox()
+        self._deadzone_spin.setRange(0.0, 0.20)
+        self._deadzone_spin.setSingleStep(0.005)
+        self._deadzone_spin.setDecimals(3)
+        self._deadzone_spin.setValue(mapping.deadzone)
+        self._deadzone_spin.setFixedWidth(80)
+        self._deadzone_slider.valueChanged.connect(
+            lambda v: self._deadzone_spin.setValue(v / 1000.0)
+        )
+        self._deadzone_spin.valueChanged.connect(
+            lambda v: self._deadzone_slider.setValue(int(v * 1000))
+        )
+        self._deadzone_spin.valueChanged.connect(self._emit)
+        dz_row.addWidget(self._deadzone_slider)
+        dz_row.addWidget(self._deadzone_spin)
+        ctrl_form.addRow("Default deadzone", dz_row)
+
+        corners_group = QGroupBox("Stick corners%s" % pro_suffix)
         corners_form = QFormLayout(corners_group)
         self._left_corners = self._build_corner_combo(mapping.left_stick_corners)
         corners_form.addRow("Left stick corners", self._left_corners)
         self._right_corners = self._build_corner_combo(mapping.right_stick_corners)
         corners_form.addRow("Right stick corners", self._right_corners)
+        corners_group.setEnabled(pro)
 
-        # Touchpad group — Pro feature, XY surface → two CCs.
-        touchpad_group = QGroupBox(f"Touchpad{pro_suffix}")
+        touchpad_group = QGroupBox("Touchpad%s" % pro_suffix)
         touchpad_form = QFormLayout(touchpad_group)
         self._touchpad_enabled = QCheckBox("Enable touchpad as XY MIDI surface")
         self._touchpad_enabled.setChecked(mapping.touchpad.enabled)
@@ -178,26 +332,24 @@ class SettingsPanel(QWidget):
         self._touchpad_two_finger.setChecked(mapping.touchpad.two_finger)
         self._touchpad_two_finger.toggled.connect(self._emit)
         touchpad_form.addRow(self._touchpad_two_finger)
+        touchpad_group.setEnabled(pro)
 
-        # Adaptive triggers (DualSense L2/R2 force-feedback) — Pro feature.
-        haptics_group = QGroupBox(f"Adaptive triggers{pro_suffix}")
+        haptics_group = QGroupBox("Adaptive triggers%s" % pro_suffix)
         haptics_form = QFormLayout(haptics_group)
         self._l2_effect = self._build_effect_combo(mapping.l2_haptic_effect)
         haptics_form.addRow("L2 feel", self._l2_effect)
         self._r2_effect = self._build_effect_combo(mapping.r2_haptic_effect)
         haptics_form.addRow("R2 feel", self._r2_effect)
 
-        # Haptic-in (incoming MIDI → trigger pulses). Headline V1.1c feature.
         self._haptic_in_enabled = QCheckBox("Respond to incoming MIDI (haptic-in)")
         self._haptic_in_enabled.setChecked(mapping.haptic_input.enabled)
         self._haptic_in_enabled.toggled.connect(self._emit)
         haptics_form.addRow(self._haptic_in_enabled)
 
         port_hint = QLabel(
-            f"Listen port: <code>{INPUT_PORT_NAME}</code> — point your DAW's "
-            "MIDI output here."
+            "Listen port: <code>%s</code> — point your DAW's MIDI output here." % INPUT_PORT_NAME
         )
-        port_hint.setTextFormat(Qt.RichText)
+        port_hint.setTextFormat(Qt.TextFormat.RichText)
         port_hint.setStyleSheet("color: #5a606b; font-size: 11px;")
         port_hint.setWordWrap(True)
         haptics_form.addRow(port_hint)
@@ -208,144 +360,107 @@ class SettingsPanel(QWidget):
         bindings_row.addWidget(manage_btn)
         bindings_row.addStretch(1)
         haptics_form.addRow(bindings_row)
+        haptics_group.setEnabled(pro)
 
-        # OSC output — Pro feature, lives alongside the MIDI port.
-        osc_group = QGroupBox(f"OSC output{pro_suffix}")
-        osc_form = QFormLayout(osc_group)
-        self._osc_enabled = QCheckBox("Send OSC packets alongside MIDI")
-        self._osc_enabled.setChecked(mapping.osc.enabled)
-        self._osc_enabled.toggled.connect(self._emit)
-        osc_form.addRow(self._osc_enabled)
+        calib_group = QGroupBox("Calibration")
+        calib_layout = QVBoxLayout(calib_group)
+        calib_layout.addWidget(_note(
+            "Re-runs the auto-calibration sweep. Useful if you swap controllers "
+            "or your sticks start drifting mid-set."
+        ))
+        recalib_row = QHBoxLayout()
+        recalib = QPushButton("Re-calibrate sticks")
+        recalib.clicked.connect(self.recalibrate_clicked.emit)
+        recalib_row.addWidget(recalib)
+        recalib_row.addStretch(1)
+        calib_layout.addLayout(recalib_row)
 
-        self._osc_mode = QComboBox()
-        for label, value in (("Alongside MIDI", "alongside"), ("OSC only", "only")):
-            self._osc_mode.addItem(label, value)
-        idx = max(0, [self._osc_mode.itemData(i) for i in range(self._osc_mode.count())]
-                     .index(mapping.osc.mode) if mapping.osc.mode in
-                     ("alongside", "only") else 0)
-        self._osc_mode.setCurrentIndex(idx)
-        self._osc_mode.currentIndexChanged.connect(self._emit)
-        osc_form.addRow("Mode", self._osc_mode)
-
-        self._osc_host = QLineEdit(mapping.osc.host)
-        self._osc_host.setPlaceholderText("127.0.0.1")
-        self._osc_host.editingFinished.connect(self._emit)
-        osc_form.addRow("Host", self._osc_host)
-
-        self._osc_port = QSpinBox()
-        self._osc_port.setRange(1, 65535)
-        self._osc_port.setValue(mapping.osc.port)
-        self._osc_port.valueChanged.connect(self._emit)
-        osc_form.addRow("Port", self._osc_port)
-
-        osc_note = QLabel(
-            "Address-per-control mapping lives in your preset JSON for now. "
-            "Resolume listens on 7000 by default; TouchDesigner / MadMapper "
-            "are user-configured."
-        )
-        osc_note.setStyleSheet("color: #5a606b; font-size: 11px;")
-        osc_note.setWordWrap(True)
-        osc_form.addRow(osc_note)
-
-        ping_btn = QPushButton("Send /gmb/ping (test the route)")
-        ping_btn.clicked.connect(self._on_osc_ping)
-        osc_form.addRow(ping_btn)
-
-        # Privacy / telemetry — opt-in only, never gated.
+        # ── 4. PRIVACY ─────────────────────────────────────────────────────
         privacy_group = QGroupBox("Privacy")
         privacy_form = QFormLayout(privacy_group)
-        self._check_updates = QCheckBox("Check for updates on startup")
-        self._check_updates.setChecked(_read_update_opt_in())
-        self._check_updates.toggled.connect(self._on_update_opt_changed)
-        privacy_form.addRow(self._check_updates)
 
         self._anon_stats = QCheckBox("Send anonymous usage stats (opt-in)")
         self._anon_stats.setChecked(telemetry.is_enabled())
         self._anon_stats.toggled.connect(self._on_telemetry_opt_changed)
         privacy_form.addRow(self._anon_stats)
 
-        privacy_note = QLabel(
-            "Updates check fires once per launch, no personal data. "
-            "Usage stats are off by default and never include preset content."
-        )
-        privacy_note.setStyleSheet("color: #5a606b; font-size: 11px;")
-        privacy_note.setWordWrap(True)
-        privacy_form.addRow(privacy_note)
+        self._check_updates = QCheckBox("Check for updates on startup")
+        self._check_updates.setChecked(_read_update_opt_in())
+        self._check_updates.toggled.connect(self._on_update_opt_changed)
+        privacy_form.addRow(self._check_updates)
 
-        # Appearance group — theme switcher
-        appearance_group = QGroupBox("Appearance")
-        appearance_form = QFormLayout(appearance_group)
-        self._theme = QComboBox()
-        self._theme.addItem("System", "system")
-        self._theme.addItem("Dark", "dark")
-        self._theme.addItem("Light", "light")
-        current_theme = mapping.theme
-        for i in range(self._theme.count()):
-            if self._theme.itemData(i) == current_theme:
-                self._theme.setCurrentIndex(i)
-                break
-        self._theme.currentIndexChanged.connect(self._on_theme_changed)
-        appearance_form.addRow("Theme", self._theme)
-
-        # Calibration group
-        calib_group = QGroupBox("Calibration")
-        calib_layout = QVBoxLayout(calib_group)
-        calib_layout.addWidget(QLabel(
-            "Re-runs the auto-calibration sweep. Useful if you swap controllers "
-            "or your sticks start drifting mid-set."
+        privacy_form.addRow(_note(
+            "Usage stats are off by default and never include preset content or "
+            "controller serial numbers. Update checks fire once per launch — no "
+            "personal data leaves the machine."
         ))
-        row = QHBoxLayout()
-        recalib = QPushButton("Re-calibrate sticks")
-        recalib.clicked.connect(self.recalibrate_clicked.emit)
-        row.addWidget(recalib)
-        row.addStretch(1)
-        calib_layout.addLayout(row)
-        
-        # Export crash bundle button
+
+        ls = license_state()
+        if ls.is_pro and ls.email:
+            lic_text = "License: Pro · %s" % ls.email
+        elif ls.is_pro:
+            lic_text = "License: Pro"
+        else:
+            lic_text = "License: Free tier"
+        lic_label = QLabel(lic_text)
+        lic_label.setStyleSheet("font-size: 11px;")
+        privacy_form.addRow("", lic_label)
+
         export_row = QHBoxLayout()
-        export_btn = QPushButton("Export crash bundle")
+        export_btn = QPushButton("Export crash bundle…")
         export_btn.clicked.connect(self._on_export_bundle)
         export_row.addWidget(export_btn)
         export_row.addStretch(1)
-        calib_layout.addLayout(export_row)
+        privacy_form.addRow(export_row)
 
+        # ── 5. DANGER ZONE ─────────────────────────────────────────────────
+        danger_group = QGroupBox("Danger Zone")
+        danger_form = QFormLayout(danger_group)
+        danger_group.setStyleSheet(
+            "QGroupBox { border: 1px solid #c0392b; border-radius: 4px; }"
+            "QGroupBox::title { color: #c0392b; }"
+        )
+
+        clear_snaps_btn = QPushButton("Clear all snapshots")
+        clear_snaps_btn.clicked.connect(self._on_clear_snapshots)
+        danger_form.addRow(clear_snaps_btn)
+
+        clear_saves_btn = QPushButton("Clear autosaves")
+        clear_saves_btn.clicked.connect(self._on_clear_autosaves)
+        danger_form.addRow(clear_saves_btn)
+
+        reset_btn = QPushButton("Reset to factory defaults")
+        reset_btn.clicked.connect(self._on_reset_to_defaults)
+        danger_form.addRow(reset_btn)
+
+        sign_out_btn = QPushButton("Sign out (deactivate license)")
+        sign_out_btn.clicked.connect(self._on_sign_out)
+        if not ls.is_pro:
+            sign_out_btn.setEnabled(False)
+        danger_form.addRow(sign_out_btn)
+
+        # ── layout ─────────────────────────────────────────────────────────
+        outer.addWidget(app_group)
         outer.addWidget(midi_group)
         outer.addWidget(multi_group)
-        outer.addWidget(input_group)
+        outer.addWidget(osc_group)
+        outer.addWidget(ctrl_group)
         outer.addWidget(corners_group)
         outer.addWidget(touchpad_group)
         outer.addWidget(haptics_group)
-        outer.addWidget(osc_group)
-        outer.addWidget(privacy_group)
-        outer.addWidget(appearance_group)
         outer.addWidget(calib_group)
+        outer.addWidget(privacy_group)
+        outer.addWidget(danger_group)
         outer.addStretch(1)
-
-        # Gate Pro-only groups when no license is active.
-        corners_group.setEnabled(pro)
-        touchpad_group.setEnabled(pro)
-        haptics_group.setEnabled(pro)
-        osc_group.setEnabled(pro)
 
         self._building = False
 
-    # Adaptive-trigger effects in the order shown to the user. Stored on the
-    # mapping as lowercase strings; "off" round-trips to None internally.
-    _EFFECT_LABELS = [
-        ("Off",       None),
-        ("Feedback",  "feedback"),
-        ("Weapon",    "weapon"),
-        ("Vibration", "vibration"),
-        ("Bow",       "bow"),
-        ("Galloping", "galloping"),
-        ("Machine",   "machine"),
-    ]
+    # ── combo builders ────────────────────────────────────────────────────────
 
     def _build_effect_combo(self, current_value: Optional[str]) -> QComboBox:
         combo = QComboBox()
         for label, _ in self._EFFECT_LABELS:
             combo.addItem(label)
-        # Find the index matching the current mapping value.
         for i, (_, value) in enumerate(self._EFFECT_LABELS):
             if value == current_value:
                 combo.setCurrentIndex(i)
@@ -354,7 +469,6 @@ class SettingsPanel(QWidget):
         return combo
 
     def _build_corner_combo(self, cfg) -> QComboBox:
-        """Dropdown for stick-corner mode. Index → (enabled, n)."""
         combo = QComboBox()
         combo.addItem("Off")
         combo.addItem("4 corners")
@@ -367,70 +481,75 @@ class SettingsPanel(QWidget):
         combo.currentIndexChanged.connect(self._emit)
         return combo
 
+    # ── emit ──────────────────────────────────────────────────────────────────
+
     def _emit(self, *_args) -> None:
         if self._building:
             return
-        self._mapping.midi_channel = self._channel.value() - 1
-        self._mapping.deadzone = self._deadzone.value()
-        self._mapping.poll_hz = self._poll.value()
+        m = self._mapping
+        m.midi_channel = self._channel.value() - 1
+        m.deadzone = self._deadzone_spin.value()
+        m.poll_hz = self._poll.value()
+        m.auto_reconnect_enabled = self._auto_reconnect.isChecked()
 
-        # Stick corners — index 0 = Off, 1..3 = 4/8/16 corners.
-        self._apply_corner_combo(self._left_corners, self._mapping.left_stick_corners)
-        self._apply_corner_combo(self._right_corners, self._mapping.right_stick_corners)
+        self._apply_corner_combo(self._left_corners, m.left_stick_corners)
+        self._apply_corner_combo(self._right_corners, m.right_stick_corners)
 
-        # Touchpad XY surface.
-        tp = self._mapping.touchpad
+        tp = m.touchpad
         tp.enabled = self._touchpad_enabled.isChecked()
         tp.x_cc = self._touchpad_x_cc.value()
         tp.y_cc = self._touchpad_y_cc.value()
         tp.require_contact = self._touchpad_require_contact.isChecked()
         tp.two_finger = self._touchpad_two_finger.isChecked()
 
-        # Adaptive-trigger effects.
-        self._mapping.l2_haptic_effect = self._EFFECT_LABELS[self._l2_effect.currentIndex()][1]
-        self._mapping.r2_haptic_effect = self._EFFECT_LABELS[self._r2_effect.currentIndex()][1]
+        m.l2_haptic_effect = self._EFFECT_LABELS[self._l2_effect.currentIndex()][1]
+        m.r2_haptic_effect = self._EFFECT_LABELS[self._r2_effect.currentIndex()][1]
 
-        # Haptic-in enabled flag — bindings are edited via dialog, not here.
-        self._mapping.haptic_input.enabled = self._haptic_in_enabled.isChecked()
+        m.haptic_input.enabled = self._haptic_in_enabled.isChecked()
+        m.haptic_input.guard_feedback_loop = self._feedback_guard.isChecked()
 
-        # OSC output.
-        osc = self._mapping.osc
+        osc = m.osc
         osc.enabled = self._osc_enabled.isChecked()
         osc.mode = self._osc_mode.currentData() or "alongside"
         osc.host = self._osc_host.text().strip() or "127.0.0.1"
         osc.port = self._osc_port.value()
 
-        self.settings_changed.emit(self._mapping)
+        self.settings_changed.emit(m)
 
-    def _open_haptic_bindings_dialog(self) -> None:
-        """Open the bindings editor. Mutates the live mapping in place on
-        OK then re-emits settings_changed so the bridge picks the new list
-        up without a restart."""
-        dlg = HapticInputDialog(self._mapping.haptic_input, parent=self)
-        if dlg.exec():
-            self._mapping.haptic_input.bindings = dlg.bindings()
-            self._mapping.haptic_input.listen_channel = dlg.listen_channel()
-            self.settings_changed.emit(self._mapping)
+    # ── change handlers ───────────────────────────────────────────────────────
 
-    def _on_osc_ping(self) -> None:
-        from ..osc_backend import OscSender
-        host = self._osc_host.text().strip() or "127.0.0.1"
-        port = self._osc_port.value()
-        s = OscSender(host=host, port=port)
-        ok = s.ping()
-        s.close()
-        from PySide6.QtWidgets import QMessageBox
-        if ok:
-            QMessageBox.information(
-                self, "OSC ping sent",
-                f"Sent /gmb/ping → {host}:{port}\n\n"
-                "Check Resolume's OSC monitor (Preferences → OSC → "
-                "Input devices) or TouchDesigner's OSC In CHOP to "
-                "confirm receipt.",
-            )
-        else:
-            QMessageBox.warning(self, "OSC ping failed",
-                                f"Couldn't send to {host}:{port}.")
+    def _on_theme_changed(self, _idx: int) -> None:
+        if self._building:
+            return
+        theme = self._theme.currentData()
+        if theme:
+            self._mapping.theme = theme
+            app = QApplication.instance()
+            if app:
+                apply_theme(app, theme)
+            self._qs.setValue("appearance/theme", theme)
+            self._emit()
+
+    def _on_font_size_changed(self, _idx: int) -> None:
+        if self._building:
+            return
+        pt = self._font_size.currentData()
+        self._qs.setValue("appearance/font_pt", pt)
+        app = QApplication.instance()
+        if app:
+            f = app.font()
+            f.setPointSize(pt)
+            app.setFont(f)
+
+    def _on_reduce_motion_changed(self, checked: bool) -> None:
+        if self._building:
+            return
+        self._qs.setValue("appearance/reduce_motion", checked)
+
+    def _on_test_wizard_changed(self, checked: bool) -> None:
+        if self._building:
+            return
+        self._qs.setValue("controller/test_wizard_on_first_connect", checked)
 
     def _on_update_opt_changed(self, checked: bool) -> None:
         if self._building:
@@ -449,16 +568,118 @@ class SettingsPanel(QWidget):
         _write_multi_mode(mode)
         self.multi_mode_changed.emit(mode)
 
-    def _on_theme_changed(self, _idx: int) -> None:
-        if self._building:
+    def _open_haptic_bindings_dialog(self) -> None:
+        dlg = HapticInputDialog(self._mapping.haptic_input, parent=self)
+        if dlg.exec():
+            self._mapping.haptic_input.bindings = dlg.bindings()
+            self._mapping.haptic_input.listen_channel = dlg.listen_channel()
+            self.settings_changed.emit(self._mapping)
+
+    def _on_osc_ping(self) -> None:
+        from ..osc_backend import OscSender
+        host = self._osc_host.text().strip() or "127.0.0.1"
+        port = self._osc_port.value()
+        s = OscSender(host=host, port=port)
+        ok = s.ping()
+        s.close()
+        from PySide6.QtWidgets import QMessageBox
+        if ok:
+            QMessageBox.information(
+                self, "OSC ping sent",
+                "Sent /gmb/ping to %s:%d\n\n"
+                "Check Resolume's OSC monitor (Preferences -> OSC -> "
+                "Input devices) or TouchDesigner's OSC In CHOP to confirm receipt." % (host, port),
+            )
+        else:
+            QMessageBox.warning(self, "OSC ping failed",
+                                "Couldn't send to %s:%d." % (host, port))
+
+    def _on_export_bundle(self) -> None:
+        try:
+            bundle_path = export_bundle()
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Crash bundle exported",
+                "Bundle saved to:\n%s\n\nAttach this file to a bug report." % bundle_path
+            )
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Export failed",
+                                "Could not export crash bundle:\n%s" % e)
+
+    # ── danger zone ───────────────────────────────────────────────────────────
+
+    def _on_clear_snapshots(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Clear snapshots",
+            "Delete all snapshots? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
-        theme = self._theme.currentData()
-        if theme:
-            self._mapping.theme = theme
-            app = QApplication.instance()
-            if app:
-                apply_theme(app, theme)
-            self._emit()
+        d = user_data_dir() / "snapshots"
+        if d.exists():
+            shutil.rmtree(d)
+            d.mkdir(parents=True, exist_ok=True)
+        QMessageBox.information(self, "Done", "All snapshots cleared.")
+
+    def _on_clear_autosaves(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Clear autosaves",
+            "Delete all autosaves? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        d = user_data_dir() / "autosaves"
+        if d.exists():
+            shutil.rmtree(d)
+            d.mkdir(parents=True, exist_ok=True)
+        QMessageBox.information(self, "Done", "All autosaves cleared.")
+
+    def _on_reset_to_defaults(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Reset to factory defaults",
+            "Reset all settings to factory defaults? "
+            "Your presets and license are preserved.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._qs.clear()
+        fresh = Mapping()
+        self._building = True
+        self._theme.setCurrentIndex(0)          # system
+        self._font_size.setCurrentIndex(1)      # medium
+        self._reduce_motion.setChecked(False)
+        self._channel.setValue(fresh.midi_channel + 1)
+        self._poll.setValue(fresh.poll_hz)
+        self._feedback_guard.setChecked(fresh.haptic_input.guard_feedback_loop)
+        self._auto_reconnect.setChecked(fresh.auto_reconnect_enabled)
+        self._test_wizard.setChecked(True)
+        self._deadzone_spin.setValue(fresh.deadzone)
+        self._building = False
+        for attr in ("midi_channel", "deadzone", "poll_hz", "auto_reconnect_enabled"):
+            setattr(self._mapping, attr, getattr(fresh, attr))
+        self.settings_changed.emit(self._mapping)
+        QMessageBox.information(self, "Done", "Settings reset to factory defaults.")
+
+    def _on_sign_out(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Sign out",
+            "Deactivate this license? You can re-enter your key at any time.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        license_deactivate()
+        QMessageBox.information(self, "Signed out", "License deactivated.")
+
+    # ── helpers ───────────────────────────────────────────────────────────────
 
     def current_multi_mode(self) -> str:
         return self._MULTI_MODE_LABELS[self._multi_mode.currentIndex()][1]
@@ -472,21 +693,3 @@ class SettingsPanel(QWidget):
         cfg.enabled = True
         cfg.n = {1: 4, 2: 8, 3: 16}[idx]
         cfg.ensure_notes()
-
-    def _on_export_bundle(self) -> None:
-        """Export a crash bundle and show confirmation."""
-        try:
-            bundle_path = export_bundle()
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(
-                self,
-                "Crash bundle exported",
-                f"Bundle saved to:\n{bundle_path}\n\nAttach this file to a bug report."
-            )
-        except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(
-                self,
-                "Export failed",
-                f"Could not export crash bundle:\n{e}"
-            )
