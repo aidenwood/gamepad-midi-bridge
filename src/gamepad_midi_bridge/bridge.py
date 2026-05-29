@@ -211,6 +211,10 @@ class BridgeWorker(QObject):
         self._flick_state: Dict[int, tuple] = {}  # axis_idx -> (prev_val, prev_ts)
         # Trigger aftertouch state — was AT active last tick?
         self._at_active: Dict[int, bool] = {L2_AXIS: False, R2_AXIS: False}
+        # Polyphonic aftertouch state — per-(button, note): last sent pressure (0..127).
+        # Used to deduplicate messages and rate-limit to 30Hz.
+        self._poly_at_last_pressure: Dict[Tuple[int, int], int] = {}  # (btn_idx, note) -> last_pressure
+        self._poly_at_last_send_ms: float = 0.0  # timestamp of last batch send
         # Test note timers — keeps QTimer objects alive across send_test_note() calls
         self._test_note_timers: List[QTimer] = []
         # Latency self-test — set True by LatencyDialog; bridge records
@@ -967,6 +971,26 @@ class BridgeWorker(QObject):
         ts_ms = time.time() * 1000.0
         self._recent_outbound_cc.append((channel, cc_number, value, ts_ms))
 
+    def _get_poly_at_pressure(self, reader, pressure_source: str) -> float:
+        """Get normalized pressure (0..1) from the configured source.
+
+        pressure_source: "left_stick_mag", "right_stick_mag", "l2", or "r2".
+        Returns 0..1 normalized value.
+        """
+        if pressure_source == "left_stick_mag":
+            x = reader.get_axis(0) or 0.0
+            y = reader.get_axis(1) or 0.0
+            return (x*x + y*y) ** 0.5  # magnitude
+        elif pressure_source == "right_stick_mag":
+            x = reader.get_axis(2) or 0.0
+            y = reader.get_axis(3) or 0.0
+            return (x*x + y*y) ** 0.5
+        elif pressure_source == "l2":
+            return max(0.0, min(1.0, float(reader.get_axis(4) or 0.0)))
+        elif pressure_source == "r2":
+            return max(0.0, min(1.0, float(reader.get_axis(5) or 0.0)))
+        return 0.0
+
     def _dispatch_haptic(self, source: str, midi_id: int, normalized: float) -> None:
         """Match an incoming MIDI value against every binding and fire."""
         cfg = self._state.mapping.haptic_input
@@ -1289,6 +1313,75 @@ class BridgeWorker(QObject):
             if pressed != was:
                 self._prev_buttons[btn_idx] = pressed
                 self.button_state.emit(btn_idx, pressed)
+
+        # --- Polyphonic Aftertouch (PolyAT) for held buttons
+        self._poll_poly_aftertouch(reader, mapping, midi, buttons, n_buttons)
+
+    def _poll_poly_aftertouch(self, reader, mapping, midi, buttons, n_buttons) -> None:
+        """Send PolyAT messages for held buttons with poly_aftertouch enabled.
+
+        Rate-limited to 30Hz to avoid swamping MIDI. Tracks last-sent pressure
+        per (button, note) to deduplicate.
+        """
+        now_ms = time.time() * 1000.0
+        # Rate limit to 30Hz (~33ms between sends)
+        if now_ms - self._poly_at_last_send_ms < 33.0:
+            return
+
+        if midi is None:
+            return
+
+        osc_only = self._osc_only()
+        if osc_only:
+            return
+
+        any_sent = False
+        for btn_idx, note in buttons.items():
+            if btn_idx >= n_buttons:
+                continue
+            pressed = reader.get_button(btn_idx)
+            if not pressed:
+                # Clean up state when button is released
+                self._poly_at_last_pressure.pop((btn_idx, note), None)
+                continue
+
+            # Get button config and check if PolyAT is enabled
+            btn_cfg = mapping.button_configs.get(btn_idx)
+            if not btn_cfg or not btn_cfg.poly_aftertouch.enabled:
+                continue
+
+            # Get pressure from configured source
+            pressure_0_to_1 = self._get_poly_at_pressure(
+                reader, btn_cfg.poly_aftertouch.pressure_source
+            )
+            pressure_7bit = round(pressure_0_to_1 * 127.0)
+            pressure_7bit = max(0, min(127, pressure_7bit))
+
+            # Deduplicate: only send if pressure changed
+            last_pressure = self._poly_at_last_pressure.get((btn_idx, note), -1)
+            if pressure_7bit == last_pressure:
+                continue
+
+            # Get per-button channel
+            btn_channel = self._channel_for_button(mapping, btn_idx)
+            poly_at = 0xA0 | btn_channel  # Polyphonic aftertouch status
+
+            try:
+                midi.port.send_message([poly_at, note, pressure_7bit])
+                self._rtp_send(poly_at, note, pressure_7bit)
+                self._record_midi_send(poly_at, note, pressure_7bit)
+                self._emit_midi_message(
+                    "sent", poly_at, note, pressure_7bit,
+                    f"POLY-AT #{note} pressure={pressure_7bit}"
+                )
+                self._poly_at_last_pressure[(btn_idx, note)] = pressure_7bit
+                any_sent = True
+            except Exception:
+                pass
+
+        if any_sent:
+            self.midi_sent.emit()
+            self._poly_at_last_send_ms = now_ms
 
     def _poll_axes(self, reader, mapping, offsets, deadzone, midi, cc, n_axes) -> None:
         _buttons, axes, _hats = self._active_mappings_view(mapping)

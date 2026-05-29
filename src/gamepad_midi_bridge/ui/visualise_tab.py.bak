@@ -4,7 +4,6 @@ Live: DualSense diagram + stats (battery/transport/rate/latency/runtime).
 Scope: Per-axis oscilloscope traces (5s history).
 Throughput: MIDI throughput graph + sparkline history.
 Heatmap: Button activity + session usage heatmap.
-Timeline: Scrollable session activity log (bridge events, presets, errors).
 
 Sub-tabs persist last-viewed state via QSettings(visualise/last_tab).
 """
@@ -24,7 +23,6 @@ from .axis_scope import AxisScope
 from .usage_heatmap import UsageHeatmap
 
 from .throughput_panel import ThroughputPanel
-from .activity_timeline import ActivityTimeline
 
 # Match controller_meter.py palette so the two views feel like one app.
 STICK_BG = QColor("#16181d")
@@ -486,10 +484,6 @@ class VisualiseTab(QWidget):
         usage_v.addWidget(self._usage_heatmap)
         heatmap_layout.addWidget(usage_frame, 1)
         self._tabs.addTab(heatmap_widget, "Heatmap")
-
-        # === Timeline Tab: session activity log ===
-        self._activity_timeline = ActivityTimeline()
-        self._tabs.addTab(self._activity_timeline, "Timeline")
 
     @staticmethod
     def _panel_frame() -> QFrame:

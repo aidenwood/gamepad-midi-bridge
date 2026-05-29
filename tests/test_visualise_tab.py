@@ -101,12 +101,12 @@ class TestVisualiseTabs:
 
     @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
     def test_subtab_count(self):
-        """VisualiseTab has exactly 4 sub-tabs."""
+        """VisualiseTab has exactly 5 sub-tabs."""
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication([])
 
         tab = VisualiseTab()
-        assert tab._tabs.count() == 4
+        assert tab._tabs.count() == 5
 
     @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
     def test_subtab_titles(self):
@@ -115,7 +115,7 @@ class TestVisualiseTabs:
         app = QApplication.instance() or QApplication([])
 
         tab = VisualiseTab()
-        expected_titles = ["Live", "Scope", "Throughput", "Heatmap"]
+        expected_titles = ["Live", "Scope", "Throughput", "Heatmap", "Timeline"]
         for i, title in enumerate(expected_titles):
             assert tab._tabs.tabText(i) == title
 

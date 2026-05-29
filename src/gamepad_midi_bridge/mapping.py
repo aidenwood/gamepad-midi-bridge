@@ -97,6 +97,24 @@ class TriggerConfig:
 
 
 @dataclass
+class PolyAftertouchConfig:
+    """Polyphonic Aftertouch (PolyAT) emission for held buttons.
+
+    When a button is held and poly_aftertouch is enabled, the bridge sends
+    MIDI Polyphonic Aftertouch messages (0xA0) scaled from the configured
+    pressure source. Each held note gets its own pressure stream.
+
+    Fields:
+      - `enabled`            : master switch (default False).
+      - `pressure_source`    : where to read pressure: "left_stick_mag",
+                               "right_stick_mag", "l2", or "r2".
+                               Defaults to "left_stick_mag".
+    """
+    enabled: bool = False
+    pressure_source: str = "left_stick_mag"
+
+
+@dataclass
 class ButtonConfig:
     """Per-button gating config for any face button.
 
@@ -113,10 +131,14 @@ class ButtonConfig:
                                > 0; else 100 (default). DualSense face buttons
                                are binary (no pressure), so this is a fixed
                                override per button, not a curve.
+      - `poly_aftertouch`    : optional PolyAftertouchConfig for expressive
+                               pressure control on held notes. Disabled by
+                               default.
     """
     gate_button: Optional[int] = None
     gate_release_value: int = 0
     velocity: int = 100
+    poly_aftertouch: PolyAftertouchConfig = field(default_factory=PolyAftertouchConfig)
 
 
 @dataclass
@@ -836,6 +858,21 @@ def _trigger_from_dict(d: Optional[dict]) -> TriggerConfig:
     )
 
 
+def _poly_aftertouch_from_dict(d: Optional[dict]) -> PolyAftertouchConfig:
+    """Hydrate a PolyAftertouchConfig from raw dict, defaulting to disabled."""
+    if not d:
+        return PolyAftertouchConfig()
+    # Validate pressure_source is one of the allowed values
+    valid_sources = {"left_stick_mag", "right_stick_mag", "l2", "r2"}
+    pressure_source = str(d.get("pressure_source", "left_stick_mag"))
+    if pressure_source not in valid_sources:
+        pressure_source = "left_stick_mag"
+    return PolyAftertouchConfig(
+        enabled=bool(d.get("enabled", False)),
+        pressure_source=pressure_source,
+    )
+
+
 def _button_config_from_dict(d: Optional[dict]) -> ButtonConfig:
     """Hydrate a ButtonConfig from raw dict."""
     if not d:
@@ -853,6 +890,7 @@ def _button_config_from_dict(d: Optional[dict]) -> ButtonConfig:
         gate_button=gate_button,
         gate_release_value=max(0, min(127, int(d.get("gate_release_value", 0)))),
         velocity=max(0, min(127, int(d.get("velocity", 100)))),
+        poly_aftertouch=_poly_aftertouch_from_dict(d.get("poly_aftertouch")),
     )
 
 

@@ -10,6 +10,7 @@ from gamepad_midi_bridge.mapping import (
     Mapping,
     OscConfig,
     PassthroughConfig,
+    PolyAftertouchConfig,
     ProgramChangeConfig,
     SCHEMA_VERSION,
     SetlistConfig,
@@ -18,6 +19,7 @@ from gamepad_midi_bridge.mapping import (
     TouchpadConfig,
     TriggerConfig,
     _passthrough_from_dict,
+    _poly_aftertouch_from_dict,
     _program_change_from_dict,
     _setlist_config_from_dict,
     _shift_layer_from_dict,
@@ -1570,3 +1572,89 @@ def test_old_macro_without_arp_fields_loads_with_defaults():
     assert mac.arp_mode is False
     assert mac.arp_rate_hz == pytest.approx(8.0)
     assert mac.arp_loop is True
+
+
+# ------------------------------------------------------------------ PolyAftertouchConfig
+
+def test_poly_aftertouch_config_defaults():
+    """PolyAftertouchConfig defaults to disabled with left_stick_mag source."""
+    cfg = PolyAftertouchConfig()
+    assert cfg.enabled is False
+    assert cfg.pressure_source == "left_stick_mag"
+
+
+def test_poly_aftertouch_config_round_trip():
+    """PolyAftertouchConfig preserves all fields through deserialization."""
+    cfg = PolyAftertouchConfig(enabled=True, pressure_source="r2")
+    d = {"enabled": True, "pressure_source": "r2"}
+    restored = _poly_aftertouch_from_dict(d)
+    assert restored.enabled is True
+    assert restored.pressure_source == "r2"
+
+
+def test_poly_aftertouch_invalid_source_defaults_to_left_stick_mag():
+    """Invalid pressure_source defaults to left_stick_mag."""
+    cfg = _poly_aftertouch_from_dict({"enabled": True, "pressure_source": "invalid"})
+    assert cfg.enabled is True
+    assert cfg.pressure_source == "left_stick_mag"
+
+
+def test_button_config_with_poly_aftertouch_round_trip():
+    """ButtonConfig with PolyAftertouchConfig nested inside survives round-trip."""
+    m = Mapping(name="PolyATButtonTest")
+    m.button_configs = {
+        0: ButtonConfig(
+            velocity=100,
+            poly_aftertouch=PolyAftertouchConfig(enabled=True, pressure_source="l2"),
+        ),
+        2: ButtonConfig(
+            velocity=80,
+            poly_aftertouch=PolyAftertouchConfig(enabled=False, pressure_source="right_stick_mag"),
+        ),
+    }
+    restored = Mapping.from_dict(m.to_dict())
+
+    # Button 0 — PolyAT enabled on L2
+    assert restored.button_configs[0].velocity == 100
+    assert restored.button_configs[0].poly_aftertouch.enabled is True
+    assert restored.button_configs[0].poly_aftertouch.pressure_source == "l2"
+
+    # Button 2 — PolyAT disabled
+    assert restored.button_configs[2].velocity == 80
+    assert restored.button_configs[2].poly_aftertouch.enabled is False
+    assert restored.button_configs[2].poly_aftertouch.pressure_source == "right_stick_mag"
+
+
+def test_button_config_poly_aftertouch_defaults_when_missing():
+    """ButtonConfig loads with PolyAftouchConfig defaults if nested field is missing."""
+    cfg = _button_config_from_dict({"velocity": 100})
+    assert cfg.velocity == 100
+    assert cfg.poly_aftertouch.enabled is False
+    assert cfg.poly_aftertouch.pressure_source == "left_stick_mag"
+
+
+def test_old_preset_without_poly_aftertouch_loads_cleanly():
+    """Old preset (no poly_aftertouch in button_configs) loads with defaults."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "button_configs": {
+            "0": {"velocity": 100, "gate_button": None},
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.button_configs[0].poly_aftertouch.enabled is False
+    assert m.button_configs[0].poly_aftertouch.pressure_source == "left_stick_mag"
+
+
+def test_poly_aftertouch_pressure_sources_validation():
+    """All valid pressure sources are accepted; invalid ones default."""
+    valid_sources = ["left_stick_mag", "right_stick_mag", "l2", "r2"]
+    for source in valid_sources:
+        cfg = _poly_aftertouch_from_dict({"enabled": True, "pressure_source": source})
+        assert cfg.pressure_source == source
+
+    # Invalid sources default to left_stick_mag
+    for invalid in ["left_stick", "trigger", "invalid_source"]:
+        cfg = _poly_aftertouch_from_dict({"enabled": True, "pressure_source": invalid})
+        assert cfg.pressure_source == "left_stick_mag"
