@@ -59,7 +59,6 @@ from .tray import TrayController, is_available as tray_available
 from .visualise_tab import VisualiseTab
 
 
-from .about_tab import AboutTab
 UPGRADE_URL = "https://store.aidxn.com/gamepad-midi-bridge"
 RECOVERY_URL = "https://store.aidxn.com/recover"
 CHANGELOG_URL = "https://store.aidxn.com/changelog"
@@ -886,18 +885,77 @@ class MainWindow(QMainWindow):
         return wrap
 
     def _build_about_tab(self) -> QWidget:
-        """Build the About tab using the polished AboutTab widget with Pro features."""
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(28, 28, 28, 28)
+        v.setSpacing(10)
+
+        title = QLabel(APP_NAME)
+        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f5f7fa;")
+        v.addWidget(title)
+
+        sub = QLabel(f"v{__version__} · Aidxn Design")
+        sub.setStyleSheet("color: #8a9099;")
+        v.addWidget(sub)
+
+        v.addSpacing(16)
         self._tier_label = QLabel()
-        about_tab = AboutTab(
-            tier_label_widget=self._tier_label,
-            on_upgrade=self._open_upgrade,
-            on_enter_license=self._enter_license_key,
-            on_export_pack=self._on_export_pack,
-            on_import_pack=self._on_import_pack,
-            refresh_tier=self._refresh_tier_label,
+        v.addWidget(self._tier_label)
+
+        row = QHBoxLayout()
+        upgrade = QPushButton("Upgrade to Pro")
+        upgrade.setObjectName("PrimaryButton")
+        upgrade.clicked.connect(self._open_upgrade)
+        activate = QPushButton("Enter license key")
+        activate.clicked.connect(self._enter_license_key)
+        row.addWidget(upgrade)
+        row.addWidget(activate)
+        row.addStretch(1)
+        v.addLayout(row)
+
+        recovery_row = QHBoxLayout()
+        recover = QPushButton("Lost your license key?")
+        recover.clicked.connect(lambda: webbrowser.open(RECOVERY_URL))
+        recover.setFlat(True)
+        recover.setStyleSheet("color: #8a9099; text-align: left;")
+        recovery_row.addWidget(recover)
+
+        changelog = QPushButton("Release notes")
+        changelog.clicked.connect(lambda: webbrowser.open(CHANGELOG_URL))
+        changelog.setFlat(True)
+        changelog.setStyleSheet("color: #8a9099; text-align: left;")
+        recovery_row.addWidget(changelog)
+
+        recovery_row.addStretch(1)
+        v.addLayout(recovery_row)
+
+        # Portable config row — export/import everything as a single file
+        v.addSpacing(16)
+        portable_label = QLabel("CONFIG PACK")
+        portable_label.setStyleSheet(
+            "color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
         )
+        v.addWidget(portable_label)
+        portable_note = QLabel(
+            "Bundle your mapping + presets + Pro license into a single "
+            ".gmbpack file. Useful for moving rigs between machines."
+        )
+        portable_note.setStyleSheet("color: #8a9099; font-size: 12px;")
+        portable_note.setWordWrap(True)
+        v.addWidget(portable_note)
+        portable_row = QHBoxLayout()
+        export_btn = QPushButton("Export config…")
+        export_btn.clicked.connect(self._on_export_pack)
+        import_btn = QPushButton("Import config…")
+        import_btn.clicked.connect(self._on_import_pack)
+        portable_row.addWidget(export_btn)
+        portable_row.addWidget(import_btn)
+        portable_row.addStretch(1)
+        v.addLayout(portable_row)
+
+        v.addStretch(1)
         self._refresh_tier_label()
-        return about_tab
+        return w
 
     def _update_live_scope(self, inspector, payload: dict) -> None:
         """Hook a newly-rendered AxisScope widget to bridge axis_value signals.

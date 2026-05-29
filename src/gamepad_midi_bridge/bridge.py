@@ -36,6 +36,7 @@ from .midi_input import (
 )
 from .osc_backend import OscReceiver, OscSender
 from . import usage_stats as _usage_stats
+from . import latency_test as _latency_test
 
 
 # Adaptive-trigger effects whose output report carries a meaningful amplitude/
@@ -211,6 +212,10 @@ class BridgeWorker(QObject):
         self._at_active: Dict[int, bool] = {L2_AXIS: False, R2_AXIS: False}
         # Test note timers — keeps QTimer objects alive across send_test_note() calls
         self._test_note_timers: List[QTimer] = []
+        # Latency self-test — set True by LatencyDialog; bridge records
+        # input/output timestamps only when this flag is active (zero overhead
+        # in normal operation).
+        self._latency_test_active: bool = False
 
     # ---------------------------------------------------------------- public API
 
@@ -1184,6 +1189,9 @@ class BridgeWorker(QObject):
                     continue
 
             if pressed and not was:
+                # Latency self-test: capture button-event timestamp (input side).
+                if self._latency_test_active:
+                    _latency_test.tracker().record_input(time.perf_counter())
                 # Macro playback: if this button is bound to a macro, play it
                 # instead of (or in addition to) the normal note. Each playback
                 # gets its own QTimer chain so simultaneous macros work fine.
@@ -1195,6 +1203,9 @@ class BridgeWorker(QObject):
                 # Use velocity from button config if available, else default to 100
                 velocity = btn_cfg.velocity if btn_cfg else 100
                 if not osc_only:
+                    # Latency self-test: capture MIDI-send timestamp (output side).
+                    if self._latency_test_active:
+                        _latency_test.tracker().record_output(time.perf_counter())
                     midi.port.send_message([btn_note_on, note, velocity])
                     self._record_midi_send(btn_note_on, note, velocity)
                     self.midi_sent.emit()

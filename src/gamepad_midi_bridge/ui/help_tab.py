@@ -145,6 +145,7 @@ class HelpTab(QWidget):
     hide_window_requested = Signal()
     recalibrate_requested = Signal()
     run_test_wizard_requested = Signal()
+    run_latency_test_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -406,6 +407,9 @@ class HelpTab(QWidget):
         row2.setSpacing(8)
         row2.addWidget(self._link_button(
             "Run controller test wizard", lambda: self.run_test_wizard_requested.emit()
+        ))
+        row2.addWidget(self._link_button(
+            "Run latency test", lambda: self.run_latency_test_requested.emit()
         ))
         row2.addWidget(self._link_button(
             "Check for updates", self._check_for_updates
