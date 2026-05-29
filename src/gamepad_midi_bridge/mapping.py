@@ -887,6 +887,15 @@ class Mapping:
     # default so existing presets are unaffected. Additive-only schema field.
     midi_learn: MidiLearnConfig = field(default_factory=MidiLearnConfig)
 
+    # Per-preset DualSense lightbar colour (additive-only schema field).
+    # Allows each mapping to specify an RGB colour so when the preset loads,
+    # the controller's lightbar reflects it (visual confirmation of active preset).
+    lightbar_enabled: bool = False
+    lightbar_red: int = 0       # clamp 0..255
+    lightbar_green: int = 0     # clamp 0..255
+    lightbar_blue: int = 0      # clamp 0..255
+    player_led_bitmask: int = 0 # clamp 0..31; 5 LEDs, bit 0 = leftmost
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -905,6 +914,7 @@ class Mapping:
             d["port_name_override"] = self.port_name_override
         # Serialize midi_learn config
         d["midi_learn"] = self.midi_learn.to_dict()
+        # Lightbar fields are included via asdict (additive-only)
         return d
 
     @classmethod
@@ -959,6 +969,11 @@ class Mapping:
             midi2=_midi2_from_dict(data.get("midi2")),
             pattern_recorder=_pattern_recorder_from_dict(data.get("pattern_recorder")),
             midi_learn=MidiLearnConfig.from_dict(data.get("midi_learn")),
+            lightbar_enabled=bool(data.get("lightbar_enabled", False)),
+            lightbar_red=max(0, min(255, int(data.get("lightbar_red", 0)))),
+            lightbar_green=max(0, min(255, int(data.get("lightbar_green", 0)))),
+            lightbar_blue=max(0, min(255, int(data.get("lightbar_blue", 0)))),
+            player_led_bitmask=max(0, min(31, int(data.get("player_led_bitmask", 0)))),
         )
 
 
