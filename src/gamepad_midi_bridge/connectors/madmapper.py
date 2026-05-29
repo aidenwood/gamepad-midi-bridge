@@ -96,6 +96,9 @@ class MadMapperConnector(Connector):
     def is_installed(self, host: HostInstallation) -> bool:
         return (host.config_dir / DEVICE_FILENAME).exists()
 
+    def _installed_file(self, host: HostInstallation) -> Path:
+        return host.config_dir / DEVICE_FILENAME
+
     def post_install_steps(self, host: HostInstallation) -> str:
         return (
             "1. Restart MadMapper (it scans Devices/ on launch).\n"

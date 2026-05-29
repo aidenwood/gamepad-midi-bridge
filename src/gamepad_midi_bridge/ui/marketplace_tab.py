@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import time
 import webbrowser
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from PySide6.QtCore import QByteArray, Qt, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
@@ -46,11 +46,14 @@ class MarketplaceTab(QWidget):
         super().__init__(parent)
         self._net = QNetworkAccessManager(self)
         self._presets: List[Dict[str, Any]] = []
+        self._visible_presets: List[Dict[str, Any]] = []
         self._cache_fetched_at: float = 0.0
         self._cache_key: str = ""
         self._inflight_list: Optional[QNetworkReply] = None
         self._inflight_get: Optional[QNetworkReply] = None
         self._loading: bool = False
+        self._selected_tags: Set[str] = set()
+        self._sort_by: str = "newest"  # newest, downloads, rating, name
 
         self._build_ui()
         # Kick off first load without forcing — uses cache if a previous tab
@@ -76,7 +79,20 @@ class MarketplaceTab(QWidget):
         sub.setWordWrap(True)
         outer.addWidget(sub)
 
+        # Search box and sort
+        outer.addLayout(self._build_search_sort_row())
+
+        # Host / device filters
         outer.addLayout(self._build_filter_row())
+
+        # Tag chips
+        self._tag_chips_container = QWidget()
+        self._tag_chips_layout = QHBoxLayout(self._tag_chips_container)
+        self._tag_chips_layout.setContentsMargins(0, 0, 0, 0)
+        self._tag_chips_layout.setSpacing(6)
+        self._tag_chips_layout.addStretch(1)
+        self._tag_chips_container.setVisible(False)
+        outer.addWidget(self._tag_chips_container)
 
         self._status_label = QLabel("")
         self._status_label.setStyleSheet(f"color: {MUTED}; padding: 2px 0;")
@@ -94,6 +110,32 @@ class MarketplaceTab(QWidget):
         action_row.addStretch(1)
         outer.addLayout(action_row)
 
+    def _build_search_sort_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Search title / description / author / tags…")
+        self._search.textChanged.connect(self._refresh_visible)
+        row.addWidget(self._search, 1)
+
+        row.addWidget(QLabel("Sort:"))
+        self._sort_combo = QComboBox()
+        self._sort_combo.addItem("Newest", userData="newest")
+        self._sort_combo.addItem("Most downloaded", userData="downloads")
+        self._sort_combo.addItem("Highest rated", userData="rating")
+        self._sort_combo.addItem("Name A-Z", userData="name")
+        self._sort_combo.currentIndexChanged.connect(
+            lambda: self._set_sort(self._sort_combo.currentData())
+        )
+        row.addWidget(self._sort_combo)
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(lambda: self.refresh(force=True))
+        row.addWidget(refresh_btn)
+
+        return row
+
     def _build_filter_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -107,6 +149,7 @@ class MarketplaceTab(QWidget):
             ("Generic", "generic"),
         ):
             self._host_combo.addItem(label, userData=value)
+        self._host_combo.currentIndexChanged.connect(self._refresh_visible)
         row.addWidget(QLabel("Host:"))
         row.addWidget(self._host_combo)
 
@@ -118,17 +161,9 @@ class MarketplaceTab(QWidget):
             ("Generic", "generic"),
         ):
             self._device_combo.addItem(label, userData=value)
+        self._device_combo.currentIndexChanged.connect(self._refresh_visible)
         row.addWidget(QLabel("Device:"))
         row.addWidget(self._device_combo)
-
-        self._search = QLineEdit()
-        self._search.setPlaceholderText("Search title / description…")
-        self._search.returnPressed.connect(lambda: self.refresh(force=True))
-        row.addWidget(self._search, 1)
-
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(lambda: self.refresh(force=True))
-        row.addWidget(refresh_btn)
 
         return row
 
@@ -137,8 +172,8 @@ class MarketplaceTab(QWidget):
     def refresh(self, force: bool = True) -> None:
         host = self._host_combo.currentData() or ""
         device = self._device_combo.currentData() or ""
-        q = self._search.text().strip()
-        cache_key = f"{host}|{device}|{q}"
+        # Cache key doesn't include search — we filter locally
+        cache_key = f"{host}|{device}"
 
         if (
             not force
@@ -146,7 +181,7 @@ class MarketplaceTab(QWidget):
             and cache_key == self._cache_key
             and (time.time() - self._cache_fetched_at) < CACHE_TTL_SECONDS
         ):
-            self._render_list()
+            self._refresh_visible()
             return
 
         params: List[str] = []
@@ -154,9 +189,6 @@ class MarketplaceTab(QWidget):
             params.append(f"host={host}")
         if device:
             params.append(f"device={device}")
-        if q:
-            from urllib.parse import quote
-            params.append(f"q={quote(q)}")
         url = LIST_URL + ("?" + "&".join(params) if params else "")
 
         self._cancel_inflight_list()
@@ -189,7 +221,7 @@ class MarketplaceTab(QWidget):
             self._cache_key = cache_key
             self._cache_fetched_at = time.time()
             self._loading = False
-            self._render_list()
+            self._refresh_visible()
         except Exception as e:  # pragma: no cover
             self._set_error(f"Couldn't parse marketplace response: {e}")
         finally:
@@ -242,6 +274,119 @@ class MarketplaceTab(QWidget):
                 pass
             self._inflight_list = None
 
+    # ---------------------------------------------------------------- filtering
+
+    def _set_sort(self, sort_by: str) -> None:
+        self._sort_by = sort_by
+        self._refresh_visible()
+
+    def _toggle_tag_filter(self, tag: str) -> None:
+        if tag in self._selected_tags:
+            self._selected_tags.remove(tag)
+        else:
+            self._selected_tags.add(tag)
+        self._refresh_visible()
+
+    def _refresh_visible(self) -> None:
+        """Rebuild visible presets from _presets based on filters."""
+        if not self._presets:
+            self._visible_presets = []
+            self._render_list()
+            return
+
+        search_q = self._search.text().strip().lower()
+        host_filter = self._host_combo.currentData() or ""
+        device_filter = self._device_combo.currentData() or ""
+
+        visible = []
+        for preset in self._presets:
+            # Host filter
+            if host_filter and preset.get("host_target") != host_filter:
+                continue
+            # Device filter
+            if device_filter and preset.get("device_target") != device_filter:
+                continue
+            # Search across title, description, author, tags
+            if search_q:
+                title = (preset.get("title") or "").lower()
+                description = (preset.get("description") or "").lower()
+                author_obj = preset.get("author") or {}
+                author_name = (
+                    (author_obj.get("display_name") or "").lower() +
+                    (author_obj.get("github_handle") or "").lower()
+                )
+                tags = preset.get("tags") or []
+                tags_str = " ".join(str(t).lower() for t in tags)
+                haystack = f"{title} {description} {author_name} {tags_str}"
+                if search_q not in haystack:
+                    continue
+            # Tag filter — if any tags selected, preset must have at least one
+            if self._selected_tags:
+                preset_tags = set(str(t).lower() for t in (preset.get("tags") or []))
+                selected_tags_lower = set(t.lower() for t in self._selected_tags)
+                if not preset_tags & selected_tags_lower:
+                    continue
+            visible.append(preset)
+
+        # Sort
+        if self._sort_by == "newest":
+            # Assume later presets are newer; reverse if needed
+            visible.sort(key=lambda p: p.get("id", ""), reverse=True)
+        elif self._sort_by == "downloads":
+            visible.sort(key=lambda p: p.get("downloads", 0), reverse=True)
+        elif self._sort_by == "rating":
+            visible.sort(key=lambda p: p.get("rating", 0), reverse=True)
+        elif self._sort_by == "name":
+            visible.sort(key=lambda p: (p.get("title") or "Untitled").lower())
+
+        self._visible_presets = visible
+        self._build_tag_chips()
+        self._render_list()
+
+    def _build_tag_chips(self) -> None:
+        """Extract unique tags from visible presets and render filter chips."""
+        # Clear old chips
+        while self._tag_chips_layout.count() > 1:
+            item = self._tag_chips_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Collect unique tags from all presets (not just visible)
+        all_tags: Set[str] = set()
+        for preset in self._presets:
+            tags = preset.get("tags") or []
+            for tag in tags:
+                all_tags.add(str(tag))
+
+        if not all_tags:
+            self._tag_chips_container.setVisible(False)
+            return
+
+        self._tag_chips_container.setVisible(True)
+        sorted_tags = sorted(all_tags)
+        for tag in sorted_tags:
+            is_selected = tag in self._selected_tags
+            chip = QPushButton(tag)
+            chip.setMaximumWidth(120)
+            chip.setCursor(Qt.PointingHandCursor)
+            if is_selected:
+                chip.setStyleSheet(
+                    f"QPushButton {{ "
+                    f"background-color: {ACCENT}; color: #0f1419; "
+                    f"border: none; border-radius: 12px; padding: 4px 10px; "
+                    f"font-size: 12px; font-weight: 500; }}"
+                )
+            else:
+                chip.setStyleSheet(
+                    f"QPushButton {{ "
+                    f"background-color: #1f2229; color: {ACCENT}; "
+                    f"border: 1px solid {CARD_BORDER}; border-radius: 12px; "
+                    f"padding: 4px 10px; font-size: 12px; }} "
+                    f"QPushButton:hover {{ background-color: #24262d; }}"
+                )
+            chip.clicked.connect(lambda _=False, t=tag: self._toggle_tag_filter(t))
+            self._tag_chips_layout.insertWidget(self._tag_chips_layout.count() - 1, chip)
+
     # ---------------------------------------------------------------- rendering
 
     def _set_loading(self, message: str) -> None:
@@ -275,7 +420,12 @@ class MarketplaceTab(QWidget):
         self._loading = False
         if self._cache_fetched_at:
             age = int(time.time() - self._cache_fetched_at)
-            self._status_label.setText(f"{len(self._presets)} preset(s) · cached {age}s ago")
+            total = len(self._presets)
+            visible = len(self._visible_presets)
+            if visible == total:
+                self._status_label.setText(f"Showing {visible} of {total} presets · cached {age}s ago")
+            else:
+                self._status_label.setText(f"Showing {visible} of {total} presets · cached {age}s ago")
         else:
             self._status_label.setText("")
 
@@ -284,18 +434,24 @@ class MarketplaceTab(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(8)
 
-        if not self._presets:
-            empty = QLabel(
-                "No presets match those filters yet.\n\n"
-                "Want to be first? Build a mapping, then publish it from the "
-                "marketplace site — your name goes on it forever."
-            )
+        if not self._visible_presets:
+            if self._presets:
+                empty = QLabel(
+                    "No presets match your filters.\n\n"
+                    "Try adjusting your search or selecting different tags."
+                )
+            else:
+                empty = QLabel(
+                    "No presets available yet.\n\n"
+                    "Want to be first? Build a mapping, then publish it from the "
+                    "marketplace site — your name goes on it forever."
+                )
             empty.setAlignment(Qt.AlignCenter)
             empty.setWordWrap(True)
             empty.setStyleSheet(f"color: {MUTED}; padding: 40px;")
             v.addWidget(empty)
         else:
-            for preset in self._presets:
+            for preset in self._visible_presets:
                 v.addWidget(self._preset_card(preset))
 
         v.addStretch(1)

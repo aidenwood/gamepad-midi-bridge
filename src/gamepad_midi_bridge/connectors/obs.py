@@ -114,6 +114,9 @@ class ObsConnector(Connector):
     def is_installed(self, host: HostInstallation) -> bool:
         return (host.config_dir / HELPER_NAME).exists()
 
+    def _installed_file(self, host: HostInstallation) -> Path:
+        return host.config_dir / HELPER_NAME
+
     def post_install_steps(self, host: HostInstallation) -> str:
         return (
             "1. Open OBS → Tools → WebSocket Server Settings.\n"

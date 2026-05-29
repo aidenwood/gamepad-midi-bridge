@@ -88,6 +88,9 @@ class AbletonConnector(Connector):
     def is_installed(self, host: HostInstallation) -> bool:
         return (host.config_dir / REMOTE_SCRIPT_FOLDER / "__init__.py").exists()
 
+    def _installed_file(self, host: HostInstallation) -> Path:
+        return host.config_dir / REMOTE_SCRIPT_FOLDER / "__init__.py"
+
     def post_install_steps(self, host: HostInstallation) -> str:
         return (
             "1. Restart Ableton Live (or quit and reopen).\n"

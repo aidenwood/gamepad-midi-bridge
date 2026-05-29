@@ -105,6 +105,9 @@ class ResolumeConnector(Connector):
     def is_installed(self, host: HostInstallation) -> bool:
         return (host.config_dir / SHORTCUT_FILENAME).exists()
 
+    def _installed_file(self, host: HostInstallation) -> Path:
+        return host.config_dir / SHORTCUT_FILENAME
+
     def post_install_steps(self, host: HostInstallation) -> str:
         return (
             "1. Open Resolume.\n"

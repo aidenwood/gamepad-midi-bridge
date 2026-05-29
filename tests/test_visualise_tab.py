@@ -1,11 +1,11 @@
-"""Tests for AxisScope oscilloscope widget."""
+"""Tests for AxisScope oscilloscope widget and VisualiseTab sub-tabs."""
 from __future__ import annotations
 
 from collections import deque
 
 import pytest
 
-from gamepad_midi_bridge.ui.visualise_tab import AxisScope, OSCILLOSCOPE_SAMPLES
+from gamepad_midi_bridge.ui.visualise_tab import AxisScope, VisualiseTab, OSCILLOSCOPE_SAMPLES
 
 
 class TestAxisScopeBuffer:
@@ -85,6 +85,85 @@ class TestAxisScope:
         trigger.add_sample(2.0)
         assert trigger._samples[0] == 0.0
         assert trigger._samples[1] == 1.0
+
+
+class TestVisualiseTabs:
+    """VisualiseTab sub-tabs smoke tests."""
+
+    @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+    def test_visualise_tab_creation(self):
+        """VisualiseTab creates without errors."""
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication([])
+
+        tab = VisualiseTab()
+        assert tab is not None
+
+    @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+    def test_subtab_count(self):
+        """VisualiseTab has exactly 4 sub-tabs."""
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication([])
+
+        tab = VisualiseTab()
+        assert tab._tabs.count() == 4
+
+    @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+    def test_subtab_titles(self):
+        """Sub-tab titles match expected names."""
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication([])
+
+        tab = VisualiseTab()
+        expected_titles = ["Live", "Scope", "Throughput", "Heatmap"]
+        for i, title in enumerate(expected_titles):
+            assert tab._tabs.tabText(i) == title
+
+    @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+    def test_default_live_tab(self):
+        """Live tab is active by default (or persisted from QSettings)."""
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import QSettings
+        app = QApplication.instance() or QApplication([])
+
+        # Clear persisted setting so we get the default.
+        settings = QSettings()
+        settings.remove("visualise/last_tab")
+
+        tab = VisualiseTab()
+        # Should start at 0 (Live tab).
+        assert tab._tabs.currentIndex() == 0
+
+    @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+    def test_tab_persistence(self):
+        """Tab selection persists via QSettings."""
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import QSettings
+        app = QApplication.instance() or QApplication([])
+
+        settings = QSettings()
+        # Explicitly set to Heatmap tab (index 3).
+        settings.setValue("visualise/last_tab", 3)
+
+        tab = VisualiseTab()
+        # Should restore to index 3.
+        assert tab._tabs.currentIndex() == 3
+
+        # Verify it would persist if we switch.
+        tab._tabs.setCurrentIndex(1)
+        assert settings.value("visualise/last_tab", type=int) == 1
+
+    @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+    def test_each_tab_contains_widgets(self):
+        """Each sub-tab is a QWidget and can be accessed."""
+        from PySide6.QtWidgets import QApplication, QWidget
+        app = QApplication.instance() or QApplication([])
+
+        tab = VisualiseTab()
+        for i in range(tab._tabs.count()):
+            widget = tab._tabs.widget(i)
+            assert isinstance(widget, QWidget)
+            assert widget is not None
 
 
 def _has_qapp() -> bool:

@@ -1,9 +1,11 @@
-"""Visualise tab — richer post-setup live view.
+"""Visualise tab — richer post-setup live view with sub-tabs.
 
-Stacks a large DualSense diagram, a stats panel (battery/transport/rate/
-latency/runtime), per-axis sparkline history, and a button heatmap with a
-2 s decay. WHY a second tab: Live stays minimal so first-time users aren't
-overwhelmed; Visualise is for power users debugging mappings live.
+Live: DualSense diagram + stats (battery/transport/rate/latency/runtime).
+Scope: Per-axis oscilloscope traces (5s history).
+Throughput: MIDI throughput graph + sparkline history.
+Heatmap: Button activity + session usage heatmap.
+
+Sub-tabs persist last-viewed state via QSettings(visualise/last_tab).
 """
 from __future__ import annotations
 
@@ -11,10 +13,10 @@ import time
 from collections import deque
 from typing import Deque, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, QSettings
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget, QScrollArea,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget, QScrollArea, QTabWidget,
 )
 
 from .axis_scope import AxisScope
@@ -381,47 +383,75 @@ class VisualiseTab(QWidget):
         self._throughput_timer.timeout.connect(self._tick_throughput)
         self._throughput_timer.start()
 
+        # Restore last active tab from QSettings
+        self._settings = QSettings()
+        last_tab = self._settings.value("visualise/last_tab", 0, type=int)
+        if 0 <= last_tab < self._tabs.count():
+            self._tabs.setCurrentIndex(last_tab)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 20, 20, 20); root.setSpacing(14)
+        root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
 
-        # MIDI throughput dashboard
+        # Tab widget to split content into Live, Scope, Throughput, Heatmap tabs
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet("""
+            QTabBar::tab { padding: 8px 12px; font-size: 11px; font-weight: 600; }
+            QTabWidget::pane { border: none; }
+        """)
+        root.addWidget(self._tabs)
+
+        # === Live Tab: DualSense diagram + stats panel ===
+        live_widget = QWidget()
+        live_layout = QVBoxLayout(live_widget)
+        live_layout.setContentsMargins(20, 20, 20, 20); live_layout.setSpacing(14)
+
+        top = QHBoxLayout(); top.setSpacing(14)
+        self._diagram = _DualSenseDiagram()
+        top.addWidget(self._diagram, 3)
+        top.addWidget(self._build_stats_panel(), 1)
+        live_layout.addLayout(top)
+        live_layout.addStretch()
+        self._tabs.addTab(live_widget, "Live")
+
+        # === Scope Tab: Oscilloscope traces ===
+        scope_widget = QWidget()
+        scope_layout = QVBoxLayout(scope_widget)
+        scope_layout.setContentsMargins(20, 20, 20, 20); scope_layout.setSpacing(4)
+        scope_layout.addWidget(self._section_title("INPUT OSCILLOSCOPE (5 SECOND TRACE)"))
+
+        scope_container = QWidget()
+        scope_container_layout = QVBoxLayout(scope_container)
+        scope_container_layout.setContentsMargins(0, 0, 0, 0); scope_container_layout.setSpacing(6)
+        self._oscilloscopes: Dict[int, AxisScope] = {}
+        for axis_idx, label in SPARK_AXES:
+            scope = AxisScope(axis_idx, label)
+            self._oscilloscopes[axis_idx] = scope
+            scope_container_layout.addWidget(scope)
+        scope_container_layout.addStretch()
+
+        scope_scroll = QScrollArea()
+        scope_scroll.setWidget(scope_container)
+        scope_scroll.setWidgetResizable(True)
+        scope_scroll.setStyleSheet("border: none;")
+        scope_layout.addWidget(scope_scroll, 1)
+        self._tabs.addTab(scope_widget, "Scope")
+
+        # === Throughput Tab: MIDI throughput dashboard ===
+        throughput_widget = QWidget()
+        throughput_layout = QVBoxLayout(throughput_widget)
+        throughput_layout.setContentsMargins(20, 20, 20, 20); throughput_layout.setSpacing(4)
+
         throughput_frame = self._panel_frame()
         throughput_v = QVBoxLayout(throughput_frame)
         throughput_v.setContentsMargins(10, 8, 10, 10); throughput_v.setSpacing(4)
         throughput_v.addWidget(self._section_title("MIDI THROUGHPUT (60 SEC HISTORY)"))
         self._throughput_panel = ThroughputPanel()
         throughput_v.addWidget(self._throughput_panel)
-        root.addWidget(throughput_frame, 1)
+        throughput_layout.addWidget(throughput_frame, 1)
 
-        top = QHBoxLayout(); top.setSpacing(14)
-        self._diagram = _DualSenseDiagram()
-        top.addWidget(self._diagram, 3)
-        top.addWidget(self._build_stats_panel(), 1)
-        root.addLayout(top, 3)
-
-        # Oscilloscope grid — 6 rows (one per axis: LX, LY, RX, RY, L2, R2).
-        scope_frame = self._panel_frame()
-        scope_v = QVBoxLayout(scope_frame)
-        scope_v.setContentsMargins(10, 8, 10, 10); scope_v.setSpacing(4)
-        scope_v.addWidget(self._section_title("INPUT OSCILLOSCOPE (5 SECOND TRACE)"))
-        scope_container = QWidget()
-        scope_layout = QVBoxLayout(scope_container)
-        scope_layout.setContentsMargins(0, 0, 0, 0); scope_layout.setSpacing(6)
-        self._oscilloscopes: Dict[int, AxisScope] = {}
-        for axis_idx, label in SPARK_AXES:
-            scope = AxisScope(axis_idx, label)
-            self._oscilloscopes[axis_idx] = scope
-            scope_layout.addWidget(scope)
-        scope_layout.addStretch()
-        scope_scroll = QScrollArea()
-        scope_scroll.setWidget(scope_container)
-        scope_scroll.setWidgetResizable(True)
-        scope_scroll.setStyleSheet("border: none;")
-        scope_v.addWidget(scope_scroll, 1)
-        root.addWidget(scope_frame, 2)
-
-        # Sparkline grid — 3 cols x 2 rows even split.
+        # Also include sparkline grid in throughput tab for context
         spark_frame = self._panel_frame()
         spark_grid = QGridLayout(spark_frame)
         spark_grid.setContentsMargins(10, 10, 10, 10); spark_grid.setSpacing(8)
@@ -430,7 +460,13 @@ class VisualiseTab(QWidget):
             spark = _Sparkline(label)
             self._sparklines[axis_idx] = spark
             spark_grid.addWidget(spark, i // 3, i % 3)
-        root.addWidget(spark_frame, 2)
+        throughput_layout.addWidget(spark_frame, 1)
+        self._tabs.addTab(throughput_widget, "Throughput")
+
+        # === Heatmap Tab: Button activity + usage heatmap ===
+        heatmap_widget = QWidget()
+        heatmap_layout = QVBoxLayout(heatmap_widget)
+        heatmap_layout.setContentsMargins(20, 20, 20, 20); heatmap_layout.setSpacing(14)
 
         heat_frame = self._panel_frame()
         heat_v = QVBoxLayout(heat_frame)
@@ -438,7 +474,7 @@ class VisualiseTab(QWidget):
         heat_v.addWidget(self._section_title("BUTTON ACTIVITY"))
         self._heatmap = _Heatmap()
         heat_v.addWidget(self._heatmap, 1)
-        root.addWidget(heat_frame, 2)
+        heatmap_layout.addWidget(heat_frame, 1)
 
         # Usage heatmap — session-accumulated press counts on the silhouette.
         usage_frame = self._panel_frame()
@@ -446,7 +482,8 @@ class VisualiseTab(QWidget):
         usage_v.setContentsMargins(10, 8, 10, 10); usage_v.setSpacing(4)
         self._usage_heatmap = UsageHeatmap()
         usage_v.addWidget(self._usage_heatmap)
-        root.addWidget(usage_frame, 3)
+        heatmap_layout.addWidget(usage_frame, 1)
+        self._tabs.addTab(heatmap_widget, "Heatmap")
 
     @staticmethod
     def _panel_frame() -> QFrame:
@@ -488,6 +525,10 @@ class VisualiseTab(QWidget):
         row.addWidget(lbl); row.addWidget(val)
         layout.addLayout(row)
         return val
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Persist the current tab selection."""
+        self._settings.setValue("visualise/last_tab", index)
 
     def attach_bridge_signals(self, worker) -> None:
         """Hook the BridgeWorker. Called by MainWindow during _wire_signals."""

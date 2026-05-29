@@ -9,9 +9,10 @@ apps found by daw_detector, each with a "Suggest connector" CTA.
 """
 from __future__ import annotations
 
+import threading
 from typing import List, Tuple
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QObject, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
@@ -20,6 +21,41 @@ from PySide6.QtWidgets import (
 from .. import telemetry
 from ..connectors import Connector, HostInstallation, all_connectors
 from ..daw_detector import DetectedApp, detect_installed_apps
+
+
+# Colour palette for verify status chips
+_VERIFY_COLOURS = {
+    "verified": ("#2dd4bf", "#0d2e2a"),
+    "outdated": ("#f59e0b", "#2c1d06"),
+    "missing":  ("#f87171", "#2d0e0e"),
+}
+_VERIFY_ICONS = {
+    "verified": "✓",
+    "outdated": "⚠",
+    "missing":  "✗",
+}
+_VERIFY_LABELS = {
+    "verified": "Installed and verified",
+    "outdated": "Found but outdated",
+    "missing":  "Missing",
+}
+
+
+class _VerifyWorker(QObject):
+    """Run verify() off the main thread and signal the result."""
+    finished = Signal(str, str)   # status, details
+
+    def __init__(self, connector: Connector, host: HostInstallation) -> None:
+        super().__init__()
+        self._connector = connector
+        self._host = host
+
+    def run(self) -> None:
+        try:
+            status, details = self._connector.verify(self._host)
+        except Exception as exc:
+            status, details = "missing", f"verify() raised: {exc}"
+        self.finished.emit(status, details)
 
 
 class ConnectorsTab(QWidget):
@@ -251,6 +287,20 @@ class ConnectorsTab(QWidget):
 
         button_row = QHBoxLayout()
         button_row.setSpacing(6)
+
+        # Verify button + inline status chip
+        verify_btn = QPushButton("Verify")
+        verify_btn.setMinimumWidth(60)
+        verify_btn.setToolTip("Run a quick install self-test for this connector")
+        verify_chip = QLabel()
+        verify_chip.setVisible(False)
+        verify_chip.setStyleSheet("border-radius: 4px; padding: 2px 6px; font-size: 11px;")
+        verify_btn.clicked.connect(
+            lambda: self._on_verify(connector, host, verify_btn, verify_chip)
+        )
+        button_row.addWidget(verify_btn)
+        button_row.addWidget(verify_chip)
+
         test_btn = QPushButton("Test")
         test_btn.setMinimumWidth(60)
         test_btn.setToolTip("Send a test MIDI note to verify DAW connectivity")
@@ -300,3 +350,35 @@ class ConnectorsTab(QWidget):
             "Confirm that you received it in your MIDI monitor.\n\n"
             "Cmd-Shift-P to send another panic/all notes off."
         )
+
+    def _on_verify(
+        self,
+        connector: Connector,
+        host: HostInstallation,
+        btn: "QPushButton",
+        chip: "QLabel",
+    ) -> None:
+        """Run verify() in a background thread and update the status chip inline."""
+        btn.setEnabled(False)
+        btn.setText("…")
+        chip.setVisible(False)
+
+        worker = _VerifyWorker(connector, host)
+
+        def _done(status: str, details: str) -> None:
+            fg, bg = _VERIFY_COLOURS.get(status, ("#f5f7fa", "#16181d"))
+            icon = _VERIFY_ICONS.get(status, "?")
+            label = _VERIFY_LABELS.get(status, status)
+            chip.setText(f"{icon} {label}")
+            chip.setStyleSheet(
+                f"color: {fg}; background-color: {bg}; border-radius: 4px; "
+                "padding: 2px 6px; font-size: 11px;"
+            )
+            chip.setToolTip(details)
+            chip.setVisible(True)
+            btn.setText("Verify")
+            btn.setEnabled(True)
+
+        worker.finished.connect(_done)
+        t = threading.Thread(target=worker.run, daemon=True)
+        t.start()

@@ -95,6 +95,9 @@ class ReaperConnector(Connector):
     def is_installed(self, host: HostInstallation) -> bool:
         return (host.config_dir / KEYMAP_FILENAME).exists()
 
+    def _installed_file(self, host: HostInstallation) -> Path:
+        return host.config_dir / KEYMAP_FILENAME
+
     def post_install_steps(self, host: HostInstallation) -> str:
         return (
             "1. Open REAPER.\n"
