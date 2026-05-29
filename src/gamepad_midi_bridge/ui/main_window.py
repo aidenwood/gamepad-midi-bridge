@@ -24,6 +24,7 @@ from .bluetooth_tab import BluetoothTab
 from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
 from .help_tab import HelpTab
+from .inspector import INSPECTOR_WIDTH, Inspector, render_mapping_selection
 from .log_console import LogConsole
 from .mapping_editor import MappingEditor
 from .marketplace_tab import MarketplaceTab
@@ -114,18 +115,77 @@ class MainWindow(QMainWindow):
         self._update_banner = self._build_update_banner()
         root.addWidget(self._update_banner)
 
-        # Tabs over a collapsible log console. QSplitter lets the user drag
-        # the divide; the console respects its own collapsed flag on launch.
+        # Layout:
+        #   body_splitter (vertical)
+        #     ├── content_splitter (horizontal): tabs | side panel
+        #     └── log console (collapsible from its own header AND via the
+        #         status-bar Console toggle)
+        # The side panel holds a secondary ControllerMeter so the user can keep
+        # an eye on live controller activity while editing on any tab (mapping,
+        # presets, marketplace, etc). Hidden by default — toggled via the
+        # status-bar Split button.
         body_splitter = QSplitter(Qt.Vertical)
         body_splitter.setHandleWidth(2)
         body_splitter.setChildrenCollapsible(False)
-        body_splitter.addWidget(self._build_tabs())
+
+        # Figma-style workspace layout:
+        #   content_splitter (horizontal): [ inspector_a | workspace_a | workspace_b | inspector_b ]
+        # workspace_b is hidden unless Split is on; both inspectors are hidden
+        # until the user clicks the Inspect button (or makes a selection that
+        # auto-opens it). This lets each side of a split keep its own
+        # context-properties pane — Figma-style.
+        content_splitter = QSplitter(Qt.Horizontal)
+        content_splitter.setHandleWidth(2)
+        content_splitter.setChildrenCollapsible(False)
+
+        # Workspace A — the primary tabs.
+        self._workspace_a = self._build_tabs()
+        # Workspace B — the secondary live-preview panel (this is the
+        # original "split" content: a controller meter alongside the tabs).
+        self._side_panel = self._build_side_panel()
+
+        # Inspectors, one per workspace. Each is registered with the same
+        # mapping-selection renderer so either side reflects mapping clicks.
+        self._inspector_a = Inspector(label="INSPECTOR")
+        self._inspector_b = Inspector(label="INSPECTOR · B")
+        for insp in (self._inspector_a, self._inspector_b):
+            insp.register_renderer("mapping", render_mapping_selection)
+            insp.setVisible(False)
+
+        content_splitter.addWidget(self._workspace_a)
+        content_splitter.addWidget(self._inspector_a)
+        content_splitter.addWidget(self._side_panel)
+        content_splitter.addWidget(self._inspector_b)
+        # Tabs stretch, side panel + inspectors are fixed-ish.
+        content_splitter.setStretchFactor(0, 1)
+        content_splitter.setStretchFactor(1, 0)
+        content_splitter.setStretchFactor(2, 0)
+        content_splitter.setStretchFactor(3, 0)
+        content_splitter.setSizes([1000, INSPECTOR_WIDTH, 320, INSPECTOR_WIDTH])
+        self._content_splitter = content_splitter
+        self._side_panel.setVisible(False)  # split mode off by default
+
+        body_splitter.addWidget(content_splitter)
         self._log_console = LogConsole()
         body_splitter.addWidget(self._log_console)
         body_splitter.setStretchFactor(0, 1)
         body_splitter.setStretchFactor(1, 0)
         body_splitter.setSizes([640, 1 if self._log_console.is_collapsed() else 200])
+        self._body_splitter = body_splitter
         root.addWidget(body_splitter, 1)
+
+        # Wire the status-bar toggle buttons (created earlier inside
+        # _build_status_bar but not yet hooked up — chicken-and-egg with the
+        # console + side_panel widgets being constructed after the bar).
+        self._split_btn.setChecked(False)
+        self._split_btn.clicked.connect(self._toggle_split_view)
+        self._console_btn.setChecked(not self._log_console.is_collapsed())
+        self._console_btn.clicked.connect(self._toggle_console)
+        self._inspect_btn.setChecked(False)
+        self._inspect_btn.clicked.connect(self._toggle_inspector)
+        # Two-way binding: closing an inspector via its X reflects in the toggle.
+        self._inspector_a.visibility_changed.connect(self._on_inspector_visibility)
+        self._inspector_b.visibility_changed.connect(self._on_inspector_visibility)
 
         # Stream stdlib logging + bridge activity into the console.
         self._log_console.install_root_handler()
@@ -179,30 +239,46 @@ class MainWindow(QMainWindow):
     # ============================================================== ui builders
 
     def _build_status_bar(self) -> QFrame:
+        # Figma-style flat header — slim height, single-line status, clear
+        # tool clusters separated by vertical dividers.
         bar = QFrame()
         bar.setObjectName("StatusBar")
+        bar.setStyleSheet(
+            "QFrame#StatusBar { background: #0e0f12; "
+            "border-bottom: 1px solid #1c1e25; }"
+        )
+        bar.setFixedHeight(52)
         h = QHBoxLayout(bar)
-        h.setContentsMargins(18, 14, 18, 14)
-        h.setSpacing(14)
+        h.setContentsMargins(16, 8, 14, 8)
+        h.setSpacing(10)
 
+        # Status cluster — title + activity inline, more compact than the
+        # original stacked title/subtitle column.
         title_col = QVBoxLayout()
-        title_col.setSpacing(2)
+        title_col.setSpacing(0)
         self._status_title = QLabel("Idle")
         self._status_title.setObjectName("StatusTitle")
+        self._status_title.setStyleSheet(
+            "color: #f5f7fa; font-size: 13px; font-weight: 600;"
+        )
         self._status_sub = QLabel("Plug in a controller and click Start.")
         self._status_sub.setObjectName("StatusSub")
+        self._status_sub.setStyleSheet("color: #5a606b; font-size: 11px;")
         title_col.addWidget(self._status_title)
         title_col.addWidget(self._status_sub)
         h.addLayout(title_col, 1)
 
         self._rate_label = QLabel("")
-        self._rate_label.setStyleSheet("color: #5a606b; font-size: 11px;")
+        self._rate_label.setStyleSheet(
+            "color: #8a9099; font-size: 10px; font-family: ui-monospace, Menlo, monospace;"
+        )
         self._rate_label.setMinimumWidth(70)
+        self._rate_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         h.addWidget(self._rate_label)
 
         self._activity_dot = QLabel("●")
         self._activity_dot.setObjectName("ActivityDot")
-        self._activity_dot.setStyleSheet("color: #2c313b; font-size: 18px;")
+        self._activity_dot.setStyleSheet("color: #2c313b; font-size: 14px;")
         h.addWidget(self._activity_dot)
 
         self._start_btn = QPushButton("Start")
@@ -217,6 +293,38 @@ class MainWindow(QMainWindow):
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._on_stop)
         h.addWidget(self._stop_btn)
+
+        # Layout toggles — Split (side panel) + Console (bottom pane).
+        # Both are checkable so the pressed state mirrors the panel visibility.
+        # Click handlers are wired AFTER the panel + console widgets exist
+        # (see __init__) so we don't reference them before construction.
+        divider = QFrame()
+        divider.setFrameShape(QFrame.VLine)
+        divider.setStyleSheet("color: #2c313b;")
+        h.addWidget(divider)
+
+        self._split_btn = QPushButton("Split")
+        self._split_btn.setObjectName("LayoutToggle")
+        self._split_btn.setCheckable(True)
+        self._split_btn.setToolTip("Show controller meter alongside the current tab")
+        self._split_btn.setMinimumWidth(70)
+        h.addWidget(self._split_btn)
+
+        self._console_btn = QPushButton("Console")
+        self._console_btn.setObjectName("LayoutToggle")
+        self._console_btn.setCheckable(True)
+        self._console_btn.setToolTip("Show or hide the log console at the bottom of the window")
+        self._console_btn.setMinimumWidth(80)
+        h.addWidget(self._console_btn)
+
+        self._inspect_btn = QPushButton("Inspect")
+        self._inspect_btn.setObjectName("LayoutToggle")
+        self._inspect_btn.setCheckable(True)
+        self._inspect_btn.setToolTip(
+            "Open the right-hand inspector — context properties for the selected item"
+        )
+        self._inspect_btn.setMinimumWidth(80)
+        h.addWidget(self._inspect_btn)
 
         return bar
 
@@ -257,6 +365,113 @@ class MainWindow(QMainWindow):
         url = info.notes_url or info.download_url or UPGRADE_URL
         self._update_open.clicked.connect(lambda: webbrowser.open(url))
         self._update_banner.setVisible(True)
+
+    def _build_side_panel(self) -> QWidget:
+        """Side panel — secondary ControllerMeter docked to the right of the
+        tabs so users can keep an eye on live controller activity while
+        editing on any tab. Toggled on/off via the status-bar Split button.
+
+        A SEPARATE meter instance from the Live-tab one so both can be
+        visible simultaneously — bridge signals fan out to both meters.
+        """
+        wrap = QWidget()
+        wrap.setMinimumWidth(280)
+        wrap.setMaximumWidth(420)
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(12, 14, 14, 14)
+        v.setSpacing(8)
+
+        header = QLabel("LIVE PREVIEW")
+        header.setStyleSheet(
+            "color: #5a606b; font-size: 10px; font-weight: 700; "
+            "letter-spacing: 1.4px;"
+        )
+        v.addWidget(header)
+
+        # Secondary ControllerMeter — `_wire_signals` connects bridge events
+        # to both `_meter` (Live tab) and `_side_meter` (this side panel).
+        self._side_meter = ControllerMeter()
+        v.addWidget(self._side_meter, 1)
+
+        return wrap
+
+    def _toggle_split_view(self) -> None:
+        """Show / hide the right-hand workspace (side panel + its own
+        inspector). When split is off, only workspace A and inspector A are
+        usable — the right pair collapses to zero width."""
+        visible = self._split_btn.isChecked()
+        self._side_panel.setVisible(visible)
+        # Inspector B follows the split toggle — opening split with the
+        # inspector toggle on reveals BOTH inspectors, one per side.
+        if visible and self._inspect_btn.isChecked():
+            self._inspector_b.show_panel()
+        elif not visible:
+            self._inspector_b.hide_panel()
+        self._rebalance_content_splitter()
+
+    def _toggle_console(self) -> None:
+        """Show / hide the bottom log console. Mirrors the console's own
+        internal toggle (header arrow) so either control reflects the same
+        state. Persists across launches via the console's config."""
+        want_open = self._console_btn.isChecked()
+        # `set_collapsed(True)` hides the body but keeps the header strip
+        # visible — matches what the in-console toggle does and preserves
+        # discoverability (the user can still see CONSOLE | ▾ at the bottom).
+        self._log_console.set_collapsed(not want_open)
+
+    def _toggle_inspector(self) -> None:
+        """Show / hide the right inspector(s). When split is on, both
+        inspectors flip together; otherwise only inspector A is involved."""
+        want_open = self._inspect_btn.isChecked()
+        if want_open:
+            self._inspector_a.show_panel()
+            if self._split_btn.isChecked():
+                self._inspector_b.show_panel()
+        else:
+            self._inspector_a.hide_panel()
+            self._inspector_b.hide_panel()
+        self._rebalance_content_splitter()
+
+    def _on_inspector_visibility(self, _visible: bool) -> None:
+        """Keep the status-bar Inspect toggle in sync when an inspector is
+        closed via its own × button. The button reflects "any inspector open"."""
+        any_visible = self._inspector_a.isVisible() or self._inspector_b.isVisible()
+        if self._inspect_btn.isChecked() != any_visible:
+            self._inspect_btn.setChecked(any_visible)
+        self._rebalance_content_splitter()
+
+    def _rebalance_content_splitter(self) -> None:
+        """Recompute pane widths after a visibility toggle so panels don't
+        appear at 0px or compress workspace A unfairly."""
+        sizes = []
+        # workspace A — always visible, takes whatever's left.
+        sizes.append(1)
+        # inspector A — fixed if visible, else 0.
+        sizes.append(INSPECTOR_WIDTH if self._inspector_a.isVisible() else 0)
+        # side panel (workspace B content) — fixed-ish if visible, else 0.
+        sizes.append(320 if self._side_panel.isVisible() else 0)
+        # inspector B — fixed if visible, else 0.
+        sizes.append(INSPECTOR_WIDTH if self._inspector_b.isVisible() else 0)
+        # Scale workspace A to fill remaining width.
+        total = max(800, self.width())
+        used = sum(sizes[1:])
+        sizes[0] = max(400, total - used)
+        self._content_splitter.setSizes(sizes)
+
+    # ============================================================== inspector
+    # External API for tabs to push their selection into the inspector(s).
+    # Workspace A always gets the selection; workspace B mirrors when split
+    # is on (so the user can compare the same item across both sides).
+
+    def push_inspector_selection(self, tab_name: str, payload: Optional[dict]) -> None:
+        self._inspector_a.set_selection(tab_name, payload)
+        if self._split_btn.isChecked():
+            self._inspector_b.set_selection(tab_name, payload)
+        # Auto-open the inspector on first selection so the user sees the
+        # payload immediately — same UX as Figma.
+        if payload is not None and not self._inspect_btn.isChecked():
+            self._inspect_btn.setChecked(True)
+            self._toggle_inspector()
 
     def _build_tabs(self) -> QTabWidget:
         tabs = QTabWidget()
@@ -305,6 +520,10 @@ class MainWindow(QMainWindow):
         self._mapping_editor = MappingEditor(self._mapping)
         self._mapping_editor.upgrade_clicked.connect(self._open_upgrade)
         self._mapping_editor.activate_clicked.connect(self._enter_license_key)
+        # Forward row clicks into the right-hand inspector (Figma pattern).
+        self._mapping_editor.selection_changed.connect(
+            lambda p: self.push_inspector_selection("mapping", p)
+        )
         tabs.addTab(self._scrollable(self._mapping_editor), "Mapping")
 
         # Templates — visual mapping builder + multi-format exporter.
@@ -455,6 +674,10 @@ class MainWindow(QMainWindow):
         # path unchanged. Slot 1 wiring is deferred until configure() actually
         # spins up a second bridge.
         self._wire_bridge_to_meter(self._bridge, self._meter, primary=True)
+        # Side-panel meter mirrors the primary bridge so the user can keep
+        # an eye on live controller activity while editing on any tab.
+        # `primary=False` keeps it out of the shared status-bar wiring loop.
+        self._wire_bridge_to_meter(self._bridge, self._side_meter, primary=False)
         # Mirror primary bridge activity into the bottom console.
         self._log_console.attach_bridge_signals(self._bridge.worker)
         # Feed the Visualise tab from the same primary worker.

@@ -1,11 +1,14 @@
 """Mapping dataclass defaults + JSON round-trip + V1 backwards compat."""
 from __future__ import annotations
 
+import pytest
+
 from gamepad_midi_bridge.mapping import (
     CornerConfig,
     Mapping,
     OscConfig,
     SCHEMA_VERSION,
+    StickConfig,
     TouchpadConfig,
 )
 
@@ -110,3 +113,207 @@ def test_touchpad_config_defaults():
     assert cfg.x_cc == 16
     assert cfg.y_cc == 17
     assert cfg.require_contact is True
+    # V4 shaping defaults
+    assert cfg.mode == "absolute"
+    assert cfg.click_to_arm is False
+    assert cfg.inner_deadzone == 0.0
+    assert cfg.x_curve == "linear"
+    assert cfg.y_curve == "linear"
+    assert cfg.x_curve_amount == 0.5
+    assert cfg.y_curve_amount == 0.5
+
+
+def test_touchpad_shaping_round_trip():
+    """V4 touchpad shaping fields preserve through serialisation."""
+    m = Mapping(name="TouchpadShaping")
+    m.touchpad = TouchpadConfig(
+        enabled=True,
+        x_cc=20,
+        y_cc=21,
+        mode="relative",
+        click_to_arm=True,
+        inner_deadzone=0.1,
+        x_curve="exponential",
+        y_curve="logarithmic",
+        x_curve_amount=0.7,
+        y_curve_amount=0.3,
+    )
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.touchpad.enabled is True
+    assert restored.touchpad.x_cc == 20
+    assert restored.touchpad.y_cc == 21
+    assert restored.touchpad.mode == "relative"
+    assert restored.touchpad.click_to_arm is True
+    assert restored.touchpad.inner_deadzone == pytest.approx(0.1, abs=1e-6)
+    assert restored.touchpad.x_curve == "exponential"
+    assert restored.touchpad.y_curve == "logarithmic"
+    assert restored.touchpad.x_curve_amount == pytest.approx(0.7, abs=1e-6)
+    assert restored.touchpad.y_curve_amount == pytest.approx(0.3, abs=1e-6)
+
+
+def test_v3_preset_loads_with_v4_defaults():
+    """V3 preset (no touchpad shaping) loads cleanly with V4 defaults."""
+    v3_dict = {
+        "name": "LegacyTouchpad",
+        "schema_version": 3,
+        "touchpad": {
+            "enabled": True,
+            "x_cc": 20,
+            "y_cc": 21,
+            "require_contact": False,
+            # Missing: mode, click_to_arm, inner_deadzone, curves, amounts
+        }
+    }
+    m = Mapping.from_dict(v3_dict)
+    assert m.touchpad.enabled is True
+    assert m.touchpad.x_cc == 20
+    assert m.touchpad.require_contact is False
+    # Shaping fields default to V4 defaults (absolute, not armed, linear)
+    assert m.touchpad.mode == "absolute"
+    assert m.touchpad.click_to_arm is False
+    assert m.touchpad.inner_deadzone == 0.0
+    assert m.touchpad.x_curve == "linear"
+    assert m.touchpad.y_curve == "linear"
+
+
+def test_touchpad_curve_amount_clamping():
+    """Curve amounts outside 0..1 are clamped on load."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "x_curve_amount": 1.5,   # over-range
+            "y_curve_amount": -0.5,  # under-range
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.x_curve_amount == 1.0
+    assert m.touchpad.y_curve_amount == 0.0
+
+
+def test_touchpad_inner_deadzone_clamping():
+    """Inner deadzone is clamped to 0..0.49."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "inner_deadzone": 0.7,   # over-range
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.inner_deadzone == pytest.approx(0.49, abs=1e-6)
+
+
+def test_touchpad_schema_version_bumped():
+    """Confirm SCHEMA_VERSION is 4."""
+    assert SCHEMA_VERSION == 4
+
+
+def test_stick_config_defaults():
+    """StickConfig defaults preserve legacy behaviour (linear, no clamp, no polar)."""
+    cfg = StickConfig()
+    assert cfg.inner_deadzone == 0.05
+    assert cfg.outer_clamp == 0.0
+    assert cfg.curve == "linear"
+    assert cfg.curve_amount == 0.5
+    assert cfg.polar_mode is False
+    assert cfg.polar_angle_cc == 7
+    assert cfg.polar_mag_cc == 8
+
+
+def test_stick_config_round_trip():
+    """StickConfig fields preserve through serialisation."""
+    m = Mapping(name="StickShaping")
+    m.left_stick = StickConfig(
+        inner_deadzone=0.1,
+        outer_clamp=0.15,
+        curve="exponential",
+        curve_amount=0.7,
+        polar_mode=False,
+    )
+    m.right_stick = StickConfig(
+        inner_deadzone=0.08,
+        outer_clamp=0.0,
+        curve="s-curve",
+        curve_amount=0.6,
+        polar_mode=True,
+        polar_angle_cc=10,
+        polar_mag_cc=11,
+    )
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.left_stick.inner_deadzone == pytest.approx(0.1, abs=1e-6)
+    assert restored.left_stick.outer_clamp == pytest.approx(0.15, abs=1e-6)
+    assert restored.left_stick.curve == "exponential"
+    assert restored.left_stick.curve_amount == pytest.approx(0.7, abs=1e-6)
+    assert restored.left_stick.polar_mode is False
+
+    assert restored.right_stick.inner_deadzone == pytest.approx(0.08, abs=1e-6)
+    assert restored.right_stick.outer_clamp == 0.0
+    assert restored.right_stick.curve == "s-curve"
+    assert restored.right_stick.curve_amount == pytest.approx(0.6, abs=1e-6)
+    assert restored.right_stick.polar_mode is True
+    assert restored.right_stick.polar_angle_cc == 10
+    assert restored.right_stick.polar_mag_cc == 11
+
+
+def test_stick_config_invalid_curve_defaults_to_linear():
+    """Invalid curve names default to 'linear' on load."""
+    v_dict = {
+        "left_stick": {
+            "curve": "invalid_curve_name",
+            "curve_amount": 0.5,
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.left_stick.curve == "linear"
+
+
+def test_stick_config_clamping():
+    """StickConfig numeric fields are clamped on load."""
+    v_dict = {
+        "left_stick": {
+            "inner_deadzone": 1.5,    # over-range
+            "outer_clamp": -0.1,      # under-range
+            "curve_amount": 2.0,      # over-range
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.left_stick.inner_deadzone == pytest.approx(0.99, abs=1e-6)
+    assert m.left_stick.outer_clamp == 0.0
+    assert m.left_stick.curve_amount == 1.0
+
+
+def test_stick_config_missing_fields_load_defaults():
+    """StickConfig fields missing from dict load with sensible defaults."""
+    v_dict = {
+        "left_stick": {
+            "inner_deadzone": 0.1,
+            # Missing: outer_clamp, curve, curve_amount, polar_mode, polar_*_cc
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.left_stick.inner_deadzone == pytest.approx(0.1, abs=1e-6)
+    assert m.left_stick.outer_clamp == 0.0
+    assert m.left_stick.curve == "linear"
+    assert m.left_stick.curve_amount == 0.5
+    assert m.left_stick.polar_mode is False
+    assert m.left_stick.polar_angle_cc == 7
+    assert m.left_stick.polar_mag_cc == 8
+
+
+def test_v3_preset_loads_with_v4_stick_defaults():
+    """V3 preset (no stick config) loads cleanly with V4 defaults."""
+    v3_dict = {
+        "name": "LegacySticks",
+        "schema_version": 3,
+        "buttons": {"0": 60},
+        "axes": {"0": 3},
+        # Missing: left_stick, right_stick
+    }
+    m = Mapping.from_dict(v3_dict)
+    # Legacy behaviour: linear stick ramp, no polar, default deadzone
+    assert m.left_stick.curve == "linear"
+    assert m.left_stick.polar_mode is False
+    assert m.left_stick.inner_deadzone == pytest.approx(0.05, abs=1e-6)
+    assert m.right_stick.curve == "linear"
+    assert m.right_stick.polar_mode is False

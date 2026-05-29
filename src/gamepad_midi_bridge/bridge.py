@@ -24,7 +24,8 @@ from .calibration import calibrate
 from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import HapticInputBinding, Mapping, STICK_AXES
+from .mapping import HapticInputBinding, L2_AXIS, Mapping, R2_AXIS, STICK_AXES
+from . import shaping
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
 from .midi_input import (
     INPUT_PORT_NAME, MidiInputError, OpenedInputPort,
@@ -125,9 +126,22 @@ class BridgeWorker(QObject):
         self._running = False
         self._prev_buttons: Dict[int, bool] = {}
         self._prev_cc: Dict[int, int] = {}
+        # Per-trigger latch state, only consulted by `shaping.apply_trigger`
+        # when the trigger config mode is "latch". Stateless modes ignore.
+        self._trigger_states: Dict[int, shaping.TriggerState] = {
+            L2_AXIS: shaping.TriggerState(),
+            R2_AXIS: shaping.TriggerState(),
+        }
+        # Per-trigger "modifier gate" state — was the gate button held on the
+        # previous tick? Used to detect the release edge so we can send the
+        # configured rest value exactly once instead of leaving the receiver
+        # stuck on the last trigger value.
+        self._trigger_gate_was_held: Dict[int, bool] = {L2_AXIS: False, R2_AXIS: False}
         self._prev_hat = {"up": False, "down": False, "left": False, "right": False}
         self._prev_corner_notes: Dict[str, Optional[int]] = {"L": None, "R": None}
         self._prev_touch_cc: Dict[str, int] = {}
+        self._prev_touch_value: Dict[str, float] = {}  # tracks relative-mode state per axis
+        self._touch_armed: bool = False  # for click_to_arm mode
         self._prev_battery: Optional[tuple] = None
         # Telemetry throttle — emit GUI updates at ~30Hz max even at 100Hz polling
         self._last_telemetry: float = 0.0
@@ -467,6 +481,7 @@ class BridgeWorker(QObject):
 
                 self._poll_buttons(reader, mapping, midi, note_on, note_off, n_buttons)
                 self._poll_axes(reader, mapping, offsets, deadzone, midi, cc, n_axes)
+                self._poll_polar_sticks(reader, mapping, offsets, midi, cc, n_axes)
                 self._poll_corners(reader, mapping, offsets, deadzone, midi, note_on, note_off, n_axes)
                 if n_hats > 0:
                     self._poll_hat(reader, mapping, midi, note_on, note_off)
@@ -513,11 +528,53 @@ class BridgeWorker(QObject):
                 continue
             raw = reader.get_axis(axis_idx)
             if axis_idx in STICK_AXES:
+                # Apply offset for drift compensation
                 raw = max(-1.0, min(1.0, raw - offsets.get(axis_idx, 0.0)))
-                if abs(raw) < deadzone:
-                    raw = 0.0
-            val = int(round((raw + 1.0) * 63.5))
-            val = max(0, min(127, val))
+                # Select the appropriate stick config (left = 0,1; right = 2,3)
+                stick_cfg = mapping.left_stick if axis_idx < 2 else mapping.right_stick
+                # Apply shaping (deadzone, curves, etc.)
+                raw = shaping.apply_stick_shape(
+                    raw,
+                    inner_deadzone=stick_cfg.inner_deadzone,
+                    outer_clamp=stick_cfg.outer_clamp,
+                    curve=stick_cfg.curve,
+                    curve_amount=stick_cfg.curve_amount,
+                )
+                # Convert to 0..127 range
+                val = int(round((raw + 1.0) * 63.5))
+                val = max(0, min(127, val))
+            elif axis_idx == L2_AXIS or axis_idx == R2_AXIS:
+                # Triggers run through the shaping pipeline — supports linear
+                # (default), ceiling-cap, inverted, and latch modes. Latch
+                # mode mutates the per-trigger TriggerState held on `self`.
+                cfg = mapping.l2_trigger if axis_idx == L2_AXIS else mapping.r2_trigger
+                pressure = shaping.normalise_trigger_pressure(raw)
+                val = shaping.apply_trigger(
+                    pressure,
+                    mode=cfg.mode,
+                    ceiling=cfg.ceiling,
+                    latch_threshold=cfg.latch_threshold,
+                    state=self._trigger_states.get(axis_idx),
+                )
+                # Modifier-gate check. If the trigger is configured with a
+                # `gate_button`, the trigger is silent unless the user is
+                # holding that button. On the release edge we send the
+                # configured rest value exactly once so the receiver doesn't
+                # keep hearing the last value forever.
+                if cfg.gate_button is not None:
+                    gate_held = bool(reader.get_button(cfg.gate_button))
+                    was_held = self._trigger_gate_was_held.get(axis_idx, False)
+                    self._trigger_gate_was_held[axis_idx] = gate_held
+                    should_emit, send_release = shaping.gate_decision(gate_held, was_held)
+                    if not should_emit:
+                        continue
+                    if send_release:
+                        val = cfg.gate_release_value
+            else:
+                # Other axes (HID hats, generic analogs) use the legacy
+                # -1..1 → 0..127 remap so unknown controllers keep working.
+                val = int(round((raw + 1.0) * 63.5))
+                val = max(0, min(127, val))
             if self._prev_cc.get(axis_idx) != val:
                 if not osc_only:
                     midi.port.send_message([cc, cc_num, val])
@@ -529,6 +586,50 @@ class BridgeWorker(QObject):
                     self._prev_osc_axes[axis_idx] = val
                 self._prev_cc[axis_idx] = val
                 self._emit_axis(axis_idx, raw)
+
+    def _poll_polar_sticks(self, reader, mapping, offsets, midi, cc, n_axes) -> None:
+        """Emit polar (angle, magnitude) pairs for sticks in polar_mode.
+
+        Only runs for sticks configured with polar_mode=True. Converts cartesian
+        (X, Y) into (angle 0..1, magnitude 0..1) and sends as 2 separate CCs.
+        Deduplicates on last-sent CC value to avoid spam.
+        """
+        osc_only = self._osc_only()
+        for side, x_idx, y_idx, stick_cfg in (
+            ("L", 0, 1, mapping.left_stick),
+            ("R", 2, 3, mapping.right_stick),
+        ):
+            if not stick_cfg.polar_mode or x_idx >= n_axes or y_idx >= n_axes:
+                continue
+            # Read raw stick axes and apply offset
+            x = max(-1.0, min(1.0, reader.get_axis(x_idx) - offsets.get(x_idx, 0.0)))
+            y = max(-1.0, min(1.0, reader.get_axis(y_idx) - offsets.get(y_idx, 0.0)))
+            # Convert to polar (angle 0..1, magnitude 0..1)
+            angle, magnitude = shaping.apply_polar(
+                x, y, deadzone=stick_cfg.inner_deadzone
+            )
+            # Clamp outer radius if configured
+            if stick_cfg.outer_clamp > 0.0:
+                magnitude = min(1.0, magnitude / (1.0 - stick_cfg.outer_clamp))
+            # Convert to MIDI CC values (0..127)
+            angle_cc_val = int(round(angle * 127.0))
+            mag_cc_val = int(round(magnitude * 127.0))
+            angle_cc_val = max(0, min(127, angle_cc_val))
+            mag_cc_val = max(0, min(127, mag_cc_val))
+            # Track by synthetic axis indices to avoid collision with normal axes
+            angle_key = f"polar_{side}_angle"
+            mag_key = f"polar_{side}_mag"
+            # Only send if changed
+            if self._prev_cc.get(angle_key) != angle_cc_val:
+                if not osc_only:
+                    midi.port.send_message([cc, stick_cfg.polar_angle_cc, angle_cc_val])
+                    self.midi_sent.emit()
+                self._prev_cc[angle_key] = angle_cc_val
+            if self._prev_cc.get(mag_key) != mag_cc_val:
+                if not osc_only:
+                    midi.port.send_message([cc, stick_cfg.polar_mag_cc, mag_cc_val])
+                    self.midi_sent.emit()
+                self._prev_cc[mag_key] = mag_cc_val
 
     def _poll_corners(self, reader, mapping, offsets, deadzone,
                       midi, note_on, note_off, n_axes) -> None:
@@ -621,12 +722,25 @@ class BridgeWorker(QObject):
         # Touchpad — primary finger always; second finger when two_finger mode on.
         if mapping.touchpad.enabled:
             tp_cfg = mapping.touchpad
+            # DualSense touchpad click is button index 13 on the pygame layer.
+            # click_to_arm uses this to gate the CC output.
+            if tp_cfg.click_to_arm:
+                # Note: the reader might not have button 13 if it's an older
+                # or non-DualSense controller. Default to "not armed" in that case.
+                self._touch_armed = False
+                if 13 < self._reader.num_buttons() if self._reader else False:
+                    self._touch_armed = bool(self._reader.get_button(13))
+
             ta = state.touch_a
-            if ta.active or not tp_cfg.require_contact:
+            should_send = (ta.active or not tp_cfg.require_contact)
+            if tp_cfg.click_to_arm:
+                should_send = should_send and self._touch_armed
+
+            if should_send:
                 x_norm, y_norm = ta.normalized()
                 self.touchpad_xy.emit(ta.active, x_norm, y_norm)
-                self._send_touch_cc(midi, cc, tp_cfg.x_cc, x_norm)
-                self._send_touch_cc(midi, cc, tp_cfg.y_cc, y_norm)
+                self._send_touch_cc(midi, cc, tp_cfg.x_cc, x_norm, tp_cfg, "x")
+                self._send_touch_cc(midi, cc, tp_cfg.y_cc, y_norm, tp_cfg, "y")
             elif self._prev_touch_cc:
                 # Finger lifted — reset the GUI but keep the last MIDI value
                 # (Kaoss Pad behaviour: release leaves the modulator where it was).
@@ -637,11 +751,44 @@ class BridgeWorker(QObject):
                 # Only fire the secondary CCs while the second finger is down,
                 # so producers can use 2-finger mode as a momentary modulator.
                 if tb.active:
-                    bx, by = tb.normalized()
-                    self._send_touch_cc(midi, cc, tp_cfg.b_x_cc, bx)
-                    self._send_touch_cc(midi, cc, tp_cfg.b_y_cc, by)
+                    should_send_b = not tp_cfg.click_to_arm or self._touch_armed
+                    if should_send_b:
+                        bx, by = tb.normalized()
+                        self._send_touch_cc(midi, cc, tp_cfg.b_x_cc, bx, tp_cfg, "x")
+                        self._send_touch_cc(midi, cc, tp_cfg.b_y_cc, by, tp_cfg, "y")
 
-    def _send_touch_cc(self, midi, cc, cc_num: int, normalized: float) -> None:
+    def _send_touch_cc(self, midi, cc, cc_num: int, normalized: float,
+                       cfg: Optional["Mapping.TouchpadConfig"] = None,
+                       axis: str = "x") -> None:
+        """Send a shaped touchpad CC value.
+
+        If cfg is provided, applies curve + deadzone shaping via
+        shaping.apply_touchpad_axis. The axis param ("x" or "y") selects
+        which curve/amount to apply. For relative mode, we track and update
+        the per-axis state.
+        """
+        from .mapping import TouchpadConfig
+        if cfg is None:
+            cfg = TouchpadConfig()
+
+        # Apply shaping if provided
+        if cfg is not None:
+            curve = cfg.x_curve if axis == "x" else cfg.y_curve
+            curve_amt = cfg.x_curve_amount if axis == "x" else cfg.y_curve_amount
+            prev = self._prev_touch_value.get(f"{axis}_{cc_num}", 0.5)
+            shaped = shaping.apply_touchpad_axis(
+                normalized,
+                mode=cfg.mode,
+                inner_deadzone=cfg.inner_deadzone,
+                curve=curve,
+                curve_amount=curve_amt,
+                prev_value=prev,
+            )
+            # For relative mode, store the new value for next tick
+            if cfg.mode == "relative":
+                self._prev_touch_value[f"{axis}_{cc_num}"] = shaped
+            normalized = shaped
+
         val = max(0, min(127, int(round(normalized * 127))))
         key = f"touch_{cc_num}"
         if self._prev_touch_cc.get(key) != val:

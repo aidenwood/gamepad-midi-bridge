@@ -1,8 +1,10 @@
 """Default control mapping + serialisation.
 
-Schema version 2 (V1.1): adds corner-quantized stick buttons, touchpad XY
-CCs, and a placeholder for adaptive-trigger haptic effect names. Old v1
-presets without these fields load with sensible defaults thanks to dict.get.
+Schema version 4 (V1.3): touchpad shaping options (mode, curves, deadzone,
+click_to_arm). V3 added per-trigger shaping + haptic input. V2 (V1.1) added
+corner-quantized stick buttons, touchpad XY CCs, and adaptive-trigger haptic
+effect names. Old presets without new fields load with sensible defaults
+thanks to dict.get.
 """
 from __future__ import annotations
 
@@ -10,10 +12,71 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 
 # Axes that come from analog sticks (vs triggers). Sticks need drift compensation.
 STICK_AXES = frozenset({0, 1, 2, 3})
+
+# Trigger axis indices — used by both the per-tick polling loop and the
+# preset migration so we know where to attach a TriggerConfig.
+L2_AXIS = 4
+R2_AXIS = 5
+
+
+@dataclass
+class TriggerConfig:
+    """Per-trigger shaping + gating config for L2 / R2.
+
+    Default is a linear 0 → 127 ramp with no gate — exactly what v2 presets
+    do — so a preset loaded without a TriggerConfig behaves identically to
+    before the schema bumped.
+
+    Fields:
+      - `mode`               : one of `shaping.TRIGGER_MODES`
+                               (linear / ceiling / inverted / latch)
+      - `ceiling`            : max CC value for "ceiling" mode (0..127)
+      - `latch_threshold`    : pressure level (0..1) where latch flips on/off
+      - `gate_button`        : optional button INDEX that must be held for
+                               this trigger to send MIDI. `None` = no gate
+                               (default). e.g. DualSense D-pad down is
+                               typically button 12 on pygame/SDL, so set
+                               `gate_button=12` to require dpad-down hold
+                               before the trigger fires.
+      - `gate_release_value` : CC value sent ONCE when the gate releases.
+                               Default 0 = silence the receiver. Set to a
+                               middle value (e.g. 64) if your downstream
+                               expects a "rest at centre" idle state.
+    """
+    mode: str = "linear"
+    ceiling: int = 127
+    latch_threshold: float = 0.5
+    gate_button: Optional[int] = None
+    gate_release_value: int = 0
+
+
+@dataclass
+class StickConfig:
+    """Per-stick shaping config (left or right).
+
+    Default values reproduce the legacy stick behaviour exactly (linear, no
+    outer clamp, no polar) so old presets load unchanged.
+
+    Fields:
+      - `inner_deadzone`  : magnitudes below this snap to 0 (centre)
+      - `outer_clamp`     : top fraction of travel that pegs to ±1
+      - `curve`           : "linear" | "exponential" | "logarithmic" | "s-curve"
+      - `curve_amount`    : 0..1, strength of the curve
+      - `polar_mode`      : if True, emit (angle, magnitude) as 2 CCs instead of (X, Y)
+      - `polar_angle_cc`  : CC number for the angle when polar_mode is on
+      - `polar_mag_cc`    : CC number for the magnitude when polar_mode is on
+    """
+    inner_deadzone: float = 0.05
+    outer_clamp: float = 0.0
+    curve: str = "linear"
+    curve_amount: float = 0.5
+    polar_mode: bool = False
+    polar_angle_cc: int = 7   # volume CC by default — meaningless but visible
+    polar_mag_cc: int = 8     # balance CC
 
 
 @dataclass
@@ -125,6 +188,19 @@ class TouchpadConfig:
     finger drives x_cc/y_cc; the second finger (when present) drives
     b_x_cc/b_y_cc. Producers can use this as a Kaoss Pad with a "macro"
     second control surface in the same physical space.
+
+    V4 extensions — shaping options:
+      - `mode`           : "absolute" (default, finger position IS CC) or
+                           "relative" (finger movement adjusts CC smoothly).
+      - `click_to_arm`   : only emit CCs while touchpad button is physically
+                           clicked. Useful for avoiding accidental modulation.
+      - `inner_deadzone` : centre deadzone in absolute mode (0..0.49). Within
+                           this band around centre (0.5), snap to centre.
+      - `x_curve`        : response curve for X axis (linear / exponential /
+                           logarithmic / s-curve). See shaping.apply_curve.
+      - `y_curve`        : response curve for Y axis.
+      - `x_curve_amount` : curve aggressiveness for X (0..1).
+      - `y_curve_amount` : curve aggressiveness for Y (0..1).
     """
     enabled: bool = False
     x_cc: int = 16                 # primary finger X
@@ -133,6 +209,13 @@ class TouchpadConfig:
     b_y_cc: int = 19               # secondary finger Y
     two_finger: bool = False       # also send b_x_cc/b_y_cc when a 2nd finger lands
     require_contact: bool = True   # only send CCs while finger is on the pad
+    mode: str = "absolute"         # "absolute" | "relative"
+    click_to_arm: bool = False     # only emit while touchpad button is clicked
+    inner_deadzone: float = 0.0    # 0..0.49 centre deadzone
+    x_curve: str = "linear"        # response curve for X (see shaping.apply_curve)
+    y_curve: str = "linear"        # response curve for Y
+    x_curve_amount: float = 0.5    # curve aggressiveness (0..1)
+    y_curve_amount: float = 0.5
 
 
 @dataclass
@@ -176,6 +259,16 @@ class Mapping:
     l2_haptic_effect: Optional[str] = None
     r2_haptic_effect: Optional[str] = None
 
+    # V1.2 — per-trigger shaping (linear / ceiling / inverted / latch). Stays
+    # at "linear" defaults so v2 presets behave identically when loaded.
+    l2_trigger: TriggerConfig = field(default_factory=TriggerConfig)
+    r2_trigger: TriggerConfig = field(default_factory=TriggerConfig)
+
+    # V1.3 — per-stick shaping (deadzone, curves, polar). Defaults preserve
+    # legacy stick behaviour exactly so old presets load unchanged.
+    left_stick: StickConfig = field(default_factory=StickConfig)
+    right_stick: StickConfig = field(default_factory=StickConfig)
+
     # Incoming-MIDI → adaptive-trigger feedback. Stays disabled by default
     # so V1.1 users don't get their behaviour changed under them.
     haptic_input: HapticInputConfig = field(default_factory=HapticInputConfig)
@@ -207,7 +300,33 @@ class Mapping:
             l2_haptic_effect=data.get("l2_haptic_effect"),
             r2_haptic_effect=data.get("r2_haptic_effect"),
             haptic_input=_haptic_input_from_dict(data.get("haptic_input")),
+            l2_trigger=_trigger_from_dict(data.get("l2_trigger")),
+            r2_trigger=_trigger_from_dict(data.get("r2_trigger")),
+            left_stick=_stick_from_dict(data.get("left_stick")),
+            right_stick=_stick_from_dict(data.get("right_stick")),
         )
+
+
+def _trigger_from_dict(d: Optional[dict]) -> TriggerConfig:
+    """Hydrate a TriggerConfig from raw dict, defaulting to linear ramp."""
+    if not d:
+        return TriggerConfig()
+    raw_gate = d.get("gate_button")
+    gate_button: Optional[int] = None
+    if raw_gate is not None:
+        try:
+            gate_button = int(raw_gate)
+            if gate_button < 0:
+                gate_button = None
+        except (TypeError, ValueError):
+            gate_button = None
+    return TriggerConfig(
+        mode=str(d.get("mode", "linear")),
+        ceiling=max(0, min(127, int(d.get("ceiling", 127)))),
+        latch_threshold=max(0.0, min(1.0, float(d.get("latch_threshold", 0.5)))),
+        gate_button=gate_button,
+        gate_release_value=max(0, min(127, int(d.get("gate_release_value", 0)))),
+    )
 
 
 def _corner_from_dict(d: Optional[dict]) -> CornerConfig:
@@ -279,4 +398,31 @@ def _touchpad_from_dict(d: Optional[dict]) -> TouchpadConfig:
         b_y_cc=int(d.get("b_y_cc", 19)),
         two_finger=bool(d.get("two_finger", False)),
         require_contact=bool(d.get("require_contact", True)),
+        mode=str(d.get("mode", "absolute")),
+        click_to_arm=bool(d.get("click_to_arm", False)),
+        inner_deadzone=max(0.0, min(0.49, float(d.get("inner_deadzone", 0.0)))),
+        x_curve=str(d.get("x_curve", "linear")),
+        y_curve=str(d.get("y_curve", "linear")),
+        x_curve_amount=max(0.0, min(1.0, float(d.get("x_curve_amount", 0.5)))),
+        y_curve_amount=max(0.0, min(1.0, float(d.get("y_curve_amount", 0.5)))),
+    )
+
+
+def _stick_from_dict(d: Optional[dict]) -> StickConfig:
+    """Hydrate a StickConfig from raw dict, defaulting to legacy behaviour."""
+    if not d:
+        return StickConfig()
+    # Validate curve against allowed values
+    allowed_curves = {"linear", "exponential", "logarithmic", "s-curve"}
+    curve = str(d.get("curve", "linear"))
+    if curve not in allowed_curves:
+        curve = "linear"
+    return StickConfig(
+        inner_deadzone=max(0.0, min(0.99, float(d.get("inner_deadzone", 0.05)))),
+        outer_clamp=max(0.0, min(0.99, float(d.get("outer_clamp", 0.0)))),
+        curve=curve,
+        curve_amount=max(0.0, min(1.0, float(d.get("curve_amount", 0.5)))),
+        polar_mode=bool(d.get("polar_mode", False)),
+        polar_angle_cc=int(d.get("polar_angle_cc", 7)),
+        polar_mag_cc=int(d.get("polar_mag_cc", 8)),
     )

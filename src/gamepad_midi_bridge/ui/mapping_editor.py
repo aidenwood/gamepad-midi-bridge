@@ -20,6 +20,10 @@ from .pro_lock import ProLockOverlay
 class MappingEditor(QWidget):
     upgrade_clicked = Signal()
     activate_clicked = Signal()
+    # Emitted whenever the user selects a row in one of the three tables.
+    # Main window forwards this to the right-hand inspector. Payload shape:
+    #   { "kind": "button"|"axis"|"hat", "index": str, "midi": int, "label": str }
+    selection_changed = Signal(dict)
 
     def __init__(self, mapping: Mapping, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -35,14 +39,23 @@ class MappingEditor(QWidget):
 
         v.addWidget(self._section_label("BUTTONS → NOTES"))
         self._buttons_table = self._make_table(["Button #", "MIDI Note"])
+        self._buttons_table.itemSelectionChanged.connect(
+            lambda: self._emit_selection(self._buttons_table, "button")
+        )
         v.addWidget(self._buttons_table)
 
         v.addWidget(self._section_label("AXES → CC"))
         self._axes_table = self._make_table(["Axis #", "MIDI CC"])
+        self._axes_table.itemSelectionChanged.connect(
+            lambda: self._emit_selection(self._axes_table, "axis")
+        )
         v.addWidget(self._axes_table)
 
         v.addWidget(self._section_label("D-PAD → NOTES"))
         self._hats_table = self._make_table(["Direction", "MIDI Note"])
+        self._hats_table.itemSelectionChanged.connect(
+            lambda: self._emit_selection(self._hats_table, "hat")
+        )
         v.addWidget(self._hats_table)
 
         self._stack.addWidget(content)
@@ -106,3 +119,26 @@ class MappingEditor(QWidget):
             bi = QTableWidgetItem(b)
             bi.setTextAlignment(Qt.AlignCenter)
             table.setItem(r, 1, bi)
+
+    def _emit_selection(self, table: QTableWidget, kind: str) -> None:
+        """Forward a row-click into a selection payload the inspector can render.
+        Payload keys deliberately match `inspector.render_mapping_selection`'s
+        expected shape so a click immediately lights up the inspector pane."""
+        row = table.currentRow()
+        if row < 0 or row >= table.rowCount():
+            return
+        idx_item = table.item(row, 0)
+        midi_item = table.item(row, 1)
+        if idx_item is None or midi_item is None:
+            return
+        idx = idx_item.text()
+        midi = midi_item.text()
+        label_map = {"button": f"Button {idx}", "axis": f"Axis {idx}", "hat": f"D-pad {idx}"}
+        payload = {
+            "kind": kind,
+            "label": label_map.get(kind, f"{kind} {idx}"),
+            "index": idx,
+            "midi": midi,
+            "channel": str(self._mapping.midi_channel + 1),
+        }
+        self.selection_changed.emit(payload)

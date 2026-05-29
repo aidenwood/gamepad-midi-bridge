@@ -82,6 +82,35 @@ QPushButton#StopButton:hover {
     background-color: #fb8b8b;
 }
 
+/* Figma-style layout toggles — flat chips in the right side of the header.
+   Sit alongside Start/Stop but feel less primary, more like editor tools. */
+QPushButton#LayoutToggle {
+    background-color: transparent;
+    color: #8a9099;
+    border: 1px solid #24262d;
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+QPushButton#LayoutToggle:hover {
+    color: #c2c6cc;
+    border-color: #3a3e48;
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+QPushButton#LayoutToggle:checked {
+    color: #5eead4;
+    border-color: rgba(45, 212, 191, 0.4);
+    background-color: rgba(45, 212, 191, 0.10);
+}
+
+QPushButton#LayoutToggle:checked:hover {
+    background-color: rgba(45, 212, 191, 0.16);
+}
+
 QTabWidget::pane {
     border: none;
     background-color: #0e0f12;
