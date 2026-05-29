@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Optional
+from pathlib import Path
+import os
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -10,16 +12,19 @@ from PySide6.QtWidgets import (
 )
 
 from .. import presets as preset_io
+from .. import snapshots as snap_io
 from ..license import is_pro
 from ..mapping import Mapping
 from .diff_dialog import DiffDialog
 from .pro_lock import ProLockOverlay
+from .snapshot_dialog import SnapshotDialog
 
 
 class PresetManager(QWidget):
     upgrade_clicked = Signal()
     activate_clicked = Signal()
     preset_loaded = Signal(Mapping)
+    selection_changed = Signal(dict)
 
     def __init__(self, current_mapping_provider, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -34,6 +39,7 @@ class PresetManager(QWidget):
 
         v.addWidget(QLabel("Saved presets"))
         self._list = QListWidget()
+        self._list.itemClicked.connect(self._on_list_selection_changed)
         v.addWidget(self._list, 1)
 
         row = QHBoxLayout()
@@ -42,16 +48,19 @@ class PresetManager(QWidget):
         self._delete_btn = QPushButton("Delete")
         self._compare_btn = QPushButton("Compare presets…")
         self._export_btn = QPushButton("Export cheat sheet")
+        self._snapshots_btn = QPushButton("Snapshots…")
         self._load_btn.clicked.connect(self._on_load)
         self._save_btn.clicked.connect(self._on_save)
         self._delete_btn.clicked.connect(self._on_delete)
         self._compare_btn.clicked.connect(self._on_compare)
         self._export_btn.clicked.connect(self._on_export_cheatsheet)
+        self._snapshots_btn.clicked.connect(self._on_snapshots)
         row.addWidget(self._load_btn)
         row.addWidget(self._save_btn)
         row.addWidget(self._delete_btn)
         row.addWidget(self._compare_btn)
         row.addWidget(self._export_btn)
+        row.addWidget(self._snapshots_btn)
         row.addStretch(1)
         v.addLayout(row)
 
@@ -78,6 +87,33 @@ class PresetManager(QWidget):
         self._stack.setCurrentIndex(0 if is_pro() else 1)
 
     # ------------------------------------------------------------------ actions
+
+    def _on_list_selection_changed(self) -> None:
+        item = self._list.currentItem()
+        if item is None:
+            return
+        preset_name = item.text()
+        try:
+            # Get file path and stats
+            from .. import paths
+            preset_path = paths.preset_path(preset_name)
+            mtime = preset_path.stat().st_mtime if preset_path.exists() else 0
+            size = preset_path.stat().st_size if preset_path.exists() else 0
+            # Format mtime as ISO-like string
+            from datetime import datetime
+            dt = datetime.fromtimestamp(mtime)
+            mtime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            size_str = f"{size} bytes" if size < 1024 else f"{size // 1024} KB"
+            self.selection_changed.emit({
+                "kind": "preset_file",
+                "slug": preset_name.replace(" ", "_").lower(),
+                "name": preset_name,
+                "mtime": mtime_str,
+                "size": size_str,
+                "label": preset_name,
+            })
+        except Exception:
+            pass
 
     def _on_load(self) -> None:
         item = self._list.currentItem()
@@ -161,6 +197,17 @@ class PresetManager(QWidget):
         if mapping_a and mapping_b:
             diff_dialog = DiffDialog(mapping_a, mapping_b, name_a, name_b, self)
             diff_dialog.exec()
+
+    def _on_snapshots(self) -> None:
+        """Open the SnapshotDialog. Restore applies the mapping via preset_loaded."""
+        dlg = SnapshotDialog(self._get_current, self)
+        dlg.restore_requested.connect(self._on_snapshot_restore)
+        dlg.exec()
+
+    def _on_snapshot_restore(self, slug: str) -> None:
+        mapping = snap_io.load_snapshot(slug)
+        if mapping is not None:
+            self.preset_loaded.emit(mapping)
 
     def _on_export_cheatsheet(self) -> None:
         from pathlib import Path

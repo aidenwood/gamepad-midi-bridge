@@ -374,3 +374,125 @@ def render_live_selection(payload: dict) -> QWidget:
 
     v.addStretch(1)
     return wrap
+
+
+def render_connector_selection(payload: dict) -> QWidget:
+    """Renderer for connector (host application) selection.
+
+    Accepts a dict shaped like:
+      { "kind": "connector", "name": str, "target": str, "installed": bool,
+        "description": str, "label": str }
+    """
+    wrap = QWidget()
+    v = QVBoxLayout(wrap)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(8)
+
+    name = str(payload.get("name", "Connector"))
+    title = QLabel(name)
+    title.setStyleSheet("color: #f5f7fa; font-size: 16px; font-weight: 600;")
+    v.addWidget(title)
+
+    installed = payload.get("installed", False)
+    status_text = "Installed" if installed else "Not installed"
+    status_chip = QLabel(status_text)
+    status_chip.setAlignment(Qt.AlignCenter)
+    status_color = "#2dd4bf" if installed else "#8a9099"
+    bg_color = "rgba(45, 212, 191, 0.12)" if installed else "rgba(138, 144, 153, 0.08)"
+    border_color = "rgba(45, 212, 191, 0.3)" if installed else "rgba(138, 144, 153, 0.2)"
+    status_chip.setStyleSheet(
+        f"color: {status_color}; background: {bg_color}; "
+        f"border: 1px solid {border_color}; border-radius: 999px; "
+        "padding: 4px 10px; font-size: 10px; font-weight: 700; "
+        "letter-spacing: 1.4px;"
+    )
+    status_chip.setMaximumWidth(120)
+    v.addWidget(status_chip)
+
+    # Description
+    description = str(payload.get("description", ""))
+    if description:
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: #c2c6cc; font-size: 11px; margin-top: 8px;")
+        v.addWidget(desc_label)
+
+    # Target path (mono)
+    target = str(payload.get("target", ""))
+    if target:
+        path_label = QLabel(target)
+        path_label.setWordWrap(True)
+        path_label.setStyleSheet("color: #5a606b; font-size: 10px; font-family: ui-monospace, Menlo, monospace;")
+        v.addWidget(path_label)
+
+    # Action buttons
+    v.addSpacing(4)
+    action_btn = QPushButton("Install" if not installed else "Reinstall")
+    action_btn.setObjectName("PrimaryButton")
+    action_btn.clicked.connect(lambda: print(f"[stub] Install {payload.get('name')}"))
+    v.addWidget(action_btn)
+
+    if installed:
+        uninstall_btn = QPushButton("Uninstall")
+        uninstall_btn.clicked.connect(lambda: print(f"[stub] Uninstall {payload.get('name')}"))
+        v.addWidget(uninstall_btn)
+
+    v.addStretch(1)
+    return wrap
+
+
+def render_preset_file_selection(payload: dict) -> QWidget:
+    """Renderer for preset file selection.
+
+    Accepts a dict shaped like:
+      { "kind": "preset_file", "slug": str, "name": str, "mtime": str,
+        "size": str, "label": str }
+    """
+    wrap = QWidget()
+    v = QVBoxLayout(wrap)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(8)
+
+    name = str(payload.get("name", "Preset"))
+    title = QLabel(name)
+    title.setStyleSheet("color: #f5f7fa; font-size: 16px; font-weight: 600;")
+    v.addWidget(title)
+
+    slug = str(payload.get("slug", ""))
+    slug_label = QLabel(slug)
+    slug_label.setStyleSheet("color: #8a9099; font-size: 10px; font-family: ui-monospace, Menlo, monospace;")
+    v.addWidget(slug_label)
+
+    # Metadata row
+    meta_row = QHBoxLayout()
+    mtime_str = str(payload.get("mtime", ""))
+    if mtime_str:
+        mtime_label = QLabel(f"Modified: {mtime_str}")
+        mtime_label.setStyleSheet("color: #8a9099; font-size: 10px;")
+        meta_row.addWidget(mtime_label)
+    meta_row.addStretch(1)
+    v.addLayout(meta_row)
+
+    size_str = str(payload.get("size", ""))
+    if size_str:
+        size_label = QLabel(f"Size: {size_str}")
+        size_label.setStyleSheet("color: #8a9099; font-size: 10px;")
+        v.addWidget(size_label)
+
+    # Action buttons
+    v.addSpacing(4)
+    load_btn = QPushButton("Load")
+    load_btn.setObjectName("PrimaryButton")
+    load_btn.clicked.connect(lambda: print(f"[stub] Load preset: {payload.get('name')}"))
+    v.addWidget(load_btn)
+
+    delete_btn = QPushButton("Delete")
+    delete_btn.clicked.connect(lambda: print(f"[stub] Delete preset: {payload.get('name')}"))
+    v.addWidget(delete_btn)
+
+    export_btn = QPushButton("Export cheat sheet")
+    export_btn.clicked.connect(lambda: print(f"[stub] Export cheat sheet: {payload.get('name')}"))
+    v.addWidget(export_btn)
+
+    v.addStretch(1)
+    return wrap

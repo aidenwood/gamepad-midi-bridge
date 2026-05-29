@@ -22,6 +22,7 @@ class ConnectorsTab(QWidget):
     """List + install/uninstall every detected host on this machine."""
 
     status_message = Signal(str)
+    selection_changed = Signal(dict)
 
     def __init__(self) -> None:
         super().__init__()
@@ -119,6 +120,17 @@ class ConnectorsTab(QWidget):
         h = QHBoxLayout(card)
         h.setContentsMargins(14, 12, 14, 12)
         h.setSpacing(14)
+
+        # Make the card clickable to emit selection
+        card.setCursor(Qt.PointingHandCursor)
+        card.mousePressEvent = lambda e: self.selection_changed.emit({
+            "kind": "connector",
+            "name": host.name,
+            "target": str(host.config_dir),
+            "installed": installed,
+            "description": connector.description,
+            "label": connector.display_name,
+        })
 
         # Left column — name + description
         left = QVBoxLayout()

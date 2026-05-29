@@ -29,7 +29,10 @@ from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
 from .help_tab import HelpTab
 from .axis_scope import AxisScope
-from .inspector import INSPECTOR_WIDTH, Inspector, render_mapping_selection, render_live_selection
+from .inspector import (
+    INSPECTOR_WIDTH, Inspector, render_mapping_selection, render_live_selection,
+    render_connector_selection, render_preset_file_selection,
+)
 from .inspector_renderers import (
     render_trigger_editor,
     render_stick_editor,
@@ -41,6 +44,7 @@ from .inspector_renderers import (
 from .log_console import LogConsole
 from .logo_view_3d import BgLogo3DView
 from .mapping_editor import MappingEditor
+from .midi_log_panel import MidiLogPanel
 from .marketplace_tab import MarketplaceTab
 from .onboarding import OnboardingWizard, is_first_launch, mark_complete
 from .preset_manager import PresetManager
@@ -229,6 +233,8 @@ class MainWindow(QMainWindow):
             insp.register_renderer("mapping", render_mapping_selection)
             insp.register_renderer("marketplace", render_marketplace_selection)
             insp.register_renderer("live", render_live_selection)
+            insp.register_renderer("connectors", render_connector_selection)
+            insp.register_renderer("presets", render_preset_file_selection)
             # Config-aware renderers for trigger / stick / touchpad axis rows.
             insp.register_renderer("mapping_trigger", render_trigger_editor)
             insp.register_renderer("mapping_stick", render_stick_editor)
@@ -256,9 +262,15 @@ class MainWindow(QMainWindow):
         body_splitter.addWidget(content_splitter)
         self._log_console = LogConsole()
         body_splitter.addWidget(self._log_console)
+
+        # MIDI Activity Log Panel — scrolling MIDI message feed
+        self._midi_log_panel = MidiLogPanel()
+        body_splitter.addWidget(self._midi_log_panel)
+
         body_splitter.setStretchFactor(0, 1)
         body_splitter.setStretchFactor(1, 0)
-        body_splitter.setSizes([640, 1 if self._log_console.is_collapsed() else 200])
+        body_splitter.setStretchFactor(2, 0)
+        body_splitter.setSizes([640, 1 if self._log_console.is_collapsed() else 200, 1])
         self._body_splitter = body_splitter
         root.addWidget(body_splitter, 1)
 
@@ -755,6 +767,9 @@ class MainWindow(QMainWindow):
         self._presets.upgrade_clicked.connect(self._open_upgrade)
         self._presets.activate_clicked.connect(self._enter_license_key)
         self._presets.preset_loaded.connect(self._on_preset_loaded)
+        self._presets.selection_changed.connect(
+            lambda p: self.push_inspector_selection("presets", p)
+        )
         tabs.addTab(self._scrollable(self._presets), "Presets")
 
         self._marketplace = MarketplaceTab()
@@ -767,6 +782,9 @@ class MainWindow(QMainWindow):
 
         self._connectors = ConnectorsTab()
         self._connectors.status_message.connect(self._on_status)
+        self._connectors.selection_changed.connect(
+            lambda p: self.push_inspector_selection("connectors", p)
+        )
         tabs.addTab(self._connectors, "Connectors")
 
         self._bluetooth = BluetoothTab()
@@ -942,6 +960,8 @@ class MainWindow(QMainWindow):
         self._log_console.attach_bridge_signals(self._bridge.worker)
         # Feed the Visualise tab from the same primary worker.
         self._visualise.attach_bridge_signals(self._bridge.worker)
+        # Wire MIDI message details to the activity log panel
+        self._bridge.worker.midi_message.connect(self._on_midi_message)
 
     def _wire_bridge_to_meter(self, bridge, meter, primary: bool) -> None:
         w = bridge.worker
@@ -1250,6 +1270,13 @@ class MainWindow(QMainWindow):
 
     def _fade_activity(self) -> None:
         self._activity_dot.setStyleSheet("color: #2c313b; font-size: 18px;")
+
+    def _on_midi_message(self, direction: str, channel: int, status: int, data1: int, data2: int, label: str) -> None:
+        """Handle MIDI message detail from the bridge for the activity log."""
+        if direction == "sent":
+            self._midi_log_panel.append_sent(channel, label, data1, data2)
+        elif direction == "received":
+            self._midi_log_panel.append_received(channel, label, data1, data2)
 
     # ============================================================== licensing
 

@@ -92,6 +92,11 @@ class BridgeWorker(QObject):
     # --- MIDI sent (for the "MIDI activity" indicator)
     midi_sent = Signal()
 
+    # --- MIDI message detail (for the MIDI activity log panel)
+    # direction: "sent" or "received", channel: 0-15, status: status byte,
+    # data1: CC/note number, data2: velocity/value, label: human-readable string
+    midi_message = Signal(str, int, int, int, int, str)
+
     # --- V1.1c haptic-input: emitted whenever an incoming MIDI message
     # fired a trigger effect. (side="L"/"R", effect name, intensity 0..1).
     haptic_event = Signal(str, str, float)
@@ -190,6 +195,20 @@ class BridgeWorker(QObject):
         self._recording_events: List[MacroEvent] = []
 
     # ---------------------------------------------------------------- public API
+
+    def _emit_midi_message(
+        self, direction: str, status: int, data1: int, data2: int, label: str
+    ) -> None:
+        """Emit a MIDI message detail signal for the activity log panel.
+
+        direction: "sent" or "received"
+        status: raw status byte (includes channel in lower 4 bits)
+        data1: note/CC number or similar
+        data2: velocity/value
+        label: human-readable label like "NOTE-ON C4" or "CC#1"
+        """
+        channel = status & 0x0F
+        self.midi_message.emit(direction, channel, status, data1, data2, label)
 
     def set_mapping(self, mapping: Mapping) -> None:
         self._state.mapping = mapping
@@ -317,6 +336,7 @@ class BridgeWorker(QObject):
                 lambda s=status, d1_=d1, d2_=d2: (
                     midi.port.send_message([s, d1_, d2_]),
                     self.midi_sent.emit(),
+                    self._emit_midi_message("sent", s, d1_, d2_, f"Macro d1={d1_:3d} d2={d2_:3d}"),
                 )
             )
             timer.start(event.delay_ms)
@@ -921,6 +941,7 @@ class BridgeWorker(QObject):
                     if not osc_only:
                         midi.port.send_message([btn_note_on, note, btn_cfg.gate_release_value])
                         self.midi_sent.emit()
+                        self._emit_midi_message("sent", btn_note_on, note, btn_cfg.gate_release_value, f"NOTE-ON #{note}")
                     self._send_osc_button(btn_idx, False)
                     self._prev_buttons[btn_idx] = False
                     self.button_state.emit(btn_idx, False)
@@ -939,12 +960,14 @@ class BridgeWorker(QObject):
                     midi.port.send_message([btn_note_on, note, 127])
                     self._record_midi_send(btn_note_on, note, 127)
                     self.midi_sent.emit()
+                    self._emit_midi_message("sent", btn_note_on, note, 127, f"NOTE-ON #{note}")
                 self._send_osc_button(btn_idx, True)
             elif not pressed and was:
                 if not osc_only:
                     midi.port.send_message([btn_note_off, note, 0])
                     self._record_midi_send(btn_note_off, note, 0)
                     self.midi_sent.emit()
+                    self._emit_midi_message("sent", btn_note_off, note, 0, f"NOTE-OFF #{note}")
                 self._send_osc_button(btn_idx, False)
             if pressed != was:
                 self._prev_buttons[btn_idx] = pressed
@@ -1027,6 +1050,7 @@ class BridgeWorker(QObject):
                     self._record_outbound_cc(axis_channel, cc_num, val)
                     self._record_midi_send(axis_cc, cc_num, val)
                     self.midi_sent.emit()
+                    self._emit_midi_message("sent", axis_cc, cc_num, val, f"CC#{cc_num}")
                 # OSC sends a 0..1 float, MIDI a 0..127 int — keep both
                 # streams in lock-step but de-dup against last-sent 0..127.
                 if self._osc is not None and self._prev_osc_axes.get(axis_idx) != val:
