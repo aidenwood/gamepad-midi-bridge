@@ -24,6 +24,9 @@ class TrayController(QObject):
     start_requested = Signal()
     stop_requested = Signal()
     show_requested = Signal()
+    command_palette_requested = Signal()
+    latency_test_requested = Signal()
+    about_requested = Signal()
     quit_requested = Signal()
 
     def __init__(self, icon_path: Optional[Path], parent: Optional[QObject] = None) -> None:
@@ -48,6 +51,25 @@ class TrayController(QObject):
         show = QAction("Show window", menu)
         show.triggered.connect(self.show_requested.emit)
         menu.addAction(show)
+
+        menu.addSeparator()
+
+        # Command palette
+        palette = QAction("Open command palette", menu)
+        palette.triggered.connect(self.command_palette_requested.emit)
+        menu.addAction(palette)
+
+        # Run latency test
+        latency = QAction("Run latency test", menu)
+        latency.triggered.connect(self.latency_test_requested.emit)
+        menu.addAction(latency)
+
+        menu.addSeparator()
+
+        # About
+        about = QAction("About...", menu)
+        about.triggered.connect(self.about_requested.emit)
+        menu.addAction(about)
 
         menu.addSeparator()
 

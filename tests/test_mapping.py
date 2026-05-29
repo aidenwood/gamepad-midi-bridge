@@ -1469,3 +1469,104 @@ def test_old_preset_without_aftertouch_loads_with_defaults():
     m = Mapping.from_dict(v_dict)
     assert m.l2_trigger.aftertouch.enabled is False
     assert m.l2_trigger.aftertouch.threshold == pytest.approx(0.85, abs=1e-6)
+
+
+# ------------------------------------------------------------------ Feature #A
+# StickConfig random_mod fields
+
+def test_stick_config_random_mod_defaults():
+    """StickConfig.random_mod_* fields default to safe off-state."""
+    cfg = StickConfig()
+    assert cfg.random_mod_enabled is False
+    assert cfg.random_mod_cc == 16
+    assert cfg.random_mod_rate_hz == pytest.approx(2.0)
+    assert cfg.random_mod_smoothing_ms == 200
+
+
+def test_stick_config_random_mod_round_trip():
+    """random_mod fields survive to_dict / from_dict round-trip."""
+    from gamepad_midi_bridge.mapping import _stick_from_dict
+    cfg = StickConfig(
+        random_mod_enabled=True,
+        random_mod_cc=74,
+        random_mod_rate_hz=4.0,
+        random_mod_smoothing_ms=50,
+    )
+    from dataclasses import asdict
+    restored = _stick_from_dict(asdict(cfg))
+    assert restored.random_mod_enabled is True
+    assert restored.random_mod_cc == 74
+    assert restored.random_mod_rate_hz == pytest.approx(4.0)
+    assert restored.random_mod_smoothing_ms == 50
+
+
+def test_stick_config_random_mod_nested_in_mapping_round_trip():
+    """random_mod fields survive a full Mapping.to_dict / from_dict cycle."""
+    m = Mapping()
+    m.left_stick = StickConfig(
+        random_mod_enabled=True,
+        random_mod_cc=21,
+        random_mod_rate_hz=8.0,
+        random_mod_smoothing_ms=100,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.left_stick.random_mod_enabled is True
+    assert restored.left_stick.random_mod_cc == 21
+    assert restored.left_stick.random_mod_rate_hz == pytest.approx(8.0)
+    assert restored.left_stick.random_mod_smoothing_ms == 100
+
+
+def test_old_preset_without_random_mod_loads_with_defaults():
+    """Preset missing random_mod keys loads cleanly; feature stays disabled."""
+    v_dict = {
+        "name": "OldStick",
+        "left_stick": {"inner_deadzone": 0.1},
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.left_stick.random_mod_enabled is False
+    assert m.left_stick.random_mod_cc == 16
+
+
+# ------------------------------------------------------------------ Feature #B
+# Macro arp_mode fields
+
+def test_macro_arp_mode_defaults():
+    """Macro.arp_mode fields default to off / sensible values."""
+    from gamepad_midi_bridge.mapping import Macro
+    mac = Macro(name="test")
+    assert mac.arp_mode is False
+    assert mac.arp_rate_hz == pytest.approx(8.0)
+    assert mac.arp_loop is True
+
+
+def test_macro_arp_mode_round_trip():
+    """arp_mode fields survive _macro_from_dict round-trip."""
+    from gamepad_midi_bridge.mapping import Macro, _macro_from_dict
+    from dataclasses import asdict
+    mac = Macro(name="arp_test", arp_mode=True, arp_rate_hz=16.0, arp_loop=False)
+    restored = _macro_from_dict(asdict(mac))
+    assert restored.arp_mode is True
+    assert restored.arp_rate_hz == pytest.approx(16.0)
+    assert restored.arp_loop is False
+
+
+def test_macro_arp_mode_nested_in_mapping_round_trip():
+    """arp_mode fields survive a full Mapping.to_dict / from_dict cycle."""
+    from gamepad_midi_bridge.mapping import Macro
+    m = Mapping()
+    m.macros = [Macro(name="chord_arp", arp_mode=True, arp_rate_hz=6.0, arp_loop=True)]
+    restored = Mapping.from_dict(m.to_dict())
+    assert len(restored.macros) == 1
+    assert restored.macros[0].arp_mode is True
+    assert restored.macros[0].arp_rate_hz == pytest.approx(6.0)
+    assert restored.macros[0].arp_loop is True
+
+
+def test_old_macro_without_arp_fields_loads_with_defaults():
+    """Macro dict without arp keys loads cleanly; arp stays disabled."""
+    from gamepad_midi_bridge.mapping import _macro_from_dict
+    d = {"name": "legacy_macro", "events": [], "duration_ms": 0}
+    mac = _macro_from_dict(d)
+    assert mac.arp_mode is False
+    assert mac.arp_rate_hz == pytest.approx(8.0)
+    assert mac.arp_loop is True

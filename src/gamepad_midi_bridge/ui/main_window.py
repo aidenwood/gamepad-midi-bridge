@@ -7,10 +7,10 @@ import webbrowser
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence, QShortcut, QAction
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QSplitter, QStackedLayout, QTabWidget, QVBoxLayout, QWidget,
+    QPushButton, QSplitter, QStackedLayout, QTabWidget, QVBoxLayout, QWidget, QMenu,
 )
 
 from typing import Dict, List, Optional
@@ -195,6 +195,9 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
+        # Build the native menu bar (File / Edit / View / Help)
+        self._build_menu_bar()
+
         # --- Background 3D visualiser layer ---
         # QStackedLayout(StackAll) lets all children paint in Z order rather
         # than swapping. Bottom layer = the BgLogo3DView; top layer = a plain
@@ -362,6 +365,9 @@ class MainWindow(QMainWindow):
             self._tray.start_requested.connect(self._on_start)
             self._tray.stop_requested.connect(self._on_stop)
             self._tray.show_requested.connect(self._show_from_tray)
+            self._tray.command_palette_requested.connect(self._open_command_palette)
+            self._tray.latency_test_requested.connect(self._on_latency_test)
+            self._tray.about_requested.connect(self._menu_show_about)
             self._tray.quit_requested.connect(self._quit_from_tray)
 
         # Auto-backup of the mapping every 60 seconds
@@ -409,6 +415,177 @@ class MainWindow(QMainWindow):
         self._onboarding_wizard = None
 
     # ============================================================== ui builders
+
+    def _build_menu_bar(self) -> None:
+        """Build the native menu bar with File, Edit, View, and Help menus."""
+        menubar = self.menuBar()
+
+        # ---- File Menu ----
+        file_menu = menubar.addMenu("&File")
+
+        # Open preset (Cmd-O)
+        open_action = file_menu.addAction("&Open preset...")
+        open_action.setShortcut(QKeySequence("Ctrl+O"))
+        open_action.triggered.connect(self._menu_open_preset)
+
+        # Save preset (Cmd-S)
+        save_action = file_menu.addAction("&Save preset")
+        save_action.setShortcut(QKeySequence("Ctrl+S"))
+        save_action.triggered.connect(self._menu_save_preset)
+
+        # Save preset as (Cmd-Shift-S)
+        save_as_action = file_menu.addAction("Save preset &as...")
+        save_as_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        save_as_action.triggered.connect(self._menu_save_preset_as)
+
+        file_menu.addSeparator()
+
+        # Export pack
+        export_action = file_menu.addAction("&Export pack...")
+        export_action.triggered.connect(self._on_export_pack)
+
+        # Import pack
+        import_action = file_menu.addAction("&Import pack...")
+        import_action.triggered.connect(self._on_import_pack)
+
+        file_menu.addSeparator()
+
+        # Quit (Cmd-Q)
+        quit_action = file_menu.addAction("&Quit")
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        quit_action.triggered.connect(self._quit_from_tray)
+
+        # ---- Edit Menu ----
+        edit_menu = menubar.addMenu("&Edit")
+
+        # Undo (Cmd-Z) — disabled for now, TODO
+        undo_action = edit_menu.addAction("&Undo")
+        undo_action.setShortcut(QKeySequence("Ctrl+Z"))
+        undo_action.setEnabled(False)
+        undo_action.setToolTip("Coming soon")
+
+        # Redo — disabled for now, TODO
+        redo_action = edit_menu.addAction("&Redo")
+        redo_action.setShortcut(QKeySequence("Ctrl+Shift+Z"))
+        redo_action.setEnabled(False)
+        redo_action.setToolTip("Coming soon")
+
+        edit_menu.addSeparator()
+
+        # Preferences (Cmd-,)
+        prefs_action = edit_menu.addAction("&Preferences")
+        prefs_action.setShortcut(QKeySequence("Ctrl+,"))
+        prefs_action.triggered.connect(self._focus_settings_tab)
+
+        # ---- View Menu ----
+        view_menu = menubar.addMenu("&View")
+
+        # Toggle Split (Cmd-Alt-S)
+        split_action = view_menu.addAction("Toggle &Split")
+        split_action.setShortcut(QKeySequence("Ctrl+Alt+S"))
+        split_action.triggered.connect(self._toggle_split_view)
+
+        # Toggle Console (Cmd-Alt-C)
+        console_action = view_menu.addAction("Toggle &Console")
+        console_action.setShortcut(QKeySequence("Ctrl+Alt+C"))
+        console_action.triggered.connect(self._toggle_console)
+
+        # Toggle Inspector (Cmd-Alt-I)
+        inspector_action = view_menu.addAction("Toggle &Inspector")
+        inspector_action.setShortcut(QKeySequence("Ctrl+Alt+I"))
+        inspector_action.triggered.connect(self._toggle_inspector)
+
+        # Toggle 3D (Cmd-Alt-3)
+        bg3d_action = view_menu.addAction("Toggle &3D")
+        bg3d_action.setShortcut(QKeySequence("Ctrl+Alt+3"))
+        bg3d_action.triggered.connect(self._toggle_3d)
+
+        view_menu.addSeparator()
+
+        # Command palette (Cmd-K)
+        palette_action = view_menu.addAction("Show &command palette")
+        palette_action.setShortcut(QKeySequence("Ctrl+K"))
+        palette_action.triggered.connect(self._open_command_palette)
+
+        # ---- Help Menu ----
+        help_menu = menubar.addMenu("&Help")
+
+        # User guide
+        guide_action = help_menu.addAction("User &guide")
+        guide_action.triggered.connect(self._menu_open_user_guide)
+
+        # Keyboard shortcuts
+        shortcuts_action = help_menu.addAction("Keyboard &shortcuts")
+        shortcuts_action.triggered.connect(self._menu_show_keyboard_shortcuts)
+
+        # Report bug
+        bug_action = help_menu.addAction("&Report bug")
+        bug_action.triggered.connect(self._menu_report_bug)
+
+        help_menu.addSeparator()
+
+        # About
+        about_action = help_menu.addAction("&About")
+        about_action.triggered.connect(self._menu_show_about)
+
+    def _menu_open_preset(self) -> None:
+        """File > Open preset"""
+        # Delegate to the PresetManager's load dialog if available
+        if hasattr(self, "_presets") and self._presets is not None:
+            self._presets._on_load()
+
+    def _menu_save_preset(self) -> None:
+        """File > Save preset"""
+        # Delegate to the PresetManager's save dialog if available
+        if hasattr(self, "_presets") and self._presets is not None:
+            self._presets._on_save()
+
+    def _menu_save_preset_as(self) -> None:
+        """File > Save preset as"""
+        # Delegate to the PresetManager's save-as dialog if available
+        if hasattr(self, "_presets") and self._presets is not None:
+            # Save As is typically the same as Save in the PresetManager
+            self._presets._on_save()
+
+    def _menu_open_user_guide(self) -> None:
+        """Help > User guide"""
+        webbrowser.open("https://docs.aidxn.com/gamepad-midi-bridge")
+
+    def _menu_show_keyboard_shortcuts(self) -> None:
+        """Help > Keyboard shortcuts"""
+        shortcuts = (
+            "Start / Stop bridge: Ctrl+Return\n"
+            "Command palette: Ctrl+K\n"
+            "Panic (all notes off): Ctrl+Shift+P\n\n"
+            "View toggles:\n"
+            "  Split: Ctrl+Alt+S\n"
+            "  Console: Ctrl+Alt+C\n"
+            "  Inspector: Ctrl+Alt+I\n"
+            "  3D: Ctrl+Alt+3\n\n"
+            "File:\n"
+            "  Open preset: Ctrl+O\n"
+            "  Save preset: Ctrl+S\n"
+            "  Save As: Ctrl+Shift+S\n"
+            "  Quit: Ctrl+Q\n\n"
+            "Edit:\n"
+            "  Preferences: Ctrl+,"
+        )
+        QMessageBox.information(self, "Keyboard shortcuts", shortcuts)
+
+    def _menu_report_bug(self) -> None:
+        """Help > Report bug"""
+        webbrowser.open("https://github.com/aidenwood/gamepad-midi-bridge/issues")
+
+    def _menu_show_about(self) -> None:
+        """Help > About"""
+        # Find and focus the About tab
+        tabs = getattr(self, "_tabs_ref", None)
+        if tabs is None:
+            return
+        for i in range(tabs.count()):
+            if tabs.tabText(i) == "About":
+                tabs.setCurrentIndex(i)
+                return
 
     def _build_status_bar(self) -> QFrame:
         # Figma-style flat header — slim height, single-line status, clear
@@ -1064,6 +1241,19 @@ class MainWindow(QMainWindow):
         """Send a test MIDI note to verify connector DAW connectivity."""
         if self._bridge is not None:
             self._bridge.worker.send_test_note(channel=0, note=60, velocity=100, duration_ms=200)
+
+    def _on_latency_test(self) -> None:
+        """Run a latency test to measure bridge roundtrip time."""
+        if not self._stop_btn.isEnabled():
+            QMessageBox.information(
+                self, "Start the bridge first",
+                "Latency testing requires the bridge to be running. "
+                "Click Start, then try again.",
+            )
+            return
+        if self._bridge is not None and self._bridge.worker is not None:
+            self._bridge.worker.run_latency_test()
+            self._on_status("Latency test running…")
 
     def _sync_live_layout(self, slot_count: int) -> None:
         """Show/hide the secondary meter + Pro nudge based on hardware + tier.

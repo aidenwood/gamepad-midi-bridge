@@ -27,6 +27,7 @@ from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
 from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, PassthroughConfig, R2_AXIS, STICK_AXES, StickFlickConfig, TriggerAftertouchConfig
+from .rtp_midi import RtpMidiSender
 from . import shaping
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
 from . import presets as _presets
@@ -216,6 +217,14 @@ class BridgeWorker(QObject):
         # input/output timestamps only when this flag is active (zero overhead
         # in normal operation).
         self._latency_test_active: bool = False
+        # RTP-MIDI network sender (None = disabled)
+        self._rtp_sender: Optional[RtpMidiSender] = None
+        # Random-mod state — keyed by axis_idx.
+        # Values: (last_sample_ms, current_value) where current_value is 0..127.
+        self._random_mod_state: Dict[int, tuple] = {}
+        # Arp playback state — keyed by button_idx.
+        # Values: (QTimer, event_index, macro_name) or None when idle.
+        self._arp_state: Dict[int, Optional[object]] = {}
 
     # ---------------------------------------------------------------- public API
 
@@ -248,6 +257,7 @@ class BridgeWorker(QObject):
         self._sync_haptic_input()
         self._sync_passthrough()
         self._sync_midi_clock()
+        self._sync_rtp_sender()
 
     @Slot()
     def start(self) -> None:
@@ -276,6 +286,7 @@ class BridgeWorker(QObject):
         self._sync_osc_sender()
         self._sync_haptic_input()
         self._sync_passthrough()
+        self._sync_rtp_sender()
 
         # Auto-calibrate on first start. UI may also trigger recalibration.
         self._run_calibration()
@@ -874,6 +885,41 @@ class BridgeWorker(QObject):
         except Exception:
             pass
 
+    def _sync_rtp_sender(self) -> None:
+        """Start or stop the RTP-MIDI sender to match the current mapping config.
+
+        Called from set_mapping() and start() so live changes are applied
+        immediately without restarting the bridge.  When the peer host/port
+        changes the old sender is torn down and a new one is opened.
+        """
+        cfg = self._state.mapping.rtp_midi
+        if not cfg.enabled:
+            if self._rtp_sender is not None:
+                self._rtp_sender.stop()
+                self._rtp_sender = None
+            return
+        # Reopen when any connection parameter changes.
+        if (self._rtp_sender is not None
+                and (self._rtp_sender.peer_host != cfg.peer_host
+                     or self._rtp_sender.peer_port != cfg.peer_port)):
+            self._rtp_sender.stop()
+            self._rtp_sender = None
+        if self._rtp_sender is None:
+            sender = RtpMidiSender(cfg.peer_host, cfg.peer_port, cfg.session_name)
+            try:
+                sender.start()
+                self._rtp_sender = sender
+                self.status.emit(
+                    f"RTP-MIDI sending to {cfg.peer_host}:{cfg.peer_port}"
+                )
+            except OSError as e:
+                self.status.emit(f"RTP-MIDI unavailable: {e}")
+
+    def _rtp_send(self, status: int, data1: int, data2: int) -> None:
+        """Forward one MIDI message to the RTP-MIDI sender (no-op if disabled)."""
+        if self._rtp_sender is not None:
+            self._rtp_sender.send_midi(status, data1, data2)
+
     def _recently_sent(self, channel: int, cc_number: int, value: int, window_ms: Optional[int] = None) -> bool:
         """Check if this (channel, cc_number, value) was sent recently.
 
@@ -1181,6 +1227,7 @@ class BridgeWorker(QObject):
                     # Gate just released — send the configured release value as velocity
                     if not osc_only:
                         midi.port.send_message([btn_note_on, note, btn_cfg.gate_release_value])
+                        self._rtp_send(btn_note_on, note, btn_cfg.gate_release_value)
                         self.midi_sent.emit()
                         self._emit_midi_message("sent", btn_note_on, note, btn_cfg.gate_release_value, f"NOTE-ON #{note}")
                     self._send_osc_button(btn_idx, False)
@@ -1199,7 +1246,12 @@ class BridgeWorker(QObject):
                 if macro_name:
                     macro = next((m for m in mapping.macros if m.name == macro_name), None)
                     if macro:
-                        self._play_macro(macro, midi)
+                        if macro.arp_mode:
+                            # Arp mode: start continuous playback while held
+                            if btn_idx not in self._arp_state:
+                                self._start_arp(btn_idx, macro, midi)
+                        else:
+                            self._play_macro(macro, midi)
                 # Use velocity from button config if available, else default to 100
                 velocity = btn_cfg.velocity if btn_cfg else 100
                 if not osc_only:
@@ -1207,17 +1259,22 @@ class BridgeWorker(QObject):
                     if self._latency_test_active:
                         _latency_test.tracker().record_output(time.perf_counter())
                     midi.port.send_message([btn_note_on, note, velocity])
+                    self._rtp_send(btn_note_on, note, velocity)
                     self._record_midi_send(btn_note_on, note, velocity)
                     self.midi_sent.emit()
                     self._emit_midi_message("sent", btn_note_on, note, velocity, f"NOTE-ON #{note}")
                 self._send_osc_button(btn_idx, True)
                 _usage_stats.tracker().record("button", btn_idx)
             elif not pressed and was:
-                if not osc_only:
-                    midi.port.send_message([btn_note_off, note, 0])
-                    self._record_midi_send(btn_note_off, note, 0)
-                    self.midi_sent.emit()
-                    self._emit_midi_message("sent", btn_note_off, note, 0, f"NOTE-OFF #{note}")
+                # Stop arp playback if active on this button
+                if btn_idx in self._arp_state:
+                    self._stop_arp(btn_idx, mapping, midi)
+                else:
+                    if not osc_only:
+                        midi.port.send_message([btn_note_off, note, 0])
+                        self._record_midi_send(btn_note_off, note, 0)
+                        self.midi_sent.emit()
+                        self._emit_midi_message("sent", btn_note_off, note, 0, f"NOTE-OFF #{note}")
                 self._send_osc_button(btn_idx, False)
             if pressed != was:
                 self._prev_buttons[btn_idx] = pressed
@@ -1246,6 +1303,9 @@ class BridgeWorker(QObject):
                 # Stick-flick velocity notes (feature #A)
                 if stick_cfg.flick.enabled:
                     self._check_stick_flick(axis_idx, raw, stick_cfg.flick, mapping, midi)
+                # Random-mod (feature #A2) — sample a random CC at configured rate
+                if stick_cfg.random_mod_enabled:
+                    self._tick_random_mod(axis_idx, stick_cfg, mapping, midi)
                 # Convert to 0..127 range
                 val = int(round((raw + 1.0) * 63.5))
                 val = max(0, min(127, val))
@@ -1376,6 +1436,7 @@ class BridgeWorker(QObject):
                     axis_channel = self._channel_for_axis(mapping, axis_idx)
                     axis_cc = 0xB0 | axis_channel
                     midi.port.send_message([axis_cc, cc_num, send_val])
+                    self._rtp_send(axis_cc, cc_num, send_val)
                     self._record_outbound_cc(axis_channel, cc_num, send_val)
                     self._record_midi_send(axis_cc, cc_num, send_val)
                     self.midi_sent.emit()
@@ -1451,6 +1512,114 @@ class BridgeWorker(QObject):
             midi.port.send_message([note_off, note, 0])
             self.midi_sent.emit()
             self._emit_midi_message("sent", note_on, note, midi_vel, f"FLICK NOTE-ON #{note}")
+
+    # ---------------------------------------------------------- arp playback
+
+    def _start_arp(self, btn_idx: int, macro, midi) -> None:
+        """Begin continuous arp playback for btn_idx.
+
+        Creates a QTimer that fires every (1000 / arp_rate_hz) ms. Each tick
+        plays the next event in the macro; when all events have been played it
+        loops (arp_loop=True) or stops. State is stored in _arp_state[btn_idx].
+        """
+        interval_ms = max(1, int(round(1000.0 / max(0.01, macro.arp_rate_hz))))
+        state = {"event_index": 0, "timer": None}
+
+        def _tick():
+            if not macro.events:
+                return
+            idx = state["event_index"]
+            event = macro.events[idx % len(macro.events)]
+            if midi is not None:
+                try:
+                    midi.port.send_message([event.status, event.data1, event.data2])
+                    self.midi_sent.emit()
+                    self._emit_midi_message(
+                        "sent", event.status, event.data1, event.data2,
+                        f"ARP d1={event.data1:3d} d2={event.data2:3d}"
+                    )
+                except Exception:
+                    pass
+            state["event_index"] = idx + 1
+            if not macro.arp_loop and state["event_index"] >= len(macro.events):
+                self._stop_arp(btn_idx, mapping=None, midi=midi)
+
+        timer = QTimer(self)
+        timer.setInterval(interval_ms)
+        timer.timeout.connect(_tick)
+        state["timer"] = timer
+        self._arp_state[btn_idx] = state
+        timer.start()
+
+    def _stop_arp(self, btn_idx: int, mapping, midi) -> None:
+        """Stop arp playback for btn_idx and send note-off for all playing notes.
+
+        Iterates the macro's events and sends a note-off for every NOTE-ON found
+        so no notes are left hanging.
+        """
+        state = self._arp_state.pop(btn_idx, None)
+        if state is None:
+            return
+        timer = state.get("timer")
+        if timer is not None:
+            timer.stop()
+        # Send note-off for every NOTE-ON in the macro so nothing hangs.
+        if midi is not None:
+            macro_name = None
+            if mapping is not None:
+                macro_name = mapping.macro_bindings.get(btn_idx)
+            # Retrieve macro from mapping if available, else nothing to silence.
+            macro = None
+            if mapping is not None and macro_name:
+                macro = next((m for m in mapping.macros if m.name == macro_name), None)
+            if macro is not None:
+                try:
+                    for event in macro.events:
+                        if (event.status & 0xF0) == 0x90 and event.data2 > 0:
+                            note_off = (0x80 | (event.status & 0x0F))
+                            midi.port.send_message([note_off, event.data1, 0])
+                            self.midi_sent.emit()
+                except Exception:
+                    pass
+
+    def _tick_random_mod(self, axis_idx: int, stick_cfg, mapping: Mapping, midi) -> None:
+        """Sample a random CC value at random_mod_rate_hz and send to random_mod_cc.
+
+        Uses exponential smoothing: on each new sample the running value
+        moves toward the target over random_mod_smoothing_ms.  Called once
+        per poll tick for every enabled stick axis; the rate gate prevents
+        sampling more often than the configured rate.
+        """
+        import random
+        cfg = stick_cfg
+        now_ms = time.time() * 1000.0
+        last_ms, current_val = self._random_mod_state.get(axis_idx, (0.0, 64))
+
+        interval_ms = 1000.0 / max(0.01, cfg.random_mod_rate_hz)
+        if now_ms - last_ms >= interval_ms:
+            # New sample
+            target_val = random.randint(0, 127)
+            # Exponential-ish one-pole smooth: alpha = dt / smoothing_ms
+            smooth_ms = max(1, cfg.random_mod_smoothing_ms)
+            alpha = min(1.0, interval_ms / smooth_ms)
+            new_val = int(round(current_val + alpha * (target_val - current_val)))
+            new_val = max(0, min(127, new_val))
+            self._random_mod_state[axis_idx] = (now_ms, new_val)
+
+            if not self._osc_only() and midi is not None:
+                ch = self._channel_for_axis(mapping, axis_idx)
+                axis_cc = 0xB0 | ch
+                midi.port.send_message([axis_cc, cfg.random_mod_cc, new_val])
+                self._record_outbound_cc(ch, cfg.random_mod_cc, new_val)
+                self._record_midi_send(axis_cc, cfg.random_mod_cc, new_val)
+                self.midi_sent.emit()
+                self._emit_midi_message(
+                    "sent", axis_cc, cfg.random_mod_cc, new_val,
+                    f"RAND CC#{cfg.random_mod_cc}"
+                )
+        else:
+            # Keep current value in state (no resample yet)
+            self._random_mod_state.setdefault(axis_idx, (last_ms, current_val))
 
     def _poll_polar_sticks(self, reader, mapping, offsets, midi, cc, n_axes) -> None:
         """Emit polar (angle, magnitude) pairs for sticks in polar_mode.
@@ -1571,10 +1740,12 @@ class BridgeWorker(QObject):
             hat_note_off = 0x80 | hat_channel
             if now and not was:
                 midi.port.send_message([hat_note_on, note, 127])
+                self._rtp_send(hat_note_on, note, 127)
                 self.midi_sent.emit()
                 _usage_stats.tracker().record("hat", direction)
             elif not now and was:
                 midi.port.send_message([hat_note_off, note, 0])
+                self._rtp_send(hat_note_off, note, 0)
                 self.midi_sent.emit()
             if now != was:
                 self._prev_hat[direction] = now
@@ -2055,6 +2226,9 @@ class BridgeWorker(QObject):
             self._osc_receiver.stop()
             self._osc_receiver = None
         self._prev_osc_axes.clear()
+        if self._rtp_sender is not None:
+            self._rtp_sender.stop()
+            self._rtp_sender = None
         # Reset triggers to neutral before we hand the controller back to the
         # OS — otherwise the last-applied effect lingers until something else
         # talks to the controller.

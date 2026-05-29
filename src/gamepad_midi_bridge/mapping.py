@@ -148,6 +148,13 @@ class StickConfig:
     polar_mag_cc: int = 8     # balance CC
     cc_smoothing_ms: int = 0
     flick: StickFlickConfig = field(default_factory=StickFlickConfig)
+    # Random/chance modulator (feature #A) — when enabled, samples a random CC
+    # value at random_mod_rate_hz and sends it to random_mod_cc, optionally
+    # smoothed over random_mod_smoothing_ms.
+    random_mod_enabled: bool = False
+    random_mod_cc: int = 16
+    random_mod_rate_hz: float = 2.0
+    random_mod_smoothing_ms: int = 200
 
 
 @dataclass
@@ -319,6 +326,28 @@ class HapticInputBinding:
     intensity_scale: float = 1.0
 
 
+
+@dataclass
+class RtpMidiConfig:
+    """Optional RTP-MIDI (AppleMIDI / Network MIDI) output.
+
+    When enabled, every MIDI message sent to the local virtual port is ALSO
+    forwarded as a UDP RTP-MIDI packet to peer_host:peer_port.  No
+    session negotiation -- the receiver must already be in listening mode
+    (e.g. iOS GarageBand "Network Session", macOS Audio MIDI Setup,
+    or any DAW with an RTP-MIDI input).
+
+    Fields:
+      - enabled      : master switch (default False -- no UDP traffic).
+      - peer_host    : IPv4 address of the receiver (default 127.0.0.1).
+      - peer_port    : UDP port, typically 5004 (RTP-MIDI default).
+      - session_name : human-readable label shown in session logs.
+    """
+    enabled: bool = False
+    peer_host: str = "127.0.0.1"
+    peer_port: int = 5004
+    session_name: str = "UCM Bridge"
+
 @dataclass
 class PassthroughConfig:
     """Optional MIDI passthrough/thru mode.
@@ -394,6 +423,12 @@ class Macro:
     name: str
     events: List[MacroEvent] = field(default_factory=list)
     duration_ms: int = 0
+    # Arpeggiator mode (feature #B) — when enabled, the macro replays
+    # continuously at arp_rate_hz while the bound button is held; releases
+    # stop playback and send note-off for any held notes.
+    arp_mode: bool = False
+    arp_rate_hz: float = 8.0
+    arp_loop: bool = True
 
 
 # Default bindings the user gets when they flip `enabled` on for the first
@@ -622,6 +657,10 @@ class Mapping:
     # output port. Disabled by default; users enable via JSON for now (UI TBD).
     passthrough: "PassthroughConfig" = field(default_factory=lambda: PassthroughConfig())
 
+    # RTP-MIDI (Network MIDI / AppleMIDI) output — stream over LAN to remote
+    # receivers. Disabled by default; no UDP traffic unless explicitly enabled.
+    rtp_midi: RtpMidiConfig = field(default_factory=RtpMidiConfig)
+
     # Color tag for visual show planning (one of COLOR_TAGS)
     color_tag: str = "none"
 
@@ -691,6 +730,7 @@ class Mapping:
             macro_bindings={int(k): str(v) for k, v in data.get("macro_bindings", {}).items()},
             setlist=_setlist_config_from_dict(data.get("setlist")),
             passthrough=_passthrough_from_dict(data.get("passthrough")),
+            rtp_midi=_rtp_midi_from_dict(data.get("rtp_midi")),
             color_tag=color_tag,
             favourite=bool(data.get("favourite", False)),
         )
@@ -939,6 +979,10 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
         polar_mag_cc=int(d.get("polar_mag_cc", 8)),
         cc_smoothing_ms=max(0, min(1000, int(d.get("cc_smoothing_ms", 0)))),
         flick=_stick_flick_from_dict(d.get("flick")),
+        random_mod_enabled=bool(d.get("random_mod_enabled", False)),
+        random_mod_cc=max(0, min(127, int(d.get("random_mod_cc", 16)))),
+        random_mod_rate_hz=max(0.01, float(d.get("random_mod_rate_hz", 2.0))),
+        random_mod_smoothing_ms=max(0, int(d.get("random_mod_smoothing_ms", 200))),
     )
 
 
@@ -1043,7 +1087,14 @@ def _macro_from_dict(d: dict) -> Macro:
         except (TypeError, ValueError):
             continue
     duration_ms = max(0, int(d.get("duration_ms", events[-1].delay_ms if events else 0)))
-    return Macro(name=name, events=events, duration_ms=duration_ms)
+    return Macro(
+        name=name,
+        events=events,
+        duration_ms=duration_ms,
+        arp_mode=bool(d.get("arp_mode", False)),
+        arp_rate_hz=max(0.01, float(d.get("arp_rate_hz", 8.0))),
+        arp_loop=bool(d.get("arp_loop", True)),
+    )
 
 
 def _macros_from_dict(raw: object) -> List[Macro]:
@@ -1112,4 +1163,24 @@ def _passthrough_from_dict(d: Optional[dict]) -> "PassthroughConfig":
         pass_cc=bool(d.get("pass_cc", True)),
         pass_notes=bool(d.get("pass_notes", True)),
         pass_other=bool(d.get("pass_other", False)),
+    )
+
+def _rtp_midi_from_dict(d: Optional[dict]) -> RtpMidiConfig:
+    """Hydrate a RtpMidiConfig from raw dict, defaulting to disabled.
+
+    Missing/None returns a default disabled config so old presets load
+    cleanly without any UDP traffic.
+    """
+    if not d:
+        return RtpMidiConfig()
+    port_raw = d.get("peer_port", 5004)
+    try:
+        port = max(1, min(65535, int(port_raw)))
+    except (TypeError, ValueError):
+        port = 5004
+    return RtpMidiConfig(
+        enabled=bool(d.get("enabled", False)),
+        peer_host=str(d.get("peer_host", "127.0.0.1")),
+        peer_port=port,
+        session_name=str(d.get("session_name", "UCM Bridge")),
     )
