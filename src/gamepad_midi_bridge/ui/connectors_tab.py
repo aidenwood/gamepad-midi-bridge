@@ -27,6 +27,7 @@ class ConnectorsTab(QWidget):
 
     status_message = Signal(str)
     selection_changed = Signal(dict)
+    test_note_requested = Signal()  # Emitted when user clicks Test
 
     def __init__(self) -> None:
         super().__init__()
@@ -250,6 +251,11 @@ class ConnectorsTab(QWidget):
 
         button_row = QHBoxLayout()
         button_row.setSpacing(6)
+        test_btn = QPushButton("Test")
+        test_btn.setMinimumWidth(60)
+        test_btn.setToolTip("Send a test MIDI note to verify DAW connectivity")
+        test_btn.clicked.connect(lambda: self._on_test(connector, host))
+        button_row.addWidget(test_btn)
         install_btn = QPushButton("Reinstall" if installed else "Install")
         install_btn.setObjectName("PrimaryButton")
         install_btn.clicked.connect(lambda: self._on_install(connector, host))
@@ -284,3 +290,13 @@ class ConnectorsTab(QWidget):
         if not result.success:
             QMessageBox.warning(self, "Remove failed", result.message)
         self._rebuild_list()
+
+    def _on_test(self, connector: Connector, host: HostInstallation) -> None:
+        """Send a brief test note to verify DAW connectivity."""
+        self.test_note_requested.emit()
+        QMessageBox.information(
+            self, "Test note sent",
+            "A brief MIDI note (note-on + note-off) has been sent to your DAW.\n"
+            "Confirm that you received it in your MIDI monitor.\n\n"
+            "Cmd-Shift-P to send another panic/all notes off."
+        )

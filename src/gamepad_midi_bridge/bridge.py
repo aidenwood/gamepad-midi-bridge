@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (
-    QMetaObject, QObject, QThread, Q_ARG, Qt, Signal, Slot,
+    QMetaObject, QObject, QThread, QTimer, Q_ARG, Qt, Signal, Slot,
 )
 
 from . import dualsense as ds
@@ -26,7 +26,7 @@ from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, PassthroughConfig, R2_AXIS, STICK_AXES
+from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, PassthroughConfig, R2_AXIS, STICK_AXES, StickFlickConfig, TriggerAftertouchConfig
 from . import shaping
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
 from . import presets as _presets
@@ -205,6 +205,12 @@ class BridgeWorker(QObject):
         self._recording_events: List[MacroEvent] = []
         # Setlist mode — current position in the ordered preset list.
         self._setlist_index: int = 0
+        # Stick-flick state — per axis: (prev_shaped_val, prev_timestamp)
+        self._flick_state: Dict[int, tuple] = {}  # axis_idx -> (prev_val, prev_ts)
+        # Trigger aftertouch state — was AT active last tick?
+        self._at_active: Dict[int, bool] = {L2_AXIS: False, R2_AXIS: False}
+        # Test note timers — keeps QTimer objects alive across send_test_note() calls
+        self._test_note_timers: List[QTimer] = []
 
     # ---------------------------------------------------------------- public API
 
@@ -277,6 +283,81 @@ class BridgeWorker(QObject):
     @Slot()
     def stop(self) -> None:
         self._running = False
+
+    def panic(self) -> None:
+        """Send all notes off + all sound off on every channel as emergency stop.
+
+        Sends CC 123 (all notes off) and CC 120 (all sound off) for each channel,
+        plus note-off for every note 0..127 on every channel for DAW compatibility.
+        Total: ~2080 messages per panic across 16 channels.
+        """
+        if self._midi is None:
+            return
+        try:
+            for channel in range(16):
+                cc_byte = 0xB0 | channel
+                # CC 123 = all notes off
+                self._midi.port.send_message([cc_byte, 123, 0])
+                self._emit_midi_message("sent", cc_byte, 123, 0, "CC#123 (all notes off)")
+                self.midi_sent.emit()
+
+                # CC 120 = all sound off
+                self._midi.port.send_message([cc_byte, 120, 0])
+                self._emit_midi_message("sent", cc_byte, 120, 0, "CC#120 (all sound off)")
+                self.midi_sent.emit()
+
+                # Belt-and-braces: send note-off for every note on every channel
+                note_off = 0x80 | channel
+                for note in range(128):
+                    self._midi.port.send_message([note_off, note, 0])
+            self.midi_sent.emit()
+        except Exception:
+            pass
+
+    def send_test_note(self, channel: int = 0, note: int = 60,
+                       velocity: int = 100, duration_ms: int = 200) -> None:
+        """Send a brief test note (note-on then note-off) to verify DAW connectivity.
+
+        Sends note-on immediately, schedules note-off via QTimer after duration_ms.
+        Useful for testing connector output before connecting the full bridge.
+        """
+        if self._midi is None:
+            return
+
+        channel = max(0, min(15, channel))  # Clamp to 0..15
+        note = max(0, min(127, note))      # Clamp to 0..127
+        velocity = max(0, min(127, velocity))
+        duration_ms = max(10, duration_ms)
+
+        try:
+            note_on = 0x90 | channel
+            self._midi.port.send_message([note_on, note, velocity])
+            self._emit_midi_message("sent", note_on, note, velocity, f"TEST NOTE-ON #{note}")
+            self.midi_sent.emit()
+
+            # Schedule note-off via QTimer (thread-safe signal/slot mechanism)
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: self._send_test_note_off(channel, note))
+            timer.start(duration_ms)
+            # Keep timer alive by storing in a list
+            self._test_note_timers.append(timer)
+        except Exception:
+            pass
+
+    def _send_test_note_off(self, channel: int, note: int) -> None:
+        """Internal: send note-off and clean up the timer."""
+        if self._midi is None:
+            return
+        try:
+            note_off = 0x80 | channel
+            self._midi.port.send_message([note_off, note, 0])
+            self._emit_midi_message("sent", note_off, note, 0, f"TEST NOTE-OFF #{note}")
+            self.midi_sent.emit()
+        except Exception:
+            pass
+        # Clean up expired timers to avoid memory leak
+        self._test_note_timers = [t for t in self._test_note_timers if t.isActive()]
 
     @Slot()
     def recalibrate(self) -> None:
@@ -1151,6 +1232,9 @@ class BridgeWorker(QObject):
                     curve=stick_cfg.curve,
                     curve_amount=stick_cfg.curve_amount,
                 )
+                # Stick-flick velocity notes (feature #A)
+                if stick_cfg.flick.enabled:
+                    self._check_stick_flick(axis_idx, raw, stick_cfg.flick, mapping, midi)
                 # Convert to 0..127 range
                 val = int(round((raw + 1.0) * 63.5))
                 val = max(0, min(127, val))
@@ -1195,6 +1279,43 @@ class BridgeWorker(QObject):
                         continue
                     if send_release:
                         val = cfg.gate_release_value
+
+                # Trigger aftertouch (feature #B): emit 0xD0 past threshold
+                if cfg.aftertouch.enabled:
+                    at_cfg = cfg.aftertouch
+                    raw_pressure = shaping.normalise_trigger_pressure(
+                        reader.get_axis(axis_idx)
+                    )
+                    if raw_pressure > at_cfg.threshold:
+                        at_val = int(round(
+                            (raw_pressure - at_cfg.threshold)
+                            / (1.0 - at_cfg.threshold) * 127
+                        ))
+                        at_val = max(0, min(127, at_val))
+                        at_ch = (
+                            at_cfg.channel_override
+                            if at_cfg.channel_override >= 0
+                            else mapping.midi_channel
+                        ) & 0x0F
+                        if not self._osc_only():
+                            midi.port.send_message([0xD0 | at_ch, at_val])
+                            self.midi_sent.emit()
+                            self._emit_midi_message(
+                                "sent", 0xD0 | at_ch, at_val, 0,
+                                f"AFTERTOUCH {at_val}",
+                            )
+                        self._at_active[axis_idx] = True
+                    elif self._at_active.get(axis_idx):
+                        # Dropped below threshold — send AT=0 to zero out
+                        at_ch = (
+                            at_cfg.channel_override
+                            if at_cfg.channel_override >= 0
+                            else mapping.midi_channel
+                        ) & 0x0F
+                        if not self._osc_only():
+                            midi.port.send_message([0xD0 | at_ch, 0])
+                            self.midi_sent.emit()
+                        self._at_active[axis_idx] = False
             else:
                 # Other axes (HID hats, generic analogs) use the legacy
                 # -1..1 → 0..127 remap so unknown controllers keep working.
@@ -1256,6 +1377,69 @@ class BridgeWorker(QObject):
                     self._prev_osc_axes[axis_idx] = send_val
                 self._prev_cc[axis_idx] = send_val
                 self._emit_axis(axis_idx, raw)
+
+
+    def _check_stick_flick(self, axis_idx: int, shaped_val: float,
+                           flick_cfg, mapping: Mapping, midi) -> None:
+        """Detect rapid stick movement and fire a velocity-proportional note.
+
+        Called per-tick for each enabled stick axis. Computes axis velocity
+        (units/sec), and on the first tick where:
+          - |velocity| > speed_threshold, AND
+          - shaped_val magnitude > 0.7 (stick clearly moved in that direction)
+        fires the appropriate directional note with velocity scaled by speed.
+        Uses a rising-edge guard so rapid-fire repeats don't happen while the
+        stick stays at the destination.
+        """
+        now_ts = time.perf_counter()
+        prev_val, prev_ts = self._flick_state.get(axis_idx, (0.0, now_ts))
+
+        # Compute axis velocity in units/sec
+        dt = now_ts - prev_ts
+        velocity = (shaped_val - prev_val) / dt if dt > 1e-6 else 0.0
+
+        # Update history
+        self._flick_state[axis_idx] = (shaped_val, now_ts)
+
+        if not flick_cfg.enabled:
+            return
+
+        speed = abs(velocity)
+        if speed < flick_cfg.speed_threshold:
+            return
+
+        # Determine direction and magnitude threshold
+        # axis_idx 0/2 = X axis, 1/3 = Y axis
+        is_x_axis = (axis_idx % 2 == 0)
+        pos_flick = velocity > 0
+
+        if is_x_axis:
+            note = flick_cfg.note_pos_x if pos_flick else flick_cfg.note_neg_x
+        else:
+            note = flick_cfg.note_pos_y if pos_flick else flick_cfg.note_neg_y
+
+        # Rising-edge guard: only fire if stick just crossed 0.7 in the direction
+        # i.e. shaped_val >= 0.7 (positive) or <= -0.7 (negative) and wasn't before
+        threshold = 0.7
+        crossed = (pos_flick and shaped_val >= threshold and prev_val < threshold) or                   (not pos_flick and shaped_val <= -threshold and prev_val > -threshold)
+        if not crossed:
+            return
+
+        # Scale velocity: clamp to velocity_min..velocity_max
+        excess = speed - flick_cfg.speed_threshold
+        gain = (flick_cfg.velocity_max - flick_cfg.velocity_min) / max(1.0, flick_cfg.speed_threshold * 4)
+        midi_vel = int(round(flick_cfg.velocity_min + excess * gain))
+        midi_vel = max(flick_cfg.velocity_min, min(flick_cfg.velocity_max, midi_vel))
+
+        channel = self._channel_for_axis(mapping, axis_idx)
+        note_on = 0x90 | channel
+        note_off = 0x80 | channel
+
+        if not self._osc_only():
+            midi.port.send_message([note_on, note, midi_vel])
+            midi.port.send_message([note_off, note, 0])
+            self.midi_sent.emit()
+            self._emit_midi_message("sent", note_on, note, midi_vel, f"FLICK NOTE-ON #{note}")
 
     def _poll_polar_sticks(self, reader, mapping, offsets, midi, cc, n_axes) -> None:
         """Emit polar (angle, magnitude) pairs for sticks in polar_mode.

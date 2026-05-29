@@ -14,6 +14,9 @@ from typing import Dict, List, Optional
 
 SCHEMA_VERSION = 4
 
+# Color tag options for visual show planning
+COLOR_TAGS = ("none", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
+
 # Axes that come from analog sticks (vs triggers). Sticks need drift compensation.
 STICK_AXES = frozenset({0, 1, 2, 3})
 
@@ -22,6 +25,39 @@ STICK_AXES = frozenset({0, 1, 2, 3})
 L2_AXIS = 4
 R2_AXIS = 5
 
+
+
+@dataclass
+class TriggerAftertouchConfig:
+    """Second-stage aftertouch for the PS5 adaptive trigger.
+
+    Once pressure exceeds ``threshold`` the bridge emits channel aftertouch
+    (0xD0) proportional to how far past the threshold the trigger is pressed.
+    ``channel_override=-1`` means use the mapping's global midi_channel.
+    """
+
+    enabled: bool = False
+    threshold: float = 0.85   # 0..1 pressure where AT engages
+    channel_override: int = -1
+
+
+@dataclass
+class StickFlickConfig:
+    """Velocity-sensitive note-on from rapid stick movement.
+
+    When the stick axis crosses ``speed_threshold`` (axis units/sec) and the
+    axis magnitude passes 0.7 in that direction (rising edge), a note fires.
+    Different directional notes let sticks act like 4-way drum pads.
+    """
+
+    enabled: bool = False
+    note_pos_x: int = 64       # note fired on right-flick (+X)
+    note_neg_x: int = 65       # left-flick (-X)
+    note_pos_y: int = 66       # up-flick
+    note_neg_y: int = 67       # down-flick
+    velocity_min: int = 30
+    velocity_max: int = 127
+    speed_threshold: float = 4.0   # axis units / second minimum speed
 
 @dataclass
 class TriggerConfig:
@@ -57,6 +93,7 @@ class TriggerConfig:
     gate_button: Optional[int] = None
     gate_release_value: int = 0
     tactile_click: bool = True
+    aftertouch: TriggerAftertouchConfig = field(default_factory=TriggerAftertouchConfig)
 
 
 @dataclass
@@ -110,6 +147,7 @@ class StickConfig:
     polar_angle_cc: int = 7   # volume CC by default — meaningless but visible
     polar_mag_cc: int = 8     # balance CC
     cc_smoothing_ms: int = 0
+    flick: StickFlickConfig = field(default_factory=StickFlickConfig)
 
 
 @dataclass
@@ -584,6 +622,12 @@ class Mapping:
     # output port. Disabled by default; users enable via JSON for now (UI TBD).
     passthrough: "PassthroughConfig" = field(default_factory=lambda: PassthroughConfig())
 
+    # Color tag for visual show planning (one of COLOR_TAGS)
+    color_tag: str = "none"
+
+    # Favourite flag for quick access in setlist / preset manager
+    favourite: bool = False
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -604,6 +648,10 @@ class Mapping:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Mapping":
+        # Validate color_tag
+        raw_color = str(data.get("color_tag", "none"))
+        color_tag = raw_color if raw_color in COLOR_TAGS else "none"
+
         return cls(
             name=data.get("name", "Default"),
             schema_version=int(data.get("schema_version", 1)),
@@ -643,7 +691,36 @@ class Mapping:
             macro_bindings={int(k): str(v) for k, v in data.get("macro_bindings", {}).items()},
             setlist=_setlist_config_from_dict(data.get("setlist")),
             passthrough=_passthrough_from_dict(data.get("passthrough")),
+            color_tag=color_tag,
+            favourite=bool(data.get("favourite", False)),
         )
+
+
+def _trigger_aftertouch_from_dict(d: Optional[dict]) -> TriggerAftertouchConfig:
+    """Hydrate a TriggerAftertouchConfig, defaulting to disabled."""
+    if not d:
+        return TriggerAftertouchConfig()
+    return TriggerAftertouchConfig(
+        enabled=bool(d.get("enabled", False)),
+        threshold=max(0.0, min(1.0, float(d.get("threshold", 0.85)))),
+        channel_override=int(d.get("channel_override", -1)),
+    )
+
+
+def _stick_flick_from_dict(d: Optional[dict]) -> StickFlickConfig:
+    """Hydrate a StickFlickConfig, defaulting to disabled."""
+    if not d:
+        return StickFlickConfig()
+    return StickFlickConfig(
+        enabled=bool(d.get("enabled", False)),
+        note_pos_x=max(0, min(127, int(d.get("note_pos_x", 64)))),
+        note_neg_x=max(0, min(127, int(d.get("note_neg_x", 65)))),
+        note_pos_y=max(0, min(127, int(d.get("note_pos_y", 66)))),
+        note_neg_y=max(0, min(127, int(d.get("note_neg_y", 67)))),
+        velocity_min=max(0, min(127, int(d.get("velocity_min", 30)))),
+        velocity_max=max(0, min(127, int(d.get("velocity_max", 127)))),
+        speed_threshold=max(0.0, float(d.get("speed_threshold", 4.0))),
+    )
 
 
 def _trigger_from_dict(d: Optional[dict]) -> TriggerConfig:
@@ -666,6 +743,7 @@ def _trigger_from_dict(d: Optional[dict]) -> TriggerConfig:
         gate_button=gate_button,
         gate_release_value=max(0, min(127, int(d.get("gate_release_value", 0)))),
         tactile_click=bool(d.get("tactile_click", True)),
+        aftertouch=_trigger_aftertouch_from_dict(d.get("aftertouch")),
     )
 
 
@@ -860,6 +938,7 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
         polar_angle_cc=int(d.get("polar_angle_cc", 7)),
         polar_mag_cc=int(d.get("polar_mag_cc", 8)),
         cc_smoothing_ms=max(0, min(1000, int(d.get("cc_smoothing_ms", 0)))),
+        flick=_stick_flick_from_dict(d.get("flick")),
     )
 
 

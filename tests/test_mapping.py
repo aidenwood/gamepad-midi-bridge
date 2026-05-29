@@ -1258,3 +1258,214 @@ def test_mapping_without_passthrough_loads_with_default():
     assert m.passthrough.enabled is False
     assert m.passthrough.input_port_name == ""
     assert m.passthrough.channel_remap == -1
+
+
+# ------------------------------------------------------------------ color tag + favourite
+
+
+def test_color_tag_and_favourite_defaults():
+    """color_tag defaults to 'none', favourite defaults to False."""
+    m = Mapping()
+    assert m.color_tag == "none"
+    assert m.favourite is False
+
+
+def test_color_tag_round_trip():
+    """color_tag serializes and deserializes correctly."""
+    from gamepad_midi_bridge.mapping import COLOR_TAGS
+
+    for tag in COLOR_TAGS:
+        m = Mapping(name=f"ColorTest_{tag}", color_tag=tag)
+        restored = Mapping.from_dict(m.to_dict())
+        assert restored.color_tag == tag
+
+
+def test_favourite_round_trip():
+    """favourite flag serializes and deserializes correctly."""
+    m = Mapping(name="FavouriteTest", favourite=True)
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.favourite is True
+
+
+def test_invalid_color_tag_falls_back_to_none():
+    """Invalid color_tag defaults to 'none'."""
+    v_dict = {
+        "name": "BadColor",
+        "color_tag": "invalid_color",
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.color_tag == "none"
+
+
+def test_color_tags_contains_expected_values():
+    """COLOR_TAGS contains the 9 expected values."""
+    from gamepad_midi_bridge.mapping import COLOR_TAGS
+
+    expected = ("none", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
+    assert COLOR_TAGS == expected
+    assert len(COLOR_TAGS) == 9
+
+
+def test_color_tag_and_favourite_in_full_preset():
+    """color_tag and favourite work in a full preset with other fields."""
+    m = Mapping(
+        name="FullPreset",
+        midi_channel=5,
+        color_tag="blue",
+        favourite=True,
+    )
+    m.buttons[0] = 72
+    m.axes[2] = 10
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.name == "FullPreset"
+    assert restored.midi_channel == 5
+    assert restored.color_tag == "blue"
+    assert restored.favourite is True
+    assert restored.buttons[0] == 72
+    assert restored.axes[2] == 10
+
+
+def test_old_preset_without_color_tag_loads_cleanly():
+    """Old preset (no color_tag/favourite keys) loads with defaults."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "buttons": {"0": 60},
+        # Missing: color_tag and favourite
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.color_tag == "none"
+    assert m.favourite is False
+
+
+# ------------------------------------------------------------------ StickFlickConfig (#A)
+
+
+def test_stick_flick_config_defaults():
+    """StickFlickConfig defaults to disabled with expected note/velocity values."""
+    from gamepad_midi_bridge.mapping import StickFlickConfig
+
+    cfg = StickFlickConfig()
+    assert cfg.enabled is False
+    assert cfg.note_pos_x == 64
+    assert cfg.note_neg_x == 65
+    assert cfg.note_pos_y == 66
+    assert cfg.note_neg_y == 67
+    assert cfg.velocity_min == 30
+    assert cfg.velocity_max == 127
+    assert cfg.speed_threshold == pytest.approx(4.0, abs=1e-6)
+
+
+def test_stick_flick_config_round_trip():
+    """StickFlickConfig preserves all fields through Mapping serialisation."""
+    from gamepad_midi_bridge.mapping import StickFlickConfig
+
+    m = Mapping(name="FlickTest")
+    m.left_stick.flick = StickFlickConfig(
+        enabled=True,
+        note_pos_x=70,
+        note_neg_x=71,
+        note_pos_y=72,
+        note_neg_y=73,
+        velocity_min=40,
+        velocity_max=120,
+        speed_threshold=6.0,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    flick = restored.left_stick.flick
+    assert flick.enabled is True
+    assert flick.note_pos_x == 70
+    assert flick.note_neg_x == 71
+    assert flick.note_pos_y == 72
+    assert flick.note_neg_y == 73
+    assert flick.velocity_min == 40
+    assert flick.velocity_max == 120
+    assert flick.speed_threshold == pytest.approx(6.0, abs=1e-6)
+
+
+def test_stick_flick_config_nested_in_mapping_round_trip():
+    """left_stick.flick and right_stick.flick both survive a full Mapping round-trip."""
+    from gamepad_midi_bridge.mapping import StickFlickConfig
+
+    m = Mapping(name="BothFlicks")
+    m.left_stick.flick = StickFlickConfig(enabled=True, speed_threshold=3.0)
+    m.right_stick.flick = StickFlickConfig(enabled=False, note_pos_x=80)
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.left_stick.flick.enabled is True
+    assert restored.left_stick.flick.speed_threshold == pytest.approx(3.0, abs=1e-6)
+    assert restored.right_stick.flick.enabled is False
+    assert restored.right_stick.flick.note_pos_x == 80
+
+
+def test_old_preset_without_flick_loads_with_defaults():
+    """Old preset (no flick field) loads cleanly; flick stays disabled."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "left_stick": {
+            "inner_deadzone": 0.05,
+            "curve": "linear",
+        },
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.left_stick.flick.enabled is False
+    assert m.left_stick.flick.speed_threshold == pytest.approx(4.0, abs=1e-6)
+
+
+# ------------------------------------------------------------------ TriggerAftertouchConfig (#B)
+
+
+def test_trigger_aftertouch_config_defaults():
+    """TriggerAftertouchConfig defaults to disabled."""
+    from gamepad_midi_bridge.mapping import TriggerAftertouchConfig
+
+    cfg = TriggerAftertouchConfig()
+    assert cfg.enabled is False
+    assert cfg.threshold == pytest.approx(0.85, abs=1e-6)
+    assert cfg.channel_override == -1
+
+
+def test_trigger_aftertouch_config_round_trip():
+    """TriggerAftertouchConfig preserves all fields through Mapping serialisation."""
+    from gamepad_midi_bridge.mapping import TriggerAftertouchConfig
+
+    m = Mapping(name="ATTest")
+    m.l2_trigger.aftertouch = TriggerAftertouchConfig(
+        enabled=True, threshold=0.9, channel_override=2
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    at = restored.l2_trigger.aftertouch
+    assert at.enabled is True
+    assert at.threshold == pytest.approx(0.9, abs=1e-6)
+    assert at.channel_override == 2
+
+
+def test_trigger_aftertouch_nested_in_mapping_round_trip():
+    """l2_trigger.aftertouch and r2_trigger.aftertouch both survive a full Mapping round-trip."""
+    from gamepad_midi_bridge.mapping import TriggerAftertouchConfig
+
+    m = Mapping(name="BothAT")
+    m.l2_trigger.aftertouch = TriggerAftertouchConfig(enabled=True, threshold=0.8)
+    m.r2_trigger.aftertouch = TriggerAftertouchConfig(enabled=False, channel_override=5)
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.l2_trigger.aftertouch.enabled is True
+    assert restored.l2_trigger.aftertouch.threshold == pytest.approx(0.8, abs=1e-6)
+    assert restored.r2_trigger.aftertouch.enabled is False
+    assert restored.r2_trigger.aftertouch.channel_override == 5
+
+
+def test_old_preset_without_aftertouch_loads_with_defaults():
+    """Old preset (no aftertouch field on trigger) loads cleanly; AT stays disabled."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "l2_trigger": {
+            "mode": "linear",
+        },
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.l2_trigger.aftertouch.enabled is False
+    assert m.l2_trigger.aftertouch.threshold == pytest.approx(0.85, abs=1e-6)

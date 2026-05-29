@@ -344,6 +344,11 @@ class MainWindow(QMainWindow):
         palette_sc.setContext(Qt.ApplicationShortcut)
         palette_sc.activated.connect(self._open_command_palette)
 
+        # Ctrl+Shift+P — panic (all notes off).
+        panic_sc = QShortcut(QKeySequence("Ctrl+Shift+P"), self)
+        panic_sc.setContext(Qt.ApplicationShortcut)
+        panic_sc.activated.connect(self._on_panic)
+
         # Tray icon — optional, depends on platform support.
         self._tray: Optional[TrayController] = None
         if tray_available():
@@ -456,6 +461,17 @@ class MainWindow(QMainWindow):
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._on_stop)
         h.addWidget(self._stop_btn)
+
+        self._panic_btn = QPushButton("PANIC")
+        self._panic_btn.setObjectName("PanicButton")
+        self._panic_btn.setMinimumWidth(70)
+        self._panic_btn.setEnabled(False)
+        self._panic_btn.setToolTip("Send all notes off (Ctrl+Shift+P)")
+        self._panic_btn.setStyleSheet(
+            "QPushButton#PanicButton { color: #f97316; font-weight: 700; }"
+        )
+        self._panic_btn.clicked.connect(self._on_panic)
+        h.addWidget(self._panic_btn)
 
         # Layout toggles — Split (side panel) + Console (bottom pane).
         # Both are checkable so the pressed state mirrors the panel visibility.
@@ -816,6 +832,7 @@ class MainWindow(QMainWindow):
         self._connectors.selection_changed.connect(
             lambda p: self.push_inspector_selection("connectors", p)
         )
+        self._connectors.test_note_requested.connect(self._on_test_note)
         tabs.addTab(self._connectors, "Connectors")
 
         self._bluetooth = BluetoothTab()
@@ -1081,6 +1098,7 @@ class MainWindow(QMainWindow):
 
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
+        self._panic_btn.setEnabled(True)
         self._status_title.setText("Starting…")
         self._status_sub.setText("Detecting controller and opening MIDI port.")
 
@@ -1091,6 +1109,16 @@ class MainWindow(QMainWindow):
     def _on_stop(self) -> None:
         self._multi.stop()
         self._stop_btn.setEnabled(False)
+
+    def _on_panic(self) -> None:
+        """Send all notes off on every channel."""
+        if self._bridge is not None:
+            self._bridge.worker.panic()
+
+    def _on_test_note(self) -> None:
+        """Send a test MIDI note to verify connector DAW connectivity."""
+        if self._bridge is not None:
+            self._bridge.worker.send_test_note(channel=0, note=60, velocity=100, duration_ms=200)
 
     def _sync_live_layout(self, slot_count: int) -> None:
         """Show/hide the secondary meter + Pro nudge based on hardware + tier.
@@ -1136,6 +1164,7 @@ class MainWindow(QMainWindow):
     def _on_stopped(self) -> None:
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
+        self._panic_btn.setEnabled(False)
         self._refresh_status_idle()
         self._meter.set_connected(False)
         if self._tray is not None:
@@ -1595,6 +1624,7 @@ class MainWindow(QMainWindow):
         # ---- Bridge control ----
         cmds.append(Command("Start bridge", "Start MIDI bridging", self._on_start))
         cmds.append(Command("Stop bridge", "Stop MIDI bridging", self._on_stop))
+        cmds.append(Command("Panic — all notes off", "Send all notes off (emergency stop)", self._on_panic))
         cmds.append(Command("Toggle bridge", "Start or stop the bridge", self._toggle_bridge))
 
         # ---- Layout toggles ----
