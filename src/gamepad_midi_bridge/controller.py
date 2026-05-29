@@ -88,28 +88,73 @@ class ControllerReader:
 
     # ------------------------------------------------------------------ polling
 
+    def _alive(self) -> bool:
+        if self._joystick is None:
+            return False
+        if not pygame.get_init() or not pygame.joystick.get_init():
+            return False
+        try:
+            return pygame.joystick.get_count() > self._slot_index
+        except pygame.error:
+            return False
+
     def pump(self) -> None:
-        pygame.event.pump()
+        if not pygame.get_init() or not pygame.joystick.get_init():
+            return
+        try:
+            pygame.event.pump()
+        except pygame.error:
+            pass
 
     def get_axis(self, idx: int) -> float:
-        return self._joystick.get_axis(idx) if self._joystick else 0.0
+        if not self._alive():
+            return 0.0
+        try:
+            return self._joystick.get_axis(idx)
+        except (pygame.error, IndexError):
+            return 0.0
 
     def get_button(self, idx: int) -> bool:
-        return bool(self._joystick.get_button(idx)) if self._joystick else False
+        if not self._alive():
+            return False
+        try:
+            return bool(self._joystick.get_button(idx))
+        except (pygame.error, IndexError):
+            return False
 
     def get_hat(self, idx: int = 0) -> Tuple[int, int]:
-        if self._joystick is None or self._joystick.get_numhats() == 0:
+        if not self._alive():
             return (0, 0)
-        return self._joystick.get_hat(idx)
+        try:
+            if self._joystick.get_numhats() == 0:
+                return (0, 0)
+            return self._joystick.get_hat(idx)
+        except (pygame.error, IndexError):
+            return (0, 0)
 
     def num_axes(self) -> int:
-        return self._joystick.get_numaxes() if self._joystick else 0
+        if not self._alive():
+            return 0
+        try:
+            return self._joystick.get_numaxes()
+        except pygame.error:
+            return 0
 
     def num_buttons(self) -> int:
-        return self._joystick.get_numbuttons() if self._joystick else 0
+        if not self._alive():
+            return 0
+        try:
+            return self._joystick.get_numbuttons()
+        except pygame.error:
+            return 0
 
     def num_hats(self) -> int:
-        return self._joystick.get_numhats() if self._joystick else 0
+        if not self._alive():
+            return 0
+        try:
+            return self._joystick.get_numhats()
+        except pygame.error:
+            return 0
 
 
 def available_count() -> int:
