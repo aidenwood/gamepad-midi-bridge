@@ -95,6 +95,14 @@ class TriggerConfig:
                                Default 1.0.
       - `bow_min_velocity`   : threshold (axis units/sec) below which
                                expression goes silent. Default 0.5.
+      - `crossfade_enabled`  : if True, one trigger drives two CCs in
+                               opposition (0..127 and 127..0). Default False.
+      - `crossfade_cc_b`     : CC number for the partner channel (default 0).
+                               Main trigger CC is in `axes` dict. Clamp 0..127.
+      - `crossfade_channel_b`: optional MIDI channel override for partner CC.
+                               None = use mapping's global midi_channel.
+      - `crossfade_curve`    : curve factor (0.1..4.0, default 1.0). 1.0 = linear,
+                               0.5 = log-ish ease-in, 2.0 = exponential.
     """
     mode: str = "linear"
     ceiling: int = 127
@@ -107,6 +115,10 @@ class TriggerConfig:
     bow_cc: int = 11
     bow_velocity_scale: float = 1.0
     bow_min_velocity: float = 0.5
+    crossfade_enabled: bool = False
+    crossfade_cc_b: int = 0
+    crossfade_channel_b: Optional[int] = None
+    crossfade_curve: float = 1.0
 
 
 @dataclass
@@ -990,6 +1002,18 @@ def _trigger_from_dict(d: Optional[dict]) -> TriggerConfig:
                 gate_button = None
         except (TypeError, ValueError):
             gate_button = None
+
+    # Crossfade channel override — handle similar to other channel overrides
+    raw_xfade_ch = d.get("crossfade_channel_b")
+    crossfade_channel_b: Optional[int] = None
+    if raw_xfade_ch is not None:
+        try:
+            ch = int(raw_xfade_ch)
+            if 0 <= ch <= 15:
+                crossfade_channel_b = ch
+        except (TypeError, ValueError):
+            pass
+
     return TriggerConfig(
         mode=str(d.get("mode", "linear")),
         ceiling=max(0, min(127, int(d.get("ceiling", 127)))),
@@ -1002,6 +1026,10 @@ def _trigger_from_dict(d: Optional[dict]) -> TriggerConfig:
         bow_cc=max(0, min(127, int(d.get("bow_cc", 11)))),
         bow_velocity_scale=max(0.0, float(d.get("bow_velocity_scale", 1.0))),
         bow_min_velocity=max(0.0, float(d.get("bow_min_velocity", 0.5))),
+        crossfade_enabled=bool(d.get("crossfade_enabled", False)),
+        crossfade_cc_b=max(0, min(127, int(d.get("crossfade_cc_b", 0)))),
+        crossfade_channel_b=crossfade_channel_b,
+        crossfade_curve=max(0.1, min(4.0, float(d.get("crossfade_curve", 1.0)))),
     )
 
 

@@ -1959,6 +1959,89 @@ def test_old_preset_without_bow_mode_loads_with_defaults():
     assert m.l2_trigger.bow_min_velocity == 0.5
 
 
+def test_trigger_config_crossfade_defaults_disabled():
+    """TriggerConfig crossfade fields default to disabled."""
+    cfg = TriggerConfig()
+    assert cfg.crossfade_enabled is False
+    assert cfg.crossfade_cc_b == 0
+    assert cfg.crossfade_channel_b is None
+    assert cfg.crossfade_curve == 1.0
+
+
+def test_trigger_config_crossfade_enabled_round_trip():
+    """TriggerConfig crossfade fields survive Mapping serialisation."""
+    m = Mapping(name="CrossfadePreset")
+    m.l2_trigger = TriggerConfig(
+        crossfade_enabled=True,
+        crossfade_cc_b=3,
+        crossfade_channel_b=2,
+        crossfade_curve=0.8,
+    )
+    m_dict = m.to_dict()
+    m2 = Mapping.from_dict(m_dict)
+    assert m2.l2_trigger.crossfade_enabled is True
+    assert m2.l2_trigger.crossfade_cc_b == 3
+    assert m2.l2_trigger.crossfade_channel_b == 2
+    assert m2.l2_trigger.crossfade_curve == pytest.approx(0.8, abs=1e-6)
+
+
+def test_trigger_config_crossfade_cc_b_clamps():
+    """TriggerConfig.crossfade_cc_b clamps to 0..127."""
+    from gamepad_midi_bridge.mapping import _trigger_from_dict
+    cfg = _trigger_from_dict({"crossfade_cc_b": -5})
+    assert cfg.crossfade_cc_b == 0
+    cfg = _trigger_from_dict({"crossfade_cc_b": 200})
+    assert cfg.crossfade_cc_b == 127
+    cfg = _trigger_from_dict({"crossfade_cc_b": 50})
+    assert cfg.crossfade_cc_b == 50
+
+
+def test_trigger_config_crossfade_curve_clamps():
+    """TriggerConfig.crossfade_curve clamps to 0.1..4.0."""
+    from gamepad_midi_bridge.mapping import _trigger_from_dict
+    cfg = _trigger_from_dict({"crossfade_curve": 0.01})
+    assert cfg.crossfade_curve == 0.1
+    cfg = _trigger_from_dict({"crossfade_curve": 10.0})
+    assert cfg.crossfade_curve == 4.0
+    cfg = _trigger_from_dict({"crossfade_curve": 1.5})
+    assert cfg.crossfade_curve == pytest.approx(1.5, abs=1e-6)
+
+
+def test_trigger_config_crossfade_channel_b_validates():
+    """TriggerConfig.crossfade_channel_b accepts 0..15 or None."""
+    from gamepad_midi_bridge.mapping import _trigger_from_dict
+    # Valid channel
+    cfg = _trigger_from_dict({"crossfade_channel_b": 5})
+    assert cfg.crossfade_channel_b == 5
+    # Out of range — should be None (invalid channels silently drop)
+    cfg = _trigger_from_dict({"crossfade_channel_b": 20})
+    assert cfg.crossfade_channel_b is None
+    # Negative out of range
+    cfg = _trigger_from_dict({"crossfade_channel_b": -1})
+    assert cfg.crossfade_channel_b is None
+    # None is preserved
+    cfg = _trigger_from_dict({})
+    assert cfg.crossfade_channel_b is None
+
+
+def test_old_preset_without_crossfade_loads_with_defaults():
+    """Old preset (no crossfade fields) loads cleanly with defaults."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "l2_trigger": {
+            "mode": "linear",
+            "ceiling": 127,
+            # Missing: crossfade_enabled, crossfade_cc_b, crossfade_channel_b, crossfade_curve
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.l2_trigger.crossfade_enabled is False
+    assert m.l2_trigger.crossfade_cc_b == 0
+    assert m.l2_trigger.crossfade_channel_b is None
+    assert m.l2_trigger.crossfade_curve == 1.0
+
+
 def test_stick_config_chord_defaults():
     """Stick chord fields default to disabled."""
     cfg = StickConfig()

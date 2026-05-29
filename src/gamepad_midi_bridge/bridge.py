@@ -1851,6 +1851,33 @@ class BridgeWorker(QObject):
                 self._prev_cc[axis_idx] = send_val
                 self._emit_axis(axis_idx, raw)
 
+                # Feature #C: Trigger crossfade — one trigger drives two CCs in opposition
+                if (axis_idx == L2_AXIS or axis_idx == R2_AXIS) and not osc_only:
+                    cfg = mapping.l2_trigger if axis_idx == L2_AXIS else mapping.r2_trigger
+                    if cfg.crossfade_enabled:
+                        # Compute opposing CC pair from normalised pressure
+                        normalised_pressure = pressure  # Already normalised from line 1683
+                        cc_a_val, cc_b_val = shaping.apply_trigger_crossfade(
+                            normalised_pressure,
+                            curve=cfg.crossfade_curve,
+                        )
+                        # Determine channel for CC_B (partner CC)
+                        cc_b_channel = cfg.crossfade_channel_b if cfg.crossfade_channel_b is not None else mapping.midi_channel
+                        cc_b_channel = cc_b_channel & 0x0F
+                        cc_b_status = 0xB0 | cc_b_channel
+                        # Send CC_B if value changed (use string key to namespace from axis indices)
+                        xfade_key = f"xfade_cc_b_{axis_idx}"
+                        prev_cc_b = self._prev_cc.get(xfade_key, -1)
+                        if prev_cc_b != cc_b_val:
+                            midi.port.send_message([cc_b_status, cfg.crossfade_cc_b, cc_b_val])
+                            self._rtp_send(cc_b_status, cfg.crossfade_cc_b, cc_b_val)
+                            self._record_outbound_cc(cc_b_channel, cfg.crossfade_cc_b, cc_b_val)
+                            self._record_midi_send(cc_b_status, cfg.crossfade_cc_b, cc_b_val)
+                            self.midi_sent.emit()
+                            self._emit_midi_message("sent", cc_b_status, cfg.crossfade_cc_b, cc_b_val,
+                                                  f"XFADE-CC#{cfg.crossfade_cc_b}")
+                            self._prev_cc[xfade_key] = cc_b_val
+
             # Track stick chord values — collect X,Y pairs then poll
             if axis_idx in STICK_AXES:
                 stick_idx = axis_idx // 2  # 0,1 -> stick 0; 2,3 -> stick 1

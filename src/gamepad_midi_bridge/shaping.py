@@ -293,3 +293,45 @@ def apply_touchpad_axis(
         v = max(0.0, min(1.0, v))
 
     return apply_curve(v, curve, curve_amount)
+
+
+def apply_trigger_crossfade(pressure_0_1: float, curve: float = 1.0) -> Tuple[int, int]:
+    """Compute two opposing CC values from a single trigger pressure.
+
+    When enabled, a trigger can drive two CCs in opposition: as pressure rises,
+    cc_a_value goes 0→127 and cc_b_value goes 127→0. This enables single-trigger
+    crossfading between two filter cutoffs, dry/wet balances, effect sends, etc.
+
+    Args:
+        pressure_0_1: normalised trigger pressure, typically 0..1 from
+                      normalise_trigger_pressure().
+        curve: response curve (0.1..4.0, default 1.0). 1.0 = linear,
+               0.5 = log-ish ease-in (biases high initially), 2.0 = exponential
+               (biases low initially). Clamped to valid range on input.
+
+    Returns:
+        Tuple of (cc_a_value, cc_b_value) both in 0..127 ready for MIDI.
+        At pressure=0: (0, 127). At pressure=1: (127, 0). At pressure=0.5 with
+        linear curve: (~64, ~63).
+    """
+    # Clamp inputs to safe ranges
+    p = max(0.0, min(1.0, pressure_0_1))
+    c = max(0.1, min(4.0, curve))
+
+    # Apply curve: cc_a_value = round(p^curve * 127)
+    # Higher curve values push output toward low (exponential),
+    # lower values push toward high (logarithmic).
+    if c == 1.0:
+        # Linear: no power transform needed
+        cc_a_value = int(round(p * 127.0))
+    else:
+        # Power curve
+        cc_a_value = int(round((p ** c) * 127.0))
+
+    # Clamp just in case rounding produced an edge case
+    cc_a_value = max(0, min(127, cc_a_value))
+
+    # cc_b_value is the inverse: 127 - cc_a_value
+    cc_b_value = 127 - cc_a_value
+
+    return (cc_a_value, cc_b_value)

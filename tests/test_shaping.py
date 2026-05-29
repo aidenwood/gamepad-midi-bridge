@@ -295,3 +295,90 @@ def test_touchpad_centre_deadzone_snaps():
                                         inner_deadzone=0.05) == 0.5
     assert shaping.apply_touchpad_axis(0.49, mode="absolute",
                                         inner_deadzone=0.05) == 0.5
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Trigger crossfade — opposing CC pair from single trigger
+# ─────────────────────────────────────────────────────────────────────
+
+def test_trigger_crossfade_linear_rest_is_zero_max():
+    """At pressure=0 with linear curve, cc_a=0, cc_b=127."""
+    cc_a, cc_b = shaping.apply_trigger_crossfade(0.0, curve=1.0)
+    assert cc_a == 0
+    assert cc_b == 127
+
+
+def test_trigger_crossfade_linear_full_press_is_max_zero():
+    """At pressure=1 with linear curve, cc_a=127, cc_b=0."""
+    cc_a, cc_b = shaping.apply_trigger_crossfade(1.0, curve=1.0)
+    assert cc_a == 127
+    assert cc_b == 0
+
+
+def test_trigger_crossfade_linear_midpoint():
+    """At pressure=0.5 with linear curve, cc_a and cc_b should sum to 127."""
+    cc_a, cc_b = shaping.apply_trigger_crossfade(0.5, curve=1.0)
+    assert cc_a + cc_b == 127
+    # Near 64/63 split
+    assert 63 <= cc_a <= 65
+    assert 62 <= cc_b <= 64
+
+
+def test_trigger_crossfade_sum_always_127():
+    """For any pressure and curve, cc_a + cc_b should equal 127."""
+    for p in (0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0):
+        for curve in (0.5, 1.0, 2.0):
+            cc_a, cc_b = shaping.apply_trigger_crossfade(p, curve=curve)
+            assert cc_a + cc_b == 127, f"Failed for pressure={p}, curve={curve}"
+
+
+def test_trigger_crossfade_exponential_biases_low():
+    """Curve=2.0 (exponential) should bias cc_a toward low initially."""
+    cc_a_linear, _ = shaping.apply_trigger_crossfade(0.5, curve=1.0)
+    cc_a_exp, _ = shaping.apply_trigger_crossfade(0.5, curve=2.0)
+    # Exponential should be lower than linear at mid-range
+    assert cc_a_exp < cc_a_linear
+
+
+def test_trigger_crossfade_logarithmic_biases_high():
+    """Curve=0.5 (logarithmic) should bias cc_a toward high initially."""
+    cc_a_linear, _ = shaping.apply_trigger_crossfade(0.5, curve=1.0)
+    cc_a_log, _ = shaping.apply_trigger_crossfade(0.5, curve=0.5)
+    # Logarithmic should be higher than linear at mid-range
+    assert cc_a_log > cc_a_linear
+
+
+def test_trigger_crossfade_curve_clamps():
+    """Out-of-range curve values should be clamped to 0.1..4.0."""
+    # Curve too low should act like 0.1
+    cc_a_low, _ = shaping.apply_trigger_crossfade(0.5, curve=-1.0)
+    cc_a_min, _ = shaping.apply_trigger_crossfade(0.5, curve=0.1)
+    assert cc_a_low == cc_a_min
+
+    # Curve too high should act like 4.0
+    cc_a_high, _ = shaping.apply_trigger_crossfade(0.5, curve=10.0)
+    cc_a_max, _ = shaping.apply_trigger_crossfade(0.5, curve=4.0)
+    assert cc_a_high == cc_a_max
+
+
+def test_trigger_crossfade_pressure_clamps():
+    """Pressure outside 0..1 should be clamped."""
+    cc_a_neg, cc_b_neg = shaping.apply_trigger_crossfade(-0.5, curve=1.0)
+    cc_a_zero, cc_b_zero = shaping.apply_trigger_crossfade(0.0, curve=1.0)
+    assert (cc_a_neg, cc_b_neg) == (cc_a_zero, cc_b_zero)
+
+    cc_a_high, cc_b_high = shaping.apply_trigger_crossfade(2.0, curve=1.0)
+    cc_a_one, cc_b_one = shaping.apply_trigger_crossfade(1.0, curve=1.0)
+    assert (cc_a_high, cc_b_high) == (cc_a_one, cc_b_one)
+
+
+def test_trigger_crossfade_values_in_range():
+    """Both cc_a and cc_b should always be in 0..127."""
+    import random
+    random.seed(42)
+    for _ in range(100):
+        p = random.random()
+        curve = random.uniform(0.1, 4.0)
+        cc_a, cc_b = shaping.apply_trigger_crossfade(p, curve=curve)
+        assert 0 <= cc_a <= 127, f"cc_a={cc_a} out of range for p={p}, curve={curve}"
+        assert 0 <= cc_b <= 127, f"cc_b={cc_b} out of range for p={p}, curve={curve}"
