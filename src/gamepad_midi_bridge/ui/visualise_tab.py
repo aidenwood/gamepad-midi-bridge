@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from .axis_scope import AxisScope
 from .usage_heatmap import UsageHeatmap
 
+from .throughput_panel import ThroughputPanel
 
 # Match controller_meter.py palette so the two views feel like one app.
 STICK_BG = QColor("#16181d")
@@ -361,6 +362,10 @@ class VisualiseTab(QWidget):
         self._wired = True
         self._runtime_start: Optional[float] = None
 
+        # Throughput tracking: counters for tick() — reset every 1s
+        self._midi_out_counter = 0
+        self._midi_in_counter = 0
+
         self._repaint_timer = QTimer(self)
         self._repaint_timer.setInterval(int(1000 / REPAINT_HZ))
         self._repaint_timer.timeout.connect(self._tick)
@@ -371,9 +376,23 @@ class VisualiseTab(QWidget):
         self._rate_timer.timeout.connect(self._flush_rate)
         self._rate_timer.start()
 
+        self._throughput_timer = QTimer(self)
+        self._throughput_timer.setInterval(1000)
+        self._throughput_timer.timeout.connect(self._tick_throughput)
+        self._throughput_timer.start()
+
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 20, 20, 20); root.setSpacing(14)
+
+        # MIDI throughput dashboard
+        throughput_frame = self._panel_frame()
+        throughput_v = QVBoxLayout(throughput_frame)
+        throughput_v.setContentsMargins(10, 8, 10, 10); throughput_v.setSpacing(4)
+        throughput_v.addWidget(self._section_title("MIDI THROUGHPUT (60 SEC HISTORY)"))
+        self._throughput_panel = ThroughputPanel()
+        throughput_v.addWidget(self._throughput_panel)
+        root.addWidget(throughput_frame, 1)
 
         top = QHBoxLayout(); top.setSpacing(14)
         self._diagram = _DualSenseDiagram()
@@ -479,6 +498,7 @@ class VisualiseTab(QWidget):
         worker.touchpad_xy.connect(self._on_touchpad)
         worker.transport_changed.connect(self._on_transport)
         worker.midi_sent.connect(self._on_midi_sent)
+        worker.midi_message.connect(self._on_midi_message)
         worker.controller_info.connect(self._on_controller_info)
         worker.started.connect(self._on_started)
         worker.stopped.connect(self._on_stopped)
@@ -516,9 +536,15 @@ class VisualiseTab(QWidget):
 
     def _on_midi_sent(self) -> None:
         self._midi_count += 1; self._midi_total += 1
+        self._midi_out_counter += 1
         if self._pending_input_ts:
             ts = self._pending_input_ts.popleft()
             self._latency_samples.append(time.perf_counter() - ts)
+
+    def _on_midi_message(self, direction: str, channel: int, status: int, data1: int, data2: int, label: str) -> None:
+        """Track incoming MIDI for throughput counting."""
+        if direction == "received":
+            self._midi_in_counter += 1
 
     def _on_controller_info(self, info) -> None:
         if info is None:
@@ -543,6 +569,12 @@ class VisualiseTab(QWidget):
 
     def _flush_rate(self) -> None:
         self._stat_rate.setText(str(self._midi_count)); self._midi_count = 0
+
+    def _tick_throughput(self) -> None:
+        """Called every 1 second to push throughput data to the panel."""
+        self._throughput_panel.tick(self._midi_out_counter, self._midi_in_counter)
+        self._midi_out_counter = 0
+        self._midi_in_counter = 0
 
     def _refresh_stats(self) -> None:
         self._stat_name.setText(self._connected_name or "—")

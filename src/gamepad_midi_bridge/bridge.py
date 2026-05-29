@@ -26,7 +26,7 @@ from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, R2_AXIS, STICK_AXES
+from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, PassthroughConfig, R2_AXIS, STICK_AXES
 from . import shaping
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
 from . import presets as _presets
@@ -144,6 +144,8 @@ class BridgeWorker(QObject):
         # callback thread and the main poll loop's `_apply_haptics` calls so
         # we never interleave two output reports on the same handle.
         self._midi_in: Optional[OpenedInputPort] = None
+        # Passthrough input port — separate from the haptic-in port.
+        self._passthrough_input: Optional[OpenedInputPort] = None
         self._haptic_lock = threading.Lock()
         self._haptic_revert_timers: List["threading.Timer"] = []
         self._running = False
@@ -177,6 +179,8 @@ class BridgeWorker(QObject):
         self._prev_touchpad_zone: Optional[int] = None  # zone index for hysteresis
         self._touchpad_zone_bias: Dict[int, float] = {}  # hysteresis bias per zone
         self._prev_battery: Optional[tuple] = None
+        # CC smoothing state: keyed by (axis_idx, cc_num), value = (current_val, target_val, start_ms)
+        self._cc_smooth_state: Dict[tuple, tuple] = {}  # (current, target, started_at_ms)
         # Gesture tracking — per-finger touch start position + two-finger distance
         self._touch_start_xy: Optional[Tuple[float, float]] = None  # first contact XY
         self._touch_last_xy: Optional[Tuple[float, float]] = None  # last recorded touch position
@@ -231,6 +235,7 @@ class BridgeWorker(QObject):
         self._apply_haptics()
         self._sync_osc_sender()
         self._sync_haptic_input()
+        self._sync_passthrough()
         self._sync_midi_clock()
 
     @Slot()
@@ -259,6 +264,7 @@ class BridgeWorker(QObject):
         self._apply_haptics()
         self._sync_osc_sender()
         self._sync_haptic_input()
+        self._sync_passthrough()
 
         # Auto-calibrate on first start. UI may also trigger recalibration.
         self._run_calibration()
@@ -676,9 +682,115 @@ class BridgeWorker(QObject):
         # NOTE_OFF, polyphonic aftertouch, channel pressure, etc. are no-ops —
         # haptics naturally decay (we revert after _HAPTIC_PULSE_MS).
 
+    # ---------------------------------------------------------- passthrough
+
+    def _sync_passthrough(self) -> None:
+        """Open or close the passthrough input port to match the current config.
+
+        Called from set_mapping() and start() so it tracks live mapping changes.
+        If enabled + input_port_name is set, opens the port and registers
+        _on_passthrough_in as the callback. Otherwise closes any existing port.
+        """
+        cfg: PassthroughConfig = self._state.mapping.passthrough
+        want_port = cfg.enabled and bool(cfg.input_port_name.strip())
+
+        if not want_port:
+            if self._passthrough_input is not None:
+                close_input_port(self._passthrough_input)
+                self._passthrough_input = None
+            return
+
+        # Already open on the same port name — nothing to do.
+        if (self._passthrough_input is not None
+                and self._passthrough_input.name == cfg.input_port_name):
+            return
+
+        # Close any previously-open port (name changed or first open).
+        if self._passthrough_input is not None:
+            close_input_port(self._passthrough_input)
+            self._passthrough_input = None
+
+        try:
+            port = open_input_port(cfg.input_port_name)
+            set_input_callback(port, self._on_passthrough_in)
+            self._passthrough_input = port
+            self.status.emit(
+                f"MIDI passthrough: listening on \'{port.name}\'"
+            )
+        except MidiInputError as e:
+            self.status.emit(f"MIDI passthrough unavailable: {e}")
+            self._passthrough_input = None
+
+    def _on_passthrough_in(self, event, _data) -> None:
+        """rtmidi callback for the passthrough input port.
+
+        Runs on librtmidi's C thread — must stay non-blocking.
+
+        Signal flow for an incoming note:
+          1. Parse (message, delta) from rtmidi.
+          2. Check pass_notes / pass_cc / pass_other against message type.
+          3. If channel_remap >= 0, rewrite the channel nibble in the status byte.
+          4. If note message and transpose_semitones != 0, clamp-add to data1.
+          5. Forward via midi.port.send_message to the bridge's output port.
+          6. Emit midi_message signal ("received") so the activity log shows it.
+        """
+        try:
+            message, _delta = event
+        except (TypeError, ValueError):
+            return
+        if not message or len(message) < 1:
+            return
+
+        cfg: PassthroughConfig = self._state.mapping.passthrough
+        if not cfg.enabled:
+            return
+
+        midi = self._midi
+        if midi is None:
+            return
+
+        try:
+            status_byte = int(message[0])
+        except (IndexError, ValueError):
+            return
+
+        msg_type = status_byte & 0xF0
+        is_note = msg_type in (0x80, 0x90)
+        is_cc = msg_type == 0xB0
+
+        if is_note and not cfg.pass_notes:
+            return
+        if is_cc and not cfg.pass_cc:
+            return
+        if not is_note and not is_cc and not cfg.pass_other:
+            return
+
+        # Build a mutable copy of the raw message bytes.
+        out = list(message)
+
+        # Channel remap: replace the lower nibble of the status byte.
+        if cfg.channel_remap >= 0:
+            out[0] = msg_type | (cfg.channel_remap & 0x0F)
+
+        # Transpose: shift note number on Note-On / Note-Off.
+        if is_note and cfg.transpose_semitones != 0 and len(out) >= 2:
+            note = int(out[1]) + cfg.transpose_semitones
+            out[1] = max(0, min(127, note))
+
+        try:
+            midi.port.send_message(out)
+            self.midi_sent.emit()
+            # Emit to the activity log (direction "received" = came from passthrough).
+            d1 = int(out[1]) if len(out) > 1 else 0
+            d2 = int(out[2]) if len(out) > 2 else 0
+            label = f"PT {'NOTE' if is_note else 'CC' if is_cc else 'MSG'} d1={d1}"
+            self._emit_midi_message("received", int(out[0]), d1, d2, label)
+        except Exception:
+            pass
+
     def _recently_sent(self, channel: int, cc_number: int, value: int, window_ms: Optional[int] = None) -> bool:
         """Check if this (channel, cc_number, value) was sent recently.
-        
+
         Returns True if found within the window, False otherwise.
         Window defaults to _feedback_guard_window_ms (50ms).
         """
@@ -999,11 +1111,13 @@ class BridgeWorker(QObject):
                     macro = next((m for m in mapping.macros if m.name == macro_name), None)
                     if macro:
                         self._play_macro(macro, midi)
+                # Use velocity from button config if available, else default to 100
+                velocity = btn_cfg.velocity if btn_cfg else 100
                 if not osc_only:
-                    midi.port.send_message([btn_note_on, note, 127])
-                    self._record_midi_send(btn_note_on, note, 127)
+                    midi.port.send_message([btn_note_on, note, velocity])
+                    self._record_midi_send(btn_note_on, note, velocity)
                     self.midi_sent.emit()
-                    self._emit_midi_message("sent", btn_note_on, note, 127, f"NOTE-ON #{note}")
+                    self._emit_midi_message("sent", btn_note_on, note, velocity, f"NOTE-ON #{note}")
                 self._send_osc_button(btn_idx, True)
                 _usage_stats.tracker().record("button", btn_idx)
             elif not pressed and was:
@@ -1086,22 +1200,61 @@ class BridgeWorker(QObject):
                 # -1..1 → 0..127 remap so unknown controllers keep working.
                 val = int(round((raw + 1.0) * 63.5))
                 val = max(0, min(127, val))
-            if self._prev_cc.get(axis_idx) != val:
+            # CC smoothing: if stick config has cc_smoothing_ms > 0, interpolate
+            # the CC value over time instead of jumping in steps
+            if (axis_idx in STICK_AXES and
+                axis_idx < 2 and mapping.left_stick.cc_smoothing_ms > 0) or \
+               (axis_idx in STICK_AXES and
+                axis_idx >= 2 and mapping.right_stick.cc_smoothing_ms > 0):
+                stick_cfg = mapping.left_stick if axis_idx < 2 else mapping.right_stick
+                smoothing_ms = stick_cfg.cc_smoothing_ms
+                key = (axis_idx, cc_num)
+                now_ms = time.time() * 1000.0
+
+                # Initialize or update smoothing state
+                if key not in self._cc_smooth_state:
+                    # First time seeing this axis at this cc — start smoothing
+                    self._cc_smooth_state[key] = (val, val, now_ms)
+
+                current_val, target_val, started_ms = self._cc_smooth_state[key]
+
+                # If target changed, reset the smoothing start time
+                if target_val != val:
+                    self._cc_smooth_state[key] = (current_val, val, now_ms)
+                    target_val = val
+                    started_ms = now_ms
+
+                # Compute interpolated value
+                elapsed_ms = now_ms - started_ms
+                if elapsed_ms >= smoothing_ms:
+                    # Smoothing complete, snap to target
+                    send_val = val
+                    self._cc_smooth_state[key] = (val, val, now_ms)
+                else:
+                    # Lerp: current + (target - current) * (elapsed / duration)
+                    progress = elapsed_ms / smoothing_ms
+                    send_val = int(round(current_val + (target_val - current_val) * progress))
+                    send_val = max(0, min(127, send_val))
+                    self._cc_smooth_state[key] = (send_val, target_val, started_ms)
+            else:
+                send_val = val
+
+            if self._prev_cc.get(axis_idx) != send_val:
                 if not osc_only:
                     axis_channel = self._channel_for_axis(mapping, axis_idx)
                     axis_cc = 0xB0 | axis_channel
-                    midi.port.send_message([axis_cc, cc_num, val])
-                    self._record_outbound_cc(axis_channel, cc_num, val)
-                    self._record_midi_send(axis_cc, cc_num, val)
+                    midi.port.send_message([axis_cc, cc_num, send_val])
+                    self._record_outbound_cc(axis_channel, cc_num, send_val)
+                    self._record_midi_send(axis_cc, cc_num, send_val)
                     self.midi_sent.emit()
-                    self._emit_midi_message("sent", axis_cc, cc_num, val, f"CC#{cc_num}")
+                    self._emit_midi_message("sent", axis_cc, cc_num, send_val, f"CC#{cc_num}")
                 _usage_stats.tracker().record("axis", axis_idx)
                 # OSC sends a 0..1 float, MIDI a 0..127 int — keep both
                 # streams in lock-step but de-dup against last-sent 0..127.
-                if self._osc is not None and self._prev_osc_axes.get(axis_idx) != val:
-                    self._send_osc_axis(axis_idx, val / 127.0)
-                    self._prev_osc_axes[axis_idx] = val
-                self._prev_cc[axis_idx] = val
+                if self._osc is not None and self._prev_osc_axes.get(axis_idx) != send_val:
+                    self._send_osc_axis(axis_idx, send_val / 127.0)
+                    self._prev_osc_axes[axis_idx] = send_val
+                self._prev_cc[axis_idx] = send_val
                 self._emit_axis(axis_idx, raw)
 
     def _poll_polar_sticks(self, reader, mapping, offsets, midi, cc, n_axes) -> None:
@@ -1687,6 +1840,10 @@ class BridgeWorker(QObject):
         if self._midi_in is not None:
             close_input_port(self._midi_in)
             self._midi_in = None
+        # Close the passthrough input port so its callback thread is also done.
+        if self._passthrough_input is not None:
+            close_input_port(self._passthrough_input)
+            self._passthrough_input = None
         for t in self._haptic_revert_timers:
             try:
                 t.cancel()

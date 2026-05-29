@@ -9,6 +9,7 @@ from gamepad_midi_bridge.mapping import (
     CornerConfig,
     Mapping,
     OscConfig,
+    PassthroughConfig,
     ProgramChangeConfig,
     SCHEMA_VERSION,
     SetlistConfig,
@@ -16,9 +17,12 @@ from gamepad_midi_bridge.mapping import (
     StickConfig,
     TouchpadConfig,
     TriggerConfig,
+    _passthrough_from_dict,
     _program_change_from_dict,
     _setlist_config_from_dict,
     _shift_layer_from_dict,
+    _stick_from_dict,
+    _button_config_from_dict,
 )
 
 
@@ -1095,3 +1099,162 @@ def test_mapping_without_setlist_loads_with_default():
 def test_schema_version_unchanged_after_setlist():
     """SCHEMA_VERSION stays at 4 — setlist is additive."""
     assert SCHEMA_VERSION == 4
+
+
+# Feature #A: CC smoothing per stick axis
+def test_stick_config_cc_smoothing_ms_default():
+    """StickConfig.cc_smoothing_ms defaults to 0 (off)."""
+    cfg = StickConfig()
+    assert cfg.cc_smoothing_ms == 0
+
+
+def test_stick_config_cc_smoothing_ms_round_trip():
+    """StickConfig with non-zero cc_smoothing_ms round-trips through JSON."""
+    cfg = StickConfig(cc_smoothing_ms=100)
+    assert cfg.cc_smoothing_ms == 100
+    # Via Mapping round-trip
+    m = Mapping(left_stick=cfg)
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.left_stick.cc_smoothing_ms == 100
+
+
+def test_stick_config_cc_smoothing_ms_clamps_to_0_1000():
+    """StickConfig.cc_smoothing_ms clamps to 0..1000."""
+    # Below min: -5 → 0
+    cfg = _stick_from_dict({"cc_smoothing_ms": -5})
+    assert cfg.cc_smoothing_ms == 0
+    
+    # At min: 0 → 0
+    cfg = _stick_from_dict({"cc_smoothing_ms": 0})
+    assert cfg.cc_smoothing_ms == 0
+    
+    # In range: 500 → 500
+    cfg = _stick_from_dict({"cc_smoothing_ms": 500})
+    assert cfg.cc_smoothing_ms == 500
+    
+    # At max: 1000 → 1000
+    cfg = _stick_from_dict({"cc_smoothing_ms": 1000})
+    assert cfg.cc_smoothing_ms == 1000
+    
+    # Above max: 1500 → 1000
+    cfg = _stick_from_dict({"cc_smoothing_ms": 1500})
+    assert cfg.cc_smoothing_ms == 1000
+
+
+# Feature #B: Velocity sensitivity per button
+def test_button_config_velocity_default():
+    """ButtonConfig.velocity defaults to 100."""
+    cfg = ButtonConfig()
+    assert cfg.velocity == 100
+
+
+def test_button_config_velocity_round_trip():
+    """ButtonConfig with custom velocity round-trips through JSON."""
+    cfg = ButtonConfig(velocity=80)
+    assert cfg.velocity == 80
+    # Via Mapping round-trip
+    m = Mapping(button_configs={0: cfg})
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.button_configs[0].velocity == 80
+
+
+def test_button_config_velocity_clamps_to_0_127():
+    """ButtonConfig.velocity clamps to 0..127."""
+    # Below min: -1 → 0
+    cfg = _button_config_from_dict({"velocity": -1})
+    assert cfg.velocity == 0
+    
+    # At min: 0 → 0
+    cfg = _button_config_from_dict({"velocity": 0})
+    assert cfg.velocity == 0
+    
+    # In range: 64 → 64
+    cfg = _button_config_from_dict({"velocity": 64})
+    assert cfg.velocity == 64
+    
+    # At max: 127 → 127
+    cfg = _button_config_from_dict({"velocity": 127})
+    assert cfg.velocity == 127
+    
+    # Above max: 200 → 127
+    cfg = _button_config_from_dict({"velocity": 200})
+    assert cfg.velocity == 127
+
+
+# ---------------------------------------------------------- PassthroughConfig
+
+def test_passthrough_config_defaults():
+    """PassthroughConfig defaults to disabled with safe field values."""
+    cfg = PassthroughConfig()
+    assert cfg.enabled is False
+    assert cfg.input_port_name == ""
+    assert cfg.transpose_semitones == 0
+    assert cfg.channel_remap == -1
+    assert cfg.pass_cc is True
+    assert cfg.pass_notes is True
+    assert cfg.pass_other is False
+
+
+def test_passthrough_config_round_trip():
+    """PassthroughConfig round-trips through Mapping.to_dict / from_dict."""
+    m = Mapping()
+    m.passthrough = PassthroughConfig(
+        enabled=True,
+        input_port_name="My MIDI Keyboard",
+        transpose_semitones=7,
+        channel_remap=3,
+        pass_cc=False,
+        pass_notes=True,
+        pass_other=True,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    pt = restored.passthrough
+    assert pt.enabled is True
+    assert pt.input_port_name == "My MIDI Keyboard"
+    assert pt.transpose_semitones == 7
+    assert pt.channel_remap == 3
+    assert pt.pass_cc is False
+    assert pt.pass_notes is True
+    assert pt.pass_other is True
+
+
+def test_passthrough_channel_remap_clamp():
+    """channel_remap clamps to -1..15."""
+    assert _passthrough_from_dict({"channel_remap": -1}).channel_remap == -1
+    assert _passthrough_from_dict({"channel_remap": 0}).channel_remap == 0
+    assert _passthrough_from_dict({"channel_remap": 15}).channel_remap == 15
+    # Out-of-range values clamp to boundaries.
+    assert _passthrough_from_dict({"channel_remap": -5}).channel_remap == -1
+    assert _passthrough_from_dict({"channel_remap": 99}).channel_remap == 15
+
+
+def test_passthrough_transpose_clamp():
+    """transpose_semitones clamps to -24..+24."""
+    assert _passthrough_from_dict({"transpose_semitones": 0}).transpose_semitones == 0
+    assert _passthrough_from_dict({"transpose_semitones": 24}).transpose_semitones == 24
+    assert _passthrough_from_dict({"transpose_semitones": -24}).transpose_semitones == -24
+    assert _passthrough_from_dict({"transpose_semitones": 99}).transpose_semitones == 24
+    assert _passthrough_from_dict({"transpose_semitones": -99}).transpose_semitones == -24
+
+
+def test_passthrough_defaults_to_disabled():
+    """_passthrough_from_dict(None) returns a disabled default config."""
+    cfg = _passthrough_from_dict(None)
+    assert cfg.enabled is False
+    assert cfg.input_port_name == ""
+    assert cfg.transpose_semitones == 0
+    assert cfg.channel_remap == -1
+
+
+def test_mapping_without_passthrough_loads_with_default():
+    """Old preset (no passthrough key) loads cleanly; passthrough stays disabled."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "buttons": {"0": 60},
+        # Missing: passthrough
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.passthrough.enabled is False
+    assert m.passthrough.input_port_name == ""
+    assert m.passthrough.channel_remap == -1

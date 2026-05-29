@@ -72,9 +72,14 @@ class ButtonConfig:
                                (default).
       - `gate_release_value` : velocity to send on release edge (0 = note-off).
                                Default 0 = standard note-off.
+      - `velocity`           : static velocity (1..127) sent for note-on when
+                               > 0; else 100 (default). DualSense face buttons
+                               are binary (no pressure), so this is a fixed
+                               override per button, not a curve.
     """
     gate_button: Optional[int] = None
     gate_release_value: int = 0
+    velocity: int = 100
 
 
 @dataclass
@@ -92,6 +97,10 @@ class StickConfig:
       - `polar_mode`      : if True, emit (angle, magnitude) as 2 CCs instead of (X, Y)
       - `polar_angle_cc`  : CC number for the angle when polar_mode is on
       - `polar_mag_cc`    : CC number for the magnitude when polar_mode is on
+      - `cc_smoothing_ms` : CC interpolation time in ms (0..1000). 0 = off;
+                            otherwise CC changes interpolate over N ms instead
+                            of jumping in steps. Useful for sticks producing
+                            stepped 7-bit MIDI for filter sweeps.
     """
     inner_deadzone: float = 0.05
     outer_clamp: float = 0.0
@@ -100,6 +109,7 @@ class StickConfig:
     polar_mode: bool = False
     polar_angle_cc: int = 7   # volume CC by default — meaningless but visible
     polar_mag_cc: int = 8     # balance CC
+    cc_smoothing_ms: int = 0
 
 
 @dataclass
@@ -270,6 +280,34 @@ class HapticInputBinding:
     effect: str = "vibration"
     intensity_scale: float = 1.0
 
+
+@dataclass
+class PassthroughConfig:
+    """Optional MIDI passthrough/thru mode.
+
+    When enabled, opens `input_port_name` as a second MIDI input and forwards
+    every incoming message to the bridge's existing output port.  A MIDI
+    keyboard can therefore layer with the DualSense: both arrive at the same
+    DAW track without extra routing.
+
+    Fields:
+      - `enabled`            : master switch (default False — no extra port opened).
+      - `input_port_name`    : rtmidi input port to listen on (empty = disabled).
+      - `transpose_semitones`: semitones to add to every Note-On/Off data1 byte
+                               before forwarding (-24..+24, 0 = unchanged).
+      - `channel_remap`      : -1 = preserve original channel; 0..15 = force
+                               this channel on every forwarded message.
+      - `pass_cc`            : forward Control Change messages (0xB0).
+      - `pass_notes`         : forward Note-On (0x90) and Note-Off (0x80).
+      - `pass_other`         : forward everything else (PC, PB, aftertouch, …).
+    """
+    enabled: bool = False
+    input_port_name: str = ""
+    transpose_semitones: int = 0        # clamped -24..+24
+    channel_remap: int = -1             # -1 = preserve; 0..15 = force
+    pass_cc: bool = True
+    pass_notes: bool = True
+    pass_other: bool = False
 
 
 @dataclass
@@ -542,6 +580,10 @@ class Mapping:
     # (additive-only; old loaders ignore the key).
     setlist: SetlistConfig = field(default_factory=SetlistConfig)
 
+    # MIDI passthrough — forward a second MIDI input source to the bridge's
+    # output port. Disabled by default; users enable via JSON for now (UI TBD).
+    passthrough: "PassthroughConfig" = field(default_factory=lambda: PassthroughConfig())
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -600,6 +642,7 @@ class Mapping:
             macros=_macros_from_dict(data.get("macros")),
             macro_bindings={int(k): str(v) for k, v in data.get("macro_bindings", {}).items()},
             setlist=_setlist_config_from_dict(data.get("setlist")),
+            passthrough=_passthrough_from_dict(data.get("passthrough")),
         )
 
 
@@ -642,6 +685,7 @@ def _button_config_from_dict(d: Optional[dict]) -> ButtonConfig:
     return ButtonConfig(
         gate_button=gate_button,
         gate_release_value=max(0, min(127, int(d.get("gate_release_value", 0)))),
+        velocity=max(0, min(127, int(d.get("velocity", 100)))),
     )
 
 
@@ -815,6 +859,7 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
         polar_mode=bool(d.get("polar_mode", False)),
         polar_angle_cc=int(d.get("polar_angle_cc", 7)),
         polar_mag_cc=int(d.get("polar_mag_cc", 8)),
+        cc_smoothing_ms=max(0, min(1000, int(d.get("cc_smoothing_ms", 0)))),
     )
 
 
@@ -957,4 +1002,35 @@ def _setlist_config_from_dict(d: Optional[dict]) -> SetlistConfig:
         next_button=int(d.get("next_button", -1)),
         prev_button=int(d.get("prev_button", -1)),
         wrap=bool(d.get("wrap", True)),
+    )
+
+
+def _passthrough_from_dict(d: Optional[dict]) -> "PassthroughConfig":
+    """Hydrate a PassthroughConfig from raw dict, defaulting to disabled.
+
+    Missing/None dict returns a default disabled config so old presets load
+    cleanly without opening any extra port.
+    """
+    if not d:
+        return PassthroughConfig()
+    raw_ch = d.get("channel_remap", -1)
+    try:
+        channel_remap = int(raw_ch)
+        channel_remap = max(-1, min(15, channel_remap))
+    except (TypeError, ValueError):
+        channel_remap = -1
+    raw_tr = d.get("transpose_semitones", 0)
+    try:
+        transpose = int(raw_tr)
+        transpose = max(-24, min(24, transpose))
+    except (TypeError, ValueError):
+        transpose = 0
+    return PassthroughConfig(
+        enabled=bool(d.get("enabled", False)),
+        input_port_name=str(d.get("input_port_name", "")),
+        transpose_semitones=transpose,
+        channel_remap=channel_remap,
+        pass_cc=bool(d.get("pass_cc", True)),
+        pass_notes=bool(d.get("pass_notes", True)),
+        pass_other=bool(d.get("pass_other", False)),
     )
