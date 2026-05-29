@@ -171,12 +171,29 @@ class BatteryAlertConfig:
 
 
 @dataclass
+class OscHapticBinding:
+    """One incoming OSC message → trigger haptic effect.
+
+    Matches the OSC `address` exactly (e.g. /resolume/composition/layer/1/clip/3/connect).
+    On match, fires the configured effect on the named trigger, scaled by
+    the first OSC argument if it's a float 0..1.
+    """
+    address: str = "/midi/note/36"
+    trigger: str = "L2"                  # "L2" or "R2"
+    effect: str = "vibration"            # any dualsense.TRIGGER_EFFECTS key
+    intensity_scale: float = 1.0
+
+
+@dataclass
 class OscConfig:
     """Optional OSC output alongside (or instead of) MIDI.
 
     OSC addresses are per-control via lookup tables keyed by the same
     button/axis indices the MIDI side uses. Empty maps = no OSC sent for
     those controls. Pro feature.
+
+    listen_enabled / listen_port / listen_bindings: receive incoming OSC
+    messages and route them to adaptive-trigger haptic effects (feature #16).
     """
     enabled: bool = False
     mode: str = "alongside"          # "alongside" (MIDI + OSC) or "only" (OSC only)
@@ -184,6 +201,9 @@ class OscConfig:
     port: int = 7000                 # Resolume default
     button_addresses: Dict[int, str] = field(default_factory=dict)
     axis_addresses: Dict[int, str] = field(default_factory=dict)
+    listen_enabled: bool = False
+    listen_port: int = 7001          # different from output port to avoid loopback
+    listen_bindings: List["OscHapticBinding"] = field(default_factory=list)
 
 
 @dataclass
@@ -549,9 +569,28 @@ def _corner_from_dict(d: Optional[dict]) -> CornerConfig:
     return cfg
 
 
+def _osc_haptic_binding_from_dict(d: dict) -> OscHapticBinding:
+    """Hydrate one OscHapticBinding from a raw dict."""
+    return OscHapticBinding(
+        address=str(d.get("address", "/midi/note/36")),
+        trigger=str(d.get("trigger", "L2")).upper(),
+        effect=str(d.get("effect", "vibration")).lower(),
+        intensity_scale=float(d.get("intensity_scale", 1.0)),
+    )
+
+
 def _osc_from_dict(d: Optional[dict]) -> OscConfig:
     if not d:
         return OscConfig()
+    raw_bindings = d.get("listen_bindings") or []
+    listen_bindings: List[OscHapticBinding] = []
+    for entry in raw_bindings:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            listen_bindings.append(_osc_haptic_binding_from_dict(entry))
+        except (TypeError, ValueError):
+            continue
     return OscConfig(
         enabled=bool(d.get("enabled", False)),
         mode=str(d.get("mode", "alongside")),
@@ -559,6 +598,9 @@ def _osc_from_dict(d: Optional[dict]) -> OscConfig:
         port=int(d.get("port", 7000)),
         button_addresses={int(k): str(v) for k, v in d.get("button_addresses", {}).items()},
         axis_addresses={int(k): str(v) for k, v in d.get("axis_addresses", {}).items()},
+        listen_enabled=bool(d.get("listen_enabled", False)),
+        listen_port=int(d.get("listen_port", 7001)),
+        listen_bindings=listen_bindings,
     )
 
 
@@ -596,6 +638,19 @@ def _haptic_input_from_dict(d: Optional[dict]) -> HapticInputConfig:
 def _touchpad_from_dict(d: Optional[dict]) -> TouchpadConfig:
     if not d:
         return TouchpadConfig()
+
+    # Parse zone_notes list with safe int conversion
+    zone_notes_raw = d.get("zone_notes", [36, 38, 40, 42])
+    zone_notes: List[int] = []
+    if isinstance(zone_notes_raw, list):
+        for note in zone_notes_raw:
+            try:
+                zone_notes.append(max(0, min(127, int(note))))
+            except (TypeError, ValueError):
+                pass
+    if not zone_notes:
+        zone_notes = [36, 38, 40, 42]
+
     return TouchpadConfig(
         enabled=bool(d.get("enabled", False)),
         x_cc=int(d.get("x_cc", 16)),
@@ -611,6 +666,10 @@ def _touchpad_from_dict(d: Optional[dict]) -> TouchpadConfig:
         y_curve=str(d.get("y_curve", "linear")),
         x_curve_amount=max(0.0, min(1.0, float(d.get("x_curve_amount", 0.5)))),
         y_curve_amount=max(0.0, min(1.0, float(d.get("y_curve_amount", 0.5)))),
+        zone_mode=bool(d.get("zone_mode", False)),
+        zone_grid=max(1, min(4, int(d.get("zone_grid", 2)))),
+        zone_notes=zone_notes,
+        zone_velocity=max(0, min(127, int(d.get("zone_velocity", 100)))),
     )
 
 

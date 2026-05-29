@@ -89,6 +89,31 @@ class MappingEditor(QWidget):
             
             v.addWidget(tip_strip)
 
+        # ── Mapping-globals shortcut button ──
+        # Opens the full top-level Mapping settings in the inspector so users
+        # don't have to dig through each section to find a global variable.
+        settings_row = QWidget()
+        settings_row_layout = QHBoxLayout(settings_row)
+        settings_row_layout.setContentsMargins(0, 0, 0, 4)
+        settings_row_layout.setSpacing(6)
+        self._settings_btn = QPushButton("Settings")
+        self._settings_btn.setToolTip(
+            "Open all top-level Mapping config variables in the inspector "
+            "(name, MIDI channel, deadzone, poll Hz, port, battery alert, "
+            "haptic input, shift layer, A/B compare, program change)."
+        )
+        self._settings_btn.setStyleSheet(
+            "QPushButton { background: #1c1e25; color: #c2c6cc; "
+            "border: 1px solid #2c313b; border-radius: 4px; "
+            "font-size: 11px; padding: 4px 12px; }"
+            "QPushButton:hover { background: #252830; color: #f5f7fa; }"
+            "QPushButton:pressed { background: #0e0f12; }"
+        )
+        self._settings_btn.clicked.connect(self._emit_mapping_globals)
+        settings_row_layout.addWidget(self._settings_btn)
+        settings_row_layout.addStretch(1)
+        v.addWidget(settings_row)
+
         # ── Port name override (feature #23) ──
         v.addWidget(self._section_label("MIDI PORT"))
         port_row = QWidget()
@@ -645,6 +670,22 @@ class MappingEditor(QWidget):
 
         self.mapping_changed.emit()
 
+    def _emit_mapping_globals(self) -> None:
+        """Emit a selection payload so the inspector renders all top-level
+        Mapping config variables via render_mapping_globals.
+
+        The mapping reference is passed by reference — direct attribute
+        mutation in the renderer propagates immediately and on_change fires
+        the autosave debounce.
+        """
+        payload: dict = {
+            "kind": "mapping_globals",
+            "label": "Mapping settings",
+            "mapping": self._mapping,
+            "on_change": self.mapping_changed.emit,
+        }
+        self.selection_changed.emit(payload)
+
     def _emit_selection(self, table: QTableWidget, kind: str) -> None:
         """Forward a row-click into a selection payload the inspector can render.
 
@@ -652,6 +693,9 @@ class MappingEditor(QWidget):
         promote `kind` to "trigger" or "stick" and attach the corresponding
         config dataclass under the "config" key so the inspector can render a
         richer editor instead of the generic key-value view.
+
+        For button rows, attach button_config and button_channel.
+        For hat rows, attach hat_channel.
         """
         row = table.currentRow()
         if row < 0 or row >= table.rowCount():
@@ -694,6 +738,19 @@ class MappingEditor(QWidget):
                     label = f"Right Stick  (axis {axis_index})"
             else:
                 label = f"Axis {idx}"
+        elif kind == "button":
+            promoted_kind = "button_editor"
+            try:
+                btn_idx = int(idx)
+            except (ValueError, TypeError):
+                btn_idx = -1
+            config = self._mapping.button_configs.get(btn_idx)
+            btn_channel = self._mapping.button_channels.get(btn_idx, -1)
+            label = f"Button {idx}"
+        elif kind == "hat":
+            promoted_kind = "hat_editor"
+            hat_channel = self._mapping.hat_channels.get(idx, -1)
+            label = f"D-pad {idx}"
         else:
             label_map = {"button": f"Button {idx}", "hat": f"D-pad {idx}"}
             label = label_map.get(kind, f"{kind} {idx}")
@@ -704,9 +761,15 @@ class MappingEditor(QWidget):
             "index": idx,
             "midi": midi,
             "channel": channel,
+            "_mapping": self._mapping,  # Pass mapping reference for button/hat mutation
         }
         if config is not None:
             payload["config"] = config
+        # Attach channel overrides for buttons and hats
+        if kind == "button":
+            payload["channel"] = btn_channel
+        elif kind == "hat":
+            payload["channel"] = hat_channel
         # Wire callback so renderers emit mapping_changed when they mutate.
         payload["on_change"] = self.mapping_changed.emit
 

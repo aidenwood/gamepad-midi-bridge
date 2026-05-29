@@ -1,11 +1,20 @@
-"""OSC 1.0 packet builder — byte-exact fixtures."""
+"""OSC 1.0 packet builder + receiver — byte-exact fixtures and integration tests."""
 from __future__ import annotations
 
+import socket
 import struct
+import threading
+import time
 
 import pytest
 
-from gamepad_midi_bridge.osc_backend import _build_message, _pad4
+from gamepad_midi_bridge.osc_backend import (
+    OscReceiver,
+    _build_message,
+    _pad4,
+    _parse_message,
+)
+from gamepad_midi_bridge.mapping import OscConfig, OscHapticBinding, _osc_from_dict
 
 
 def test_test_fixture_matches_self_check():
@@ -83,3 +92,247 @@ def test_multiple_args_concatenate_in_order():
     assert pkt[12:16] == struct.pack(">i", 1)
     assert pkt[16:20] == struct.pack(">f", 2.5)
     assert pkt[20:24] == b"ok\x00\x00"
+
+
+# ============================================================ OscHapticBinding schema
+
+
+def test_osc_haptic_binding_defaults():
+    b = OscHapticBinding()
+    assert b.address == "/midi/note/36"
+    assert b.trigger == "L2"
+    assert b.effect == "vibration"
+    assert b.intensity_scale == 1.0
+
+
+def test_osc_haptic_binding_round_trip():
+    """to_dict / _osc_haptic_binding_from_dict round-trip preserves all fields."""
+    from dataclasses import asdict
+    from gamepad_midi_bridge.mapping import _osc_haptic_binding_from_dict
+    original = OscHapticBinding(
+        address="/resolume/clip/connect",
+        trigger="R2",
+        effect="feedback",
+        intensity_scale=0.75,
+    )
+    d = asdict(original)
+    restored = _osc_haptic_binding_from_dict(d)
+    assert restored.address == original.address
+    assert restored.trigger == original.trigger
+    assert restored.effect == original.effect
+    assert restored.intensity_scale == original.intensity_scale
+
+
+def test_osc_config_listen_disabled_by_default():
+    cfg = OscConfig()
+    assert cfg.listen_enabled is False
+    assert cfg.listen_port == 7001
+    assert cfg.listen_bindings == []
+
+
+def test_osc_from_dict_hydrates_listen_fields():
+    d = {
+        "enabled": True,
+        "listen_enabled": True,
+        "listen_port": 9001,
+        "listen_bindings": [
+            {"address": "/clip/1", "trigger": "L2", "effect": "vibration", "intensity_scale": 0.5},
+        ],
+    }
+    cfg = _osc_from_dict(d)
+    assert cfg.listen_enabled is True
+    assert cfg.listen_port == 9001
+    assert len(cfg.listen_bindings) == 1
+    assert cfg.listen_bindings[0].address == "/clip/1"
+    assert cfg.listen_bindings[0].intensity_scale == 0.5
+
+
+def test_osc_from_dict_old_preset_no_listen_fields():
+    """Old presets without listen fields load cleanly with defaults."""
+    d = {"enabled": True, "host": "10.0.0.1", "port": 7000}
+    cfg = _osc_from_dict(d)
+    assert cfg.listen_enabled is False
+    assert cfg.listen_port == 7001
+    assert cfg.listen_bindings == []
+
+
+# ============================================================ OscReceiver bind/unbind
+
+
+def _free_port() -> int:
+    """Find a free UDP port by briefly binding to port 0."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+def test_osc_receiver_start_stop_no_leaked_threads():
+    """start() spawns exactly one daemon thread; stop() joins it cleanly."""
+    port = _free_port()
+    recv = OscReceiver(port=port)
+    assert not recv.is_alive()
+    recv.start()
+    assert recv.is_alive()
+    recv.stop()
+    # Thread should be gone within the join timeout
+    assert not recv.is_alive()
+    assert recv._thread is None
+
+
+def test_osc_receiver_double_start_is_idempotent():
+    port = _free_port()
+    recv = OscReceiver(port=port)
+    recv.start()
+    thread_before = recv._thread
+    recv.start()   # should be a no-op
+    assert recv._thread is thread_before
+    recv.stop()
+
+
+def test_osc_receiver_stop_without_start_is_safe():
+    recv = OscReceiver(port=_free_port())
+    recv.stop()  # should not raise
+
+
+# ============================================================ OscReceiver dispatch
+
+
+def test_osc_receiver_dispatches_float_message():
+    """Sending a ,f datagram fires the callback exactly once with correct values."""
+    port = _free_port()
+    received: list = []
+    event = threading.Event()
+
+    def cb(address, args):
+        received.append((address, args))
+        event.set()
+
+    recv = OscReceiver(port=port)
+    recv.set_callback(cb)
+    recv.start()
+
+    # Build and fire a /kick 0.9 message
+    pkt = _build_message("/kick", (0.9,))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(pkt, ("127.0.0.1", port))
+        fired = event.wait(timeout=1.0)
+    finally:
+        sock.close()
+        recv.stop()
+
+    assert fired, "Callback was never called"
+    assert len(received) == 1
+    address, args = received[0]
+    assert address == "/kick"
+    assert len(args) == 1
+    assert abs(args[0] - 0.9) < 1e-5
+
+
+def test_osc_receiver_address_match_fires_callback_once():
+    """Fires exactly once per matching datagram, no duplicates."""
+    port = _free_port()
+    call_count = [0]
+    done = threading.Event()
+
+    def cb(address, args):
+        call_count[0] += 1
+        done.set()
+
+    recv = OscReceiver(port=port)
+    recv.set_callback(cb)
+    recv.start()
+
+    pkt = _build_message("/snare", (1.0,))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(pkt, ("127.0.0.1", port))
+        done.wait(timeout=1.0)
+        # Brief extra wait to catch any spurious duplicate deliveries
+        time.sleep(0.05)
+    finally:
+        sock.close()
+        recv.stop()
+
+    assert call_count[0] == 1
+
+
+# ============================================================ OSC 1.0 parsing
+
+
+def test_parse_message_float_arg():
+    pkt = _build_message("/test", (0.5,))
+    address, args = _parse_message(pkt)
+    assert address == "/test"
+    assert len(args) == 1
+    assert abs(args[0] - 0.5) < 1e-5
+
+
+def test_parse_message_int_arg():
+    pkt = _build_message("/val", (42,))
+    address, args = _parse_message(pkt)
+    assert address == "/val"
+    assert args == [42]
+
+
+def test_parse_message_string_arg():
+    pkt = _build_message("/s", ("hello",))
+    address, args = _parse_message(pkt)
+    assert address == "/s"
+    assert args == ["hello"]
+
+
+def test_parse_message_bool_true():
+    pkt = _build_message("/b", (True,))
+    address, args = _parse_message(pkt)
+    assert address == "/b"
+    assert args == [True]
+
+
+def test_parse_message_bool_false():
+    pkt = _build_message("/b", (False,))
+    address, args = _parse_message(pkt)
+    assert address == "/b"
+    assert args == [False]
+
+
+def test_parse_message_comma_f_type_tag_float():
+    """Explicit: OSC 1.0 ,f type tag with a single float argument."""
+    # Construct the raw packet manually to be spec-certain
+    addr = b"/midi/note/36\x00\x00\x00"   # 16 bytes (14 + 2 pad to 16)
+    assert len(addr) == 16
+    type_tag = b",f\x00\x00"               # 4 bytes
+    payload = struct.pack(">f", 0.75)      # 4 bytes
+    pkt = addr + type_tag + payload
+    assert len(pkt) == 24
+    address, args = _parse_message(pkt)
+    assert address == "/midi/note/36"
+    assert len(args) == 1
+    assert abs(args[0] - 0.75) < 1e-5
+
+
+def test_parse_message_no_args():
+    pkt = _build_message("/ping", ())
+    address, args = _parse_message(pkt)
+    assert address == "/ping"
+    assert args == []
+
+
+def test_parse_message_bad_address_raises():
+    with pytest.raises(ValueError):
+        _parse_message(b"no-slash\x00\x00\x00\x00" + b",\x00\x00\x00")
+
+
+def test_parse_message_too_short_raises():
+    with pytest.raises(ValueError):
+        _parse_message(b"/x")
+
+
+def test_parse_message_multiple_args():
+    """Round-trip: int + float + string all decoded correctly."""
+    pkt = _build_message("/multi", (7, 3.14, "abc"))
+    address, args = _parse_message(pkt)
+    assert address == "/multi"
+    assert args[0] == 7
+    assert abs(args[1] - 3.14) < 1e-4
+    assert args[2] == "abc"

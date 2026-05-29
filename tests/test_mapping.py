@@ -776,3 +776,168 @@ def test_program_change_from_dict_skips_malformed_entries():
 def test_schema_version_unchanged_after_feature_15():
     """SCHEMA_VERSION is still 4 after adding program change."""
     assert SCHEMA_VERSION == 4
+
+
+# ------------------------------------------------------------------ zone mode (feature #9)
+
+
+def test_touchpad_zone_mode_defaults():
+    """TouchpadConfig zone mode fields default correctly."""
+    cfg = TouchpadConfig()
+    assert cfg.zone_mode is False
+    assert cfg.zone_grid == 2
+    assert cfg.zone_notes == [36, 38, 40, 42]
+    assert cfg.zone_velocity == 100
+
+
+def test_touchpad_zone_mode_round_trip():
+    """TouchpadConfig zone mode fields round-trip through serialisation."""
+    m = Mapping(name="ZoneModeTest")
+    m.touchpad = TouchpadConfig(
+        enabled=True,
+        zone_mode=True,
+        zone_grid=3,
+        zone_notes=[36, 38, 40, 42, 43, 45, 46, 47, 48],
+        zone_velocity=80,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.touchpad.zone_mode is True
+    assert restored.touchpad.zone_grid == 3
+    assert restored.touchpad.zone_notes == [36, 38, 40, 42, 43, 45, 46, 47, 48]
+    assert restored.touchpad.zone_velocity == 80
+
+
+def test_touchpad_zone_grid_clamps_to_1_4():
+    """zone_grid clamps to 1..4 on deserialization."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "zone_mode": True,
+            "zone_grid": 0,      # under-range
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.zone_grid == 1
+
+    v_dict["touchpad"]["zone_grid"] = 10   # over-range
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.zone_grid == 4
+
+
+def test_touchpad_zone_notes_clamped_to_0_127():
+    """zone_notes values are clamped to 0..127."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "zone_mode": True,
+            "zone_notes": [-5, 36, 150, 64],  # -5 and 150 out of range
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.zone_notes == [0, 36, 127, 64]
+
+
+def test_touchpad_zone_notes_skips_malformed():
+    """Malformed zone_notes entries are skipped; defaults used if empty."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "zone_mode": True,
+            "zone_notes": ["not_a_number", 36, None, 40],
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.zone_notes == [36, 40]
+
+
+def test_touchpad_zone_notes_empty_uses_defaults():
+    """Empty zone_notes list defaults to [36, 38, 40, 42]."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "zone_mode": True,
+            "zone_notes": [],
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.zone_notes == [36, 38, 40, 42]
+
+
+def test_touchpad_zone_velocity_clamped_0_127():
+    """zone_velocity clamps to 0..127."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "zone_mode": True,
+            "zone_velocity": 150,  # over-range
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.zone_velocity == 127
+
+    v_dict["touchpad"]["zone_velocity"] = -10  # under-range
+    m = Mapping.from_dict(v_dict)
+    assert m.touchpad.zone_velocity == 0
+
+
+def test_touchpad_zone_mode_compatible_with_cc_mode():
+    """Mapping can toggle between zone_mode and CC mode without data loss."""
+    m = Mapping(name="ZoneToggle")
+    m.touchpad = TouchpadConfig(
+        enabled=True,
+        x_cc=20,
+        y_cc=21,
+        zone_mode=False,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    # CC fields preserved
+    assert restored.touchpad.x_cc == 20
+    assert restored.touchpad.y_cc == 21
+    # Zone mode field is False
+    assert restored.touchpad.zone_mode is False
+
+    # Now switch to zone mode
+    m.touchpad.zone_mode = True
+    m.touchpad.zone_grid = 2
+    m.touchpad.zone_notes = [36, 38, 40, 42]
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.touchpad.zone_mode is True
+    assert restored.touchpad.zone_grid == 2
+    # CC fields still there if we switch back
+    assert restored.touchpad.x_cc == 20
+    assert restored.touchpad.y_cc == 21
+
+
+def test_v4_preset_without_zone_mode_loads_with_defaults():
+    """V4 preset (no zone_mode fields) loads cleanly with zone defaults."""
+    v4_dict = {
+        "name": "LegacyTouchpadNoZone",
+        "schema_version": 4,
+        "touchpad": {
+            "enabled": True,
+            "x_cc": 20,
+            "y_cc": 21,
+            # Missing: zone_mode, zone_grid, zone_notes, zone_velocity
+        }
+    }
+    m = Mapping.from_dict(v4_dict)
+    assert m.touchpad.zone_mode is False
+    assert m.touchpad.zone_grid == 2
+    assert m.touchpad.zone_notes == [36, 38, 40, 42]
+    assert m.touchpad.zone_velocity == 100
+
+
+def test_touchpad_zone_grid_4x4_has_16_default_notes():
+    """4x4 zone grid with short zone_notes list defaults sensibly."""
+    v_dict = {
+        "touchpad": {
+            "enabled": True,
+            "zone_mode": True,
+            "zone_grid": 4,
+            "zone_notes": [36, 38],  # only 2 notes for 16 zones
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    # Notes are preserved (not padded by loader)
+    assert m.touchpad.zone_notes == [36, 38]
+    assert m.touchpad.zone_grid == 4

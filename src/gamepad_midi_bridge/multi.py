@@ -35,6 +35,13 @@ def _demo_env() -> bool:
     return os.environ.get("GMB_DEMO", "").lower() in ("1", "true", "yes")
 
 
+def _keyboard_env() -> bool:
+    """`GMB_KEYBOARD=1` env var swaps every controller for keyboard input.
+    Lets the GUI path opt into keyboard mode without re-plumbing every callsite.
+    """
+    return os.environ.get("GMB_KEYBOARD", "").lower() in ("1", "true", "yes")
+
+
 # User-facing modes for the "Active controllers" combo in Settings.
 MODE_OFF = "off"            # always single-slot (default)
 MODE_AUTO = "auto"          # use both if Pro + 2 connected
@@ -106,8 +113,9 @@ class MultiBridgeController(QObject):
         super().__init__(parent)
         self._parent = parent
         self._demo = _demo_env()
+        self._keyboard = _keyboard_env()
         self.bridges: List[BridgeController] = [
-            BridgeController(parent, demo=self._demo)
+            BridgeController(parent, demo=self._demo, keyboard=self._keyboard)
         ]
 
     # ------------------------------------------------------------------ slots
@@ -141,6 +149,7 @@ class MultiBridgeController(QObject):
                 self._parent,
                 slot_index=1,
                 demo=self._demo,
+                keyboard=self._keyboard,
                 midi_port_name=port_name_for_slot(1),
             ))
         # Push per-slot mappings — each worker gets a deep copy so edits on

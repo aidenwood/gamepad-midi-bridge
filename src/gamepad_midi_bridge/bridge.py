@@ -24,6 +24,7 @@ from . import dualsense as ds
 from .calibration import calibrate
 from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
+from .keyboard_controller import KeyboardControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
 from .mapping import HapticInputBinding, L2_AXIS, Mapping, R2_AXIS, STICK_AXES
 from . import shaping
@@ -33,7 +34,7 @@ from .midi_input import (
     INPUT_PORT_NAME, MidiInputError, OpenedInputPort,
     close_input_port, open_input_port, set_callback as set_input_callback,
 )
-from .osc_backend import OscSender
+from .osc_backend import OscReceiver, OscSender
 
 
 # Adaptive-trigger effects whose output report carries a meaningful amplitude/
@@ -102,24 +103,28 @@ class BridgeWorker(QObject):
 
     def __init__(self, slot_index: int = 0,
                  midi_port_name: Optional[str] = None,
-                 demo: bool = False) -> None:
+                 demo: bool = False,
+                 keyboard: bool = False) -> None:
         """Multi-controller plumbing — slot_index picks which pygame joystick
         this worker binds to, and midi_port_name overrides the virtual port so
         two workers don't fight over a single "Universal Controller MIDI" port name.
         `demo` swaps the pygame reader for a synthetic one so the bridge can
         be exercised end-to-end without hardware (recording demo videos, CI).
+        `keyboard` uses keyboard input instead (WASD + arrows + keys).
         Both default to the V1.1 single-controller behaviour.
         """
         super().__init__()
         self._slot_index = max(0, int(slot_index))
         self._midi_port_name = midi_port_name or DEFAULT_PORT_NAME
         self._demo = bool(demo)
+        self._keyboard = bool(keyboard)
         self._state = BridgeState()
         self._reader: Optional[ControllerReader] = None
         self._midi: Optional[OpenedPort] = None
         self._ds_handle: Optional[ds.DualSenseHandle] = None
         self._mac_haptic_handle = None     # set on darwin if mac_haptics opens
         self._osc: Optional[OscSender] = None
+        self._osc_receiver: Optional[OscReceiver] = None
         self._prev_osc_axes: Dict[int, int] = {}   # last sent value as MIDI 0-127
         self._left_corner: Optional[CornerDetector] = None
         self._right_corner: Optional[CornerDetector] = None
@@ -154,6 +159,8 @@ class BridgeWorker(QObject):
         self._prev_touch_cc: Dict[str, int] = {}
         self._prev_touch_value: Dict[str, float] = {}  # tracks relative-mode state per axis
         self._touch_armed: bool = False  # for click_to_arm mode
+        self._prev_touchpad_zone: Optional[int] = None  # zone index for hysteresis
+        self._touchpad_zone_bias: Dict[int, float] = {}  # hysteresis bias per zone
         self._prev_battery: Optional[tuple] = None
         self._battery_alert_fired: bool = False  # track if alert has fired for current low state
         # Telemetry throttle — emit GUI updates at ~30Hz max even at 100Hz polling
@@ -189,9 +196,12 @@ class BridgeWorker(QObject):
     @Slot()
     def start(self) -> None:
         """Entry point — invoked once when the worker's thread starts."""
-        self._reader = (SyntheticControllerReader(slot_index=self._slot_index)
-                        if self._demo
-                        else ControllerReader(slot_index=self._slot_index))
+        if self._keyboard:
+            self._reader = KeyboardControllerReader(slot_index=self._slot_index)
+        elif self._demo:
+            self._reader = SyntheticControllerReader(slot_index=self._slot_index)
+        else:
+            self._reader = ControllerReader(slot_index=self._slot_index)
         info = self._reader.detect()
         self.controller_info.emit(info)
         if info is None:
@@ -300,13 +310,72 @@ class BridgeWorker(QObject):
             if self._osc is not None:
                 self._osc.close()
                 self._osc = None
+        else:
+            # Reopen on host/port change so we don't keep stale state.
+            if self._osc is None or self._osc.host != cfg.host or self._osc.port != cfg.port:
+                if self._osc is not None:
+                    self._osc.close()
+                self._osc = OscSender(host=cfg.host, port=cfg.port)
+            self._prev_osc_axes.clear()
+        self._sync_osc_receiver()
+
+    def _sync_osc_receiver(self) -> None:
+        """Spin up or tear down the OSC listener per the mapping's OscConfig."""
+        cfg = self._state.mapping.osc
+        if not cfg.listen_enabled:
+            if self._osc_receiver is not None:
+                self._osc_receiver.stop()
+                self._osc_receiver = None
             return
-        # Reopen on host/port change so we don't keep stale state.
-        if self._osc is None or self._osc.host != cfg.host or self._osc.port != cfg.port:
-            if self._osc is not None:
-                self._osc.close()
-            self._osc = OscSender(host=cfg.host, port=cfg.port)
-        self._prev_osc_axes.clear()
+        # Restart if port changed or not yet started.
+        if (self._osc_receiver is not None
+                and self._osc_receiver.port != cfg.listen_port):
+            self._osc_receiver.stop()
+            self._osc_receiver = None
+        if self._osc_receiver is None:
+            recv = OscReceiver(port=cfg.listen_port)
+            recv.set_callback(self._on_osc_in)
+            try:
+                recv.start()
+                self._osc_receiver = recv
+                self.status.emit(f"OSC listen on UDP {cfg.listen_port}")
+            except OSError as e:
+                self.status.emit(f"OSC listen failed (port {cfg.listen_port}): {e}")
+
+    def _on_osc_in(self, address: str, args: list) -> None:
+        """OscReceiver callback — runs on the receiver daemon thread.
+
+        Looks up every matching OscHapticBinding and fires the haptic effect,
+        scaled by the first float argument (0..1) if present. Mirrors the
+        MIDI-in haptic path from _dispatch_haptic / _fire_haptic.
+        """
+        from .mapping import OscHapticBinding
+        cfg = self._state.mapping.osc
+        if not cfg.listen_enabled or not cfg.listen_bindings:
+            return
+        for binding in cfg.listen_bindings:
+            if binding.address != address:
+                continue
+            # Derive intensity from the first float arg, if any.
+            intensity = 1.0
+            for a in args:
+                if isinstance(a, float):
+                    intensity = max(0.0, min(1.0, a))
+                    break
+                if isinstance(a, int):
+                    # Treat integer 0/1 as off/on
+                    intensity = float(max(0, min(1, a)))
+                    break
+            intensity = max(0.0, min(1.0, intensity * binding.intensity_scale))
+            # Build a synthetic HapticInputBinding so we can reuse _fire_haptic.
+            haptic = HapticInputBinding(
+                trigger=binding.trigger.upper(),
+                source="note",   # source field unused by _fire_haptic pattern 1
+                midi_id=0,
+                effect=binding.effect,
+                intensity_scale=1.0,
+            )
+            self._fire_haptic(haptic, intensity)
 
     def _send_osc_axis(self, axis_idx: int, value_0_to_1: float) -> None:
         if self._osc is None:
@@ -1032,30 +1101,53 @@ class BridgeWorker(QObject):
                     self._touch_armed = bool(self._reader.get_button(13))
 
             ta = state.touch_a
-            should_send = (ta.active or not tp_cfg.require_contact)
-            if tp_cfg.click_to_arm:
-                should_send = should_send and self._touch_armed
 
-            if should_send:
+            # Zone mode: drum pad-style grid (feature #9)
+            if tp_cfg.zone_mode and ta.active:
                 x_norm, y_norm = ta.normalized()
-                self.touchpad_xy.emit(ta.active, x_norm, y_norm)
-                self._send_touch_cc(midi, cc, tp_cfg.x_cc, x_norm, tp_cfg, "x")
-                self._send_touch_cc(midi, cc, tp_cfg.y_cc, y_norm, tp_cfg, "y")
-            elif self._prev_touch_cc:
-                # Finger lifted — reset the GUI but keep the last MIDI value
-                # (Kaoss Pad behaviour: release leaves the modulator where it was).
+                self.touchpad_xy.emit(True, x_norm, y_norm)
+                self._send_zone_note(midi, cc, mapping.midi_channel, tp_cfg, x_norm, y_norm)
+            elif tp_cfg.zone_mode and not ta.active:
+                # Zone mode: finger lifted → note-off for current zone
+                if self._prev_touchpad_zone is not None:
+                    channel = mapping.midi_channel & 0x0F
+                    note_off = 0x80 | channel
+                    # Get the note for the previous zone
+                    zone_idx = self._prev_touchpad_zone
+                    note = tp_cfg.zone_notes[zone_idx] if zone_idx < len(tp_cfg.zone_notes) else tp_cfg.zone_notes[-1] if tp_cfg.zone_notes else 36
+                    try:
+                        midi.port.send_message([note_off, note, 0])
+                    except Exception:
+                        pass
+                    self.midi_sent.emit()
+                    self._prev_touchpad_zone = None
                 self.touchpad_xy.emit(False, 0.0, 0.0)
+            elif not tp_cfg.zone_mode:
+                # Original CC mode (not zone mode)
+                should_send = (ta.active or not tp_cfg.require_contact)
+                if tp_cfg.click_to_arm:
+                    should_send = should_send and self._touch_armed
 
-            if tp_cfg.two_finger:
-                tb = state.touch_b
-                # Only fire the secondary CCs while the second finger is down,
-                # so producers can use 2-finger mode as a momentary modulator.
-                if tb.active:
-                    should_send_b = not tp_cfg.click_to_arm or self._touch_armed
-                    if should_send_b:
-                        bx, by = tb.normalized()
-                        self._send_touch_cc(midi, cc, tp_cfg.b_x_cc, bx, tp_cfg, "x")
-                        self._send_touch_cc(midi, cc, tp_cfg.b_y_cc, by, tp_cfg, "y")
+                if should_send:
+                    x_norm, y_norm = ta.normalized()
+                    self.touchpad_xy.emit(ta.active, x_norm, y_norm)
+                    self._send_touch_cc(midi, cc, tp_cfg.x_cc, x_norm, tp_cfg, "x")
+                    self._send_touch_cc(midi, cc, tp_cfg.y_cc, y_norm, tp_cfg, "y")
+                elif self._prev_touch_cc:
+                    # Finger lifted — reset the GUI but keep the last MIDI value
+                    # (Kaoss Pad behaviour: release leaves the modulator where it was).
+                    self.touchpad_xy.emit(False, 0.0, 0.0)
+
+                if tp_cfg.two_finger:
+                    tb = state.touch_b
+                    # Only fire the secondary CCs while the second finger is down,
+                    # so producers can use 2-finger mode as a momentary modulator.
+                    if tb.active:
+                        should_send_b = not tp_cfg.click_to_arm or self._touch_armed
+                        if should_send_b:
+                            bx, by = tb.normalized()
+                            self._send_touch_cc(midi, cc, tp_cfg.b_x_cc, bx, tp_cfg, "x")
+                            self._send_touch_cc(midi, cc, tp_cfg.b_y_cc, by, tp_cfg, "y")
 
     def _check_battery_alert(self, mapping: Mapping, midi: OpenedPort,
                              percent: int) -> None:
@@ -1142,6 +1234,71 @@ class BridgeWorker(QObject):
             self.midi_sent.emit()
             self._prev_touch_cc[key] = val
 
+    def _send_zone_note(self, midi, cc, channel: int, cfg, x_norm: float,
+                        y_norm: float) -> None:
+        """Handle zone mode: divide touchpad into NxN grid and fire notes.
+
+        Each zone corresponds to a MIDI note. When the finger moves into a new
+        zone, we fire note-off for the old zone and note-on for the new zone.
+        Hysteresis prevents edge chatter: only switch zones when crossing
+        boundaries by more than 0.05 (5% of pad travel).
+        """
+        from .mapping import TouchpadConfig
+        if cfg is None:
+            cfg = TouchpadConfig()
+
+        grid = cfg.zone_grid
+        # Compute zone index: zx and zy clamp to [0, grid-1]
+        zx = int(x_norm * grid)
+        zy = int(y_norm * grid)
+        zx = max(0, min(grid - 1, zx))
+        zy = max(0, min(grid - 1, zy))
+        zone_idx = zy * grid + zx
+
+        # Hysteresis: apply 0.05 bias when exiting a zone to prevent chatter
+        bias = self._touchpad_zone_bias.get(self._prev_touchpad_zone, 0.0)
+        if self._prev_touchpad_zone is not None and zone_idx != self._prev_touchpad_zone:
+            # Only switch zones if we've moved far enough (> 0.05 past boundary)
+            # Recalculate with applied bias
+            zx_biased = int((x_norm - bias) * grid)
+            zy_biased = int((y_norm - bias) * grid)
+            zx_biased = max(0, min(grid - 1, zx_biased))
+            zy_biased = max(0, min(grid - 1, zy_biased))
+            zone_idx_biased = zy_biased * grid + zx_biased
+            if zone_idx_biased == self._prev_touchpad_zone:
+                # Still in the old zone with hysteresis — don't switch yet
+                return
+            # Zone change confirmed — set new bias for exiting
+            self._touchpad_zone_bias[zone_idx] = 0.05
+
+        # Fire zone change: note-off for old, note-on for new
+        if zone_idx != self._prev_touchpad_zone:
+            channel_byte = channel & 0x0F
+            note_off = 0x80 | channel_byte
+            note_on = 0x90 | channel_byte
+
+            # Send note-off for previous zone
+            if self._prev_touchpad_zone is not None:
+                old_note = (cfg.zone_notes[self._prev_touchpad_zone]
+                            if self._prev_touchpad_zone < len(cfg.zone_notes)
+                            else (cfg.zone_notes[-1] if cfg.zone_notes else 36))
+                try:
+                    midi.port.send_message([note_off, old_note, 0])
+                except Exception:
+                    pass
+
+            # Send note-on for new zone
+            new_note = (cfg.zone_notes[zone_idx]
+                        if zone_idx < len(cfg.zone_notes)
+                        else (cfg.zone_notes[-1] if cfg.zone_notes else 36))
+            try:
+                midi.port.send_message([note_on, new_note, cfg.zone_velocity])
+            except Exception:
+                pass
+
+            self.midi_sent.emit()
+            self._prev_touchpad_zone = zone_idx
+
     # ---------------------------------------------------------- shutdown
 
     def _silence_all(self, midi: OpenedPort, mapping: Mapping, channel: int) -> None:
@@ -1185,6 +1342,9 @@ class BridgeWorker(QObject):
         if self._osc is not None:
             self._osc.close()
             self._osc = None
+        if self._osc_receiver is not None:
+            self._osc_receiver.stop()
+            self._osc_receiver = None
         self._prev_osc_axes.clear()
         # Reset triggers to neutral before we hand the controller back to the
         # OS — otherwise the last-applied effect lingers until something else
@@ -1232,13 +1392,15 @@ class BridgeController(QObject):
     def __init__(self, parent: Optional[QObject] = None,
                  slot_index: int = 0,
                  midi_port_name: Optional[str] = None,
-                 demo: bool = False) -> None:
+                 demo: bool = False,
+                 keyboard: bool = False) -> None:
         super().__init__(parent)
         self.slot_index = max(0, int(slot_index))
         self.worker = BridgeWorker(
             slot_index=self.slot_index,
             midi_port_name=midi_port_name,
             demo=demo,
+            keyboard=keyboard,
         )
         self.thread = QThread()
         self.worker.moveToThread(self.thread)

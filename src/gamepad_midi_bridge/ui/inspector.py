@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from .axis_scope import AxisScope
+
 
 INSPECTOR_WIDTH = 320  # Figma's default — fixed for layout predictability.
 
@@ -310,10 +312,13 @@ def render_marketplace_selection(payload: dict) -> QWidget:
 
 def render_live_selection(payload: dict) -> QWidget:
     """Renderer for live controller selection (axis/button/stick/etc).
-    
+
     Accepts a dict shaped like:
       { "kind": "button"|"axis"|"stick"|"trigger"|"dpad"|"touchpad",
         "index": int, "value": float, "label": str }
+
+    For axes/sticks/triggers: includes a live oscilloscope strip that receives
+    updates via the inspector's _update_live_scope() method (wired by main_window).
     """
     wrap = QWidget()
     v = QVBoxLayout(wrap)
@@ -337,7 +342,7 @@ def render_live_selection(payload: dict) -> QWidget:
     kind_chip.setMaximumWidth(100)
     v.addWidget(kind_chip)
 
-    # Live value indicator
+    # Live value indicator (mono display, same as oscilloscope top-right)
     value = payload.get("value", 0.0)
     if isinstance(value, (int, float)):
         # Normalize to percentage if in 0..1 range, or -1..1 range
@@ -357,4 +362,15 @@ def render_live_selection(payload: dict) -> QWidget:
     idx_label.setStyleSheet("color: #8a9099; font-size: 11px;")
     v.addWidget(idx_label)
 
+    # Oscilloscope for axes/sticks/triggers only (not buttons/dpad/touchpad).
+    kind_lower = str(payload.get("kind", "")).lower()
+    if kind_lower in ("axis", "stick", "trigger"):
+        axis_idx = payload.get("index", -1)
+        if isinstance(axis_idx, int) and axis_idx >= 0:
+            scope_label = str(payload.get("label", "Axis"))
+            scope = AxisScope(axis_idx, scope_label)
+            scope.setObjectName(f"LiveScope_{axis_idx}")  # For main_window to find + update
+            v.addWidget(scope)
+
+    v.addStretch(1)
     return wrap

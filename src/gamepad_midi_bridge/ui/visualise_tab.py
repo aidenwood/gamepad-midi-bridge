@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget, QScrollArea,
 )
 
+from .axis_scope import AxisScope
+
 
 # Match controller_meter.py palette so the two views feel like one app.
 STICK_BG = QColor("#16181d")
@@ -105,81 +107,6 @@ class _Sparkline(QWidget):
             poly.append(QPointF(first_x + i * step,
                                 y_top + (1.0 - (v + 1.0) / 2.0) * span_y))
         p.setPen(QPen(STICK_DOT, 1)); p.setBrush(Qt.NoBrush)
-        p.drawPolyline(poly)
-
-
-class AxisScope(QWidget):
-    """Oscilloscope-style trace for a single axis. Shows last ~5 seconds
-    of values in real time. Sticks: -1..+1 centered. Triggers: 0..1."""
-
-    def __init__(self, axis_index: int, label: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._axis_index = axis_index
-        self._label = label
-        self._samples: Deque[float] = deque(maxlen=OSCILLOSCOPE_SAMPLES)
-        self._is_trigger = axis_index >= 4  # 4=L2, 5=R2
-        self.setFixedHeight(OSCILLOSCOPE_HEIGHT)
-        self.setMinimumWidth(OSCILLOSCOPE_WIDTH)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-    def add_sample(self, value: float) -> None:
-        """Append a new value and drop oldest if at capacity."""
-        if self._is_trigger:
-            # Trigger: clamp to 0..1
-            self._samples.append(max(0.0, min(1.0, float(value))))
-        else:
-            # Stick: clamp to -1..+1
-            self._samples.append(max(-1.0, min(1.0, float(value))))
-
-    def paintEvent(self, _event) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-
-        # Background
-        _filled_rect(p, QRectF(0, 0, w, h), PANEL_BG, radius=6)
-
-        # Axis label (top-left)
-        _label(p, QRectF(6, 2, w - 12, 14), self._label, TEXT_DIM, size=7, align=Qt.AlignLeft)
-
-        # Current value (top-right, mono font for precision)
-        if self._samples:
-            val = self._samples[-1]
-            val_text = f"{val:+.3f}" if not self._is_trigger else f"{val:.3f}"
-        else:
-            val_text = "—"
-        _label(p, QRectF(6, 2, w - 12, 14), val_text, TEXT_DIM, size=7, align=Qt.AlignRight)
-
-        # Draw center baseline (dashed)
-        mid_y = h / 2.0 if not self._is_trigger else h - 10
-        p.setPen(QPen(GRID_LINE, 0.5, Qt.DashLine))
-        p.drawLine(QPointF(6, mid_y), QPointF(w - 6, mid_y))
-
-        # Draw oscilloscope trace
-        if len(self._samples) < 2:
-            return
-
-        x_start = 6.0
-        x_end = w - 6
-        y_top = 18.0
-        y_bottom = h - 6.0
-        span_y = max(1.0, y_bottom - y_top)
-        n = len(self._samples)
-        step = (x_end - x_start) / max(1, n - 1)
-
-        poly = QPolygonF()
-        for i, val in enumerate(self._samples):
-            x = x_start + i * step
-            if self._is_trigger:
-                # Trigger: 0..1 → bottom..top
-                y = y_bottom - (val * span_y)
-            else:
-                # Stick: -1..+1 centered at mid
-                y = y_top + ((1.0 - (val + 1.0) / 2.0) * span_y)
-            poly.append(QPointF(x, y))
-
-        p.setPen(QPen(STICK_DOT, 1.2))
-        p.setBrush(Qt.NoBrush)
         p.drawPolyline(poly)
 
 

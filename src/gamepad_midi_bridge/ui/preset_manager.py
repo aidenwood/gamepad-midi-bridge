@@ -5,13 +5,14 @@ from typing import Optional
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QListWidget, QMessageBox,
+    QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget, QMessageBox,
     QPushButton, QStackedLayout, QVBoxLayout, QWidget,
 )
 
 from .. import presets as preset_io
 from ..license import is_pro
 from ..mapping import Mapping
+from .diff_dialog import DiffDialog
 from .pro_lock import ProLockOverlay
 
 
@@ -39,14 +40,17 @@ class PresetManager(QWidget):
         self._load_btn = QPushButton("Load")
         self._save_btn = QPushButton("Save current as…")
         self._delete_btn = QPushButton("Delete")
+        self._compare_btn = QPushButton("Compare presets…")
         self._export_btn = QPushButton("Export cheat sheet")
         self._load_btn.clicked.connect(self._on_load)
         self._save_btn.clicked.connect(self._on_save)
         self._delete_btn.clicked.connect(self._on_delete)
+        self._compare_btn.clicked.connect(self._on_compare)
         self._export_btn.clicked.connect(self._on_export_cheatsheet)
         row.addWidget(self._load_btn)
         row.addWidget(self._save_btn)
         row.addWidget(self._delete_btn)
+        row.addWidget(self._compare_btn)
         row.addWidget(self._export_btn)
         row.addStretch(1)
         v.addLayout(row)
@@ -98,6 +102,65 @@ class PresetManager(QWidget):
             return
         preset_io.delete_preset(item.text())
         self.refresh()
+
+    def _on_compare(self) -> None:
+        """Open a dialog to pick two presets and compare them."""
+        presets = preset_io.list_presets()
+        if len(presets) < 2:
+            QMessageBox.information(
+                self,
+                "Compare presets",
+                "Need at least 2 presets to compare.",
+            )
+            return
+
+        # Picker dialog with two dropdowns
+        picker = QDialog(self)
+        picker.setWindowTitle("Compare presets")
+        picker.resize(400, 150)
+
+        layout = QVBoxLayout(picker)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        # Preset A picker
+        layout.addWidget(QLabel("Preset A (left):"))
+        combo_a = QComboBox()
+        combo_a.addItems(presets)
+        layout.addWidget(combo_a)
+
+        # Preset B picker
+        layout.addWidget(QLabel("Preset B (right):"))
+        combo_b = QComboBox()
+        combo_b.addItems(presets)
+        if len(presets) > 1:
+            combo_b.setCurrentIndex(1)
+        layout.addWidget(combo_b)
+
+        # OK / Cancel
+        layout.addStretch(1)
+        btn_row = QHBoxLayout()
+        ok_btn = QPushButton("Compare")
+        cancel_btn = QPushButton("Cancel")
+        ok_btn.clicked.connect(picker.accept)
+        cancel_btn.clicked.connect(picker.reject)
+        btn_row.addStretch(1)
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+        if picker.exec() != QDialog.Accepted:
+            return
+
+        # Load presets and show diff
+        name_a = combo_a.currentText()
+        name_b = combo_b.currentText()
+        mapping_a = preset_io.load_preset(name_a)
+        mapping_b = preset_io.load_preset(name_b)
+
+        if mapping_a and mapping_b:
+            diff_dialog = DiffDialog(mapping_a, mapping_b, name_a, name_b, self)
+            diff_dialog.exec()
 
     def _on_export_cheatsheet(self) -> None:
         from pathlib import Path

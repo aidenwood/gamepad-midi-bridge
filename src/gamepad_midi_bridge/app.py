@@ -54,6 +54,12 @@ def run(argv: Optional[List[str]] = None) -> int:
     app = QApplication(argv)
     app.setStyleSheet(_load_stylesheet())
 
+    # Install keyboard event filter if requested
+    import os
+    if os.environ.get("GMB_KEYBOARD") == "1":
+        from .keyboard_bus import install_keyboard_filter
+        install_keyboard_filter(app)
+
     icon_path = Path(__file__).parent / "resources" / "icon.png"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))

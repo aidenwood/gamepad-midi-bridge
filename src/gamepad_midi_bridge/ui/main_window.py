@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSplitter, QStackedLayout, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from typing import Optional
+from typing import Dict, Optional
 
 from .. import APP_NAME, __version__, telemetry, autobackup
 
@@ -28,11 +28,15 @@ from .bluetooth_tab import BluetoothTab
 from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
 from .help_tab import HelpTab
-from .inspector import INSPECTOR_WIDTH, Inspector, render_mapping_selection
+from .axis_scope import AxisScope
+from .inspector import INSPECTOR_WIDTH, Inspector, render_mapping_selection, render_live_selection
 from .inspector_renderers import (
     render_trigger_editor,
     render_stick_editor,
     render_touchpad_editor,
+    render_button_editor,
+    render_hat_editor,
+    render_mapping_globals,
 )
 from .log_console import LogConsole
 from .logo_view_3d import BgLogo3DView
@@ -151,6 +155,9 @@ class MainWindow(QMainWindow):
         self._rate_timer.setInterval(500)
         self._rate_timer.timeout.connect(self._flush_rate)
         self._rate_timer.start()
+        # Registry to track live scope widgets so bridge signals can feed them.
+        # Keyed by (inspector_id, axis_idx) → AxisScope widget.
+        self._live_scope_widgets: Dict[tuple, Optional[AxisScope]] = {}
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -226,6 +233,11 @@ class MainWindow(QMainWindow):
             insp.register_renderer("mapping_trigger", render_trigger_editor)
             insp.register_renderer("mapping_stick", render_stick_editor)
             insp.register_renderer("mapping_touchpad", render_touchpad_editor)
+            # Button and hat editors
+            insp.register_renderer("button_editor", render_button_editor)
+            insp.register_renderer("hat_editor", render_hat_editor)
+            # Top-level Mapping globals inspector (Settings button in mapping editor)
+            insp.register_renderer("mapping_globals", render_mapping_globals)
             insp.setVisible(False)
 
         content_splitter.addWidget(self._workspace_a)
@@ -602,13 +614,25 @@ class MainWindow(QMainWindow):
         if payload is not None and not self._inspect_btn.isChecked():
             self._inspect_btn.setChecked(True)
             self._toggle_inspector()
+        # Hook the live oscilloscope scope if this is a "live" tab selection with an axis.
+        if tab_name == "live" and payload and payload.get("kind", "").lower() in ("axis", "stick", "trigger"):
+            self._update_live_scope(self._inspector_a, payload)
+            if self._split_btn.isChecked():
+                self._update_live_scope(self._inspector_b, payload)
+        if self._split_btn.isChecked():
+            self._inspector_b.set_selection(tab_name, payload)
+        # Auto-open the inspector on first selection so the user sees the
+        # payload immediately — same UX as Figma.
+        if payload is not None and not self._inspect_btn.isChecked():
+            self._inspect_btn.setChecked(True)
+            self._toggle_inspector()
 
     def _on_mapping_selection(self, payload: dict) -> None:
         """Route a MappingEditor selection to the matching inspector renderer.
 
-        Trigger/stick/touchpad rows carry a "config" dataclass — dispatch those
-        to the dedicated renderers. Buttons, hats, and plain axes fall back to
-        the generic "mapping" key-value renderer.
+        Trigger/stick/touchpad/button/hat rows carry a config dataclass or channel override —
+        dispatch those to the dedicated renderers. Plain axes fall back to the generic
+        "mapping" key-value renderer.
         """
         kind = payload.get("kind", "")
         if kind == "trigger":
@@ -617,6 +641,12 @@ class MainWindow(QMainWindow):
             tab = "mapping_stick"
         elif kind == "touchpad":
             tab = "mapping_touchpad"
+        elif kind == "button_editor":
+            tab = "button_editor"
+        elif kind == "hat_editor":
+            tab = "hat_editor"
+        elif kind == "mapping_globals":
+            tab = "mapping_globals"
         else:
             tab = "mapping"
         self.push_inspector_selection(tab, payload)
@@ -837,6 +867,45 @@ class MainWindow(QMainWindow):
         v.addStretch(1)
         self._refresh_tier_label()
         return w
+
+    def _update_live_scope(self, inspector, payload: dict) -> None:
+        """Hook a newly-rendered AxisScope widget to bridge axis_value signals.
+
+        When the user selects an axis in the Live tab, the inspector renders
+        a new AxisScope widget. This method finds that widget inside the
+        inspector's body and connects it to the bridge worker's axis_value
+        signal so live updates flow in at 100 Hz, repainting at 30 Hz internally.
+        """
+        axis_idx = payload.get("index", -1)
+        if not isinstance(axis_idx, int) or axis_idx < 0:
+            return
+
+        # Try to find the freshly-rendered scope widget by its objectName.
+        scope: Optional[AxisScope] = None
+        body = inspector._body_host
+        if body is not None:
+            for child in body.findChildren(AxisScope):
+                if child.objectName() == f"LiveScope_{axis_idx}":
+                    scope = child
+                    break
+
+        if scope is None:
+            return
+
+        # Unsubscribe the old scope (if any) for this axis.
+        inspector_id = id(inspector)
+        old_scope = self._live_scope_widgets.get((inspector_id, axis_idx))
+        if old_scope is not None:
+            try:
+                self._bridge.worker.axis_value.disconnect(old_scope.add_sample)
+            except Exception:
+                pass
+
+        # Subscribe the new scope to axis updates.
+        self._live_scope_widgets[(inspector_id, axis_idx)] = scope
+        self._bridge.worker.axis_value.connect(
+            lambda idx, val, s=scope: s.add_sample(val) if idx == axis_idx else None
+        )
 
     # ============================================================== signal wiring
 
