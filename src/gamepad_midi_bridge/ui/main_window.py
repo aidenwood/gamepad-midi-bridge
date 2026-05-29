@@ -1,18 +1,22 @@
 """Main window — status header + tabbed body. Owns the BridgeController."""
 from __future__ import annotations
 
+import json
+import logging
 import webbrowser
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QSplitter, QTabWidget, QVBoxLayout, QWidget,
+    QPushButton, QSplitter, QStackedLayout, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from typing import Optional
 
-from .. import APP_NAME, __version__, telemetry
+from .. import APP_NAME, __version__, telemetry, autobackup
+
+_log = logging.getLogger(__name__)
 from ..controller import available_count
 from ..license import activate_from_string, is_pro, state as license_state
 from ..mapping import Mapping
@@ -25,7 +29,13 @@ from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
 from .help_tab import HelpTab
 from .inspector import INSPECTOR_WIDTH, Inspector, render_mapping_selection
+from .inspector_renderers import (
+    render_trigger_editor,
+    render_stick_editor,
+    render_touchpad_editor,
+)
 from .log_console import LogConsole
+from .logo_view_3d import BgLogo3DView
 from .mapping_editor import MappingEditor
 from .marketplace_tab import MarketplaceTab
 from .onboarding import OnboardingWizard, is_first_launch, mark_complete
@@ -39,6 +49,36 @@ from .visualise_tab import VisualiseTab
 UPGRADE_URL = "https://store.aidxn.com/gamepad-midi-bridge"
 RECOVERY_URL = "https://store.aidxn.com/recover"
 CHANGELOG_URL = "https://store.aidxn.com/changelog"
+
+_BG3D_CONFIG_KEY = "bg_3d_on"
+
+
+def _read_bg3d_state() -> bool:
+    """Read persisted 3D background toggle. Default OFF."""
+    from ..paths import config_path
+    path = config_path()
+    if not path.exists():
+        return False
+    try:
+        return bool(json.loads(path.read_text(encoding="utf-8")).get(_BG3D_CONFIG_KEY, False))
+    except Exception:
+        return False
+
+
+def _write_bg3d_state(on: bool) -> None:
+    from ..paths import config_path
+    path = config_path()
+    data: dict = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data[_BG3D_CONFIG_KEY] = bool(on)
+    try:
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _load_last_mapping() -> Mapping:
@@ -107,7 +147,30 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         self.setCentralWidget(central)
-        root = QVBoxLayout(central)
+
+        # --- Background 3D visualiser layer ---
+        # QStackedLayout(StackAll) lets all children paint in Z order rather
+        # than swapping. Bottom layer = the BgLogo3DView; top layer = a plain
+        # QWidget (chrome_widget) that holds the actual status bar + body.
+        stack = QStackedLayout(central)
+        stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        stack.setContentsMargins(0, 0, 0, 0)
+
+        # Layer 0 — 3D background (full window, beneath chrome).
+        self._bg_3d = BgLogo3DView(parent=central, opacity=0.3)
+        self._bg_3d.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        stack.addWidget(self._bg_3d)
+
+        # Layer 1 — chrome (status bar + body). Transparent so 3D shows through.
+        chrome_widget = QWidget(central)
+        chrome_widget.setAttribute(Qt.WA_TranslucentBackground, True)
+        stack.addWidget(chrome_widget)
+
+        # Set the chrome layer as the "current" so it receives the layout geometry
+        # (StackAll means both paint, but currentIndex controls event delivery focus).
+        stack.setCurrentIndex(1)
+
+        root = QVBoxLayout(chrome_widget)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
@@ -144,12 +207,18 @@ class MainWindow(QMainWindow):
         # original "split" content: a controller meter alongside the tabs).
         self._side_panel = self._build_side_panel()
 
-        # Inspectors, one per workspace. Each is registered with the same
-        # mapping-selection renderer so either side reflects mapping clicks.
+        # Inspectors, one per workspace. Each is registered with renderers
+        # for mapping, marketplace, and live control selections.
         self._inspector_a = Inspector(label="INSPECTOR")
         self._inspector_b = Inspector(label="INSPECTOR · B")
         for insp in (self._inspector_a, self._inspector_b):
             insp.register_renderer("mapping", render_mapping_selection)
+            insp.register_renderer("marketplace", render_marketplace_selection)
+            insp.register_renderer("live", render_live_selection)
+            # Config-aware renderers for trigger / stick / touchpad axis rows.
+            insp.register_renderer("mapping_trigger", render_trigger_editor)
+            insp.register_renderer("mapping_stick", render_stick_editor)
+            insp.register_renderer("mapping_touchpad", render_touchpad_editor)
             insp.setVisible(False)
 
         content_splitter.addWidget(self._workspace_a)
@@ -187,6 +256,16 @@ class MainWindow(QMainWindow):
         self._inspector_a.visibility_changed.connect(self._on_inspector_visibility)
         self._inspector_b.visibility_changed.connect(self._on_inspector_visibility)
 
+        # 3D background toggle — persisted, default OFF.
+        _bg3d_on = _read_bg3d_state()
+        self._3d_btn.setChecked(_bg3d_on)
+        self._3d_btn.clicked.connect(self._toggle_3d)
+        # Apply persisted state now: only show_bg() if it was on last session.
+        if _bg3d_on:
+            self._bg_3d.show_bg()
+        else:
+            self._bg_3d.setVisible(False)
+
         # Stream stdlib logging + bridge activity into the console.
         self._log_console.install_root_handler()
 
@@ -214,6 +293,12 @@ class MainWindow(QMainWindow):
             self._tray.stop_requested.connect(self._on_stop)
             self._tray.show_requested.connect(self._show_from_tray)
             self._tray.quit_requested.connect(self._quit_from_tray)
+
+        # Auto-backup of the mapping every 60 seconds
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(60_000)
+        self._autosave_timer.timeout.connect(self._autosave_tick)
+        self._autosave_timer.start()
 
         # First-launch onboarding. Deferred so the main window paints before the
         # modal appears — keeps the welcome moment from feeling like a blocker.
@@ -326,6 +411,15 @@ class MainWindow(QMainWindow):
         self._inspect_btn.setMinimumWidth(80)
         h.addWidget(self._inspect_btn)
 
+        self._3d_btn = QPushButton("3D")
+        self._3d_btn.setObjectName("LayoutToggle")
+        self._3d_btn.setCheckable(True)
+        self._3d_btn.setToolTip(
+            "Show a rotating 3D controller behind the app UI"
+        )
+        self._3d_btn.setMinimumWidth(50)
+        h.addWidget(self._3d_btn)
+
         return bar
 
     def _build_update_banner(self) -> QFrame:
@@ -391,6 +485,9 @@ class MainWindow(QMainWindow):
         # Secondary ControllerMeter — `_wire_signals` connects bridge events
         # to both `_meter` (Live tab) and `_side_meter` (this side panel).
         self._side_meter = ControllerMeter()
+        self._side_meter.selection_changed.connect(
+            lambda p: self.push_inspector_selection("live", p)
+        )
         v.addWidget(self._side_meter, 1)
 
         return wrap
@@ -431,6 +528,15 @@ class MainWindow(QMainWindow):
             self._inspector_a.hide_panel()
             self._inspector_b.hide_panel()
         self._rebalance_content_splitter()
+
+    def _toggle_3d(self) -> None:
+        """Show / hide the 3D background visualiser. Persists to config."""
+        want_on = self._3d_btn.isChecked()
+        if want_on:
+            self._bg_3d.show_bg()
+        else:
+            self._bg_3d.hide_bg()
+        _write_bg3d_state(want_on)
 
     def _on_inspector_visibility(self, _visible: bool) -> None:
         """Keep the status-bar Inspect toggle in sync when an inspector is
@@ -473,6 +579,24 @@ class MainWindow(QMainWindow):
             self._inspect_btn.setChecked(True)
             self._toggle_inspector()
 
+    def _on_mapping_selection(self, payload: dict) -> None:
+        """Route a MappingEditor selection to the matching inspector renderer.
+
+        Trigger/stick/touchpad rows carry a "config" dataclass — dispatch those
+        to the dedicated renderers. Buttons, hats, and plain axes fall back to
+        the generic "mapping" key-value renderer.
+        """
+        kind = payload.get("kind", "")
+        if kind == "trigger":
+            tab = "mapping_trigger"
+        elif kind == "stick":
+            tab = "mapping_stick"
+        elif kind == "touchpad":
+            tab = "mapping_touchpad"
+        else:
+            tab = "mapping"
+        self.push_inspector_selection(tab, payload)
+
     def _build_tabs(self) -> QTabWidget:
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
@@ -487,6 +611,9 @@ class MainWindow(QMainWindow):
         # Live tab — primary meter always present. Secondary meter + Pro
         # nudge banner are hidden until a second controller is wired in.
         self._meter = ControllerMeter()
+        self._meter.selection_changed.connect(
+            lambda p: self.push_inspector_selection("live", p)
+        )
         self._meter2 = ControllerMeter()
         self._meter2.setVisible(False)
         self._live_splitter = QSplitter(Qt.Horizontal)
@@ -521,8 +648,10 @@ class MainWindow(QMainWindow):
         self._mapping_editor.upgrade_clicked.connect(self._open_upgrade)
         self._mapping_editor.activate_clicked.connect(self._enter_license_key)
         # Forward row clicks into the right-hand inspector (Figma pattern).
+        # Trigger/stick/touchpad rows get a richer renderer; everything else
+        # falls back to the generic key-value mapping renderer.
         self._mapping_editor.selection_changed.connect(
-            lambda p: self.push_inspector_selection("mapping", p)
+            self._on_mapping_selection
         )
         tabs.addTab(self._scrollable(self._mapping_editor), "Mapping")
 
@@ -542,6 +671,9 @@ class MainWindow(QMainWindow):
         self._marketplace = MarketplaceTab()
         self._marketplace.preset_chosen.connect(self._on_preset_loaded)
         self._marketplace.status_message.connect(self._on_status)
+        self._marketplace.selection_changed.connect(
+            lambda p: self.push_inspector_selection("marketplace", p)
+        )
         tabs.addTab(self._marketplace, "Marketplace")
 
         self._connectors = ConnectorsTab()
@@ -933,6 +1065,17 @@ class MainWindow(QMainWindow):
             self._on_stop()
         else:
             self._on_start()
+
+    def _autosave_tick(self) -> None:
+        '''Background task: save a timestamped snapshot of the current mapping
+        and prune old backups. Wrapped in try/except so disk errors never break
+        the app.'''
+        try:
+            autobackup.save_snapshot(self._mapping)
+            autobackup.prune_old_snapshots(keep=30)
+        except Exception:
+            # Silently fail — this is a background task, not critical
+            pass
 
     def _focus_settings_tab(self) -> None:
         """Jump focus to the Settings tab. Wired from the Help-tab shortcut so

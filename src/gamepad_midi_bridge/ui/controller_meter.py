@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -22,6 +22,9 @@ TEXT_DIM = QColor("#8a9099")
 
 class ControllerMeter(QWidget):
     """Visualises stick positions, trigger pressure, and button state."""
+
+    selection_changed = Signal(dict)
+
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -44,6 +47,12 @@ class ControllerMeter(QWidget):
         self._battery_charging = False
         self._battery_full = False
         self._wired = False
+        # Cache for clickable control rectangles — used for hitbox detection
+        self._stick_rects: Dict[str, tuple] = {}  # "left"|"right" -> (x, y, size)
+        self._button_rects: Dict[int, tuple] = {}  # button_idx -> (x, y, size)
+        self._dpad_rects: Dict[str, tuple] = {}    # "up"|"down"|"left"|"right" -> (x, y, size)
+        self._trigger_rects: Dict[str, tuple] = {} # "L2"|"R2" -> (x, y, width, height)
+        self._touchpad_rect: Optional[tuple] = None  # (x, y, width, height)
 
     # ---------------------------------------------------------- public setters
 
@@ -92,6 +101,73 @@ class ControllerMeter(QWidget):
         self.update()
 
     # ---------------------------------------------------------- painting
+
+    def mousePressEvent(self, event) -> None:
+        """Detect clicks on stick, button, d-pad, trigger, or touchpad and emit selection."""
+        x, y = event.position().x(), event.position().y()
+        
+        # Check sticks
+        for stick_name, (sx, sy, size) in self._stick_rects.items():
+            if sx <= x <= sx + size and sy <= y <= sy + size:
+                idx = 0 if stick_name == "left" else 2
+                payload = {
+                    "kind": "stick",
+                    "index": idx,
+                    "label": f"{stick_name.title()} Stick",
+                    "value": 0.0,
+                }
+                self.selection_changed.emit(payload)
+                return
+        
+        # Check buttons
+        for btn_idx, (bx, by, bsize) in self._button_rects.items():
+            if bx <= x <= bx + bsize and by <= y <= by + bsize:
+                payload = {
+                    "kind": "button",
+                    "index": btn_idx,
+                    "value": 1.0 if self._buttons.get(btn_idx, False) else 0.0,
+                    "label": f"Button {btn_idx}",
+                }
+                self.selection_changed.emit(payload)
+                return
+        
+        # Check d-pad
+        for direction, (dx, dy, dsize) in self._dpad_rects.items():
+            if dx <= x <= dx + dsize and dy <= y <= dy + dsize:
+                payload = {
+                    "kind": "dpad",
+                    "index": direction,
+                    "value": 1.0 if self._hats.get(direction, False) else 0.0,
+                    "label": f"D-Pad {direction.title()}",
+                }
+                self.selection_changed.emit(payload)
+                return
+        
+        # Check triggers
+        for trigger_name, (tx, ty, tw, th) in self._trigger_rects.items():
+            if tx <= x <= tx + tw and ty <= y <= ty + th:
+                idx = 4 if trigger_name == "L2" else 5
+                payload = {
+                    "kind": "trigger",
+                    "index": idx,
+                    "value": self._axes.get(idx, -1.0),
+                    "label": trigger_name,
+                }
+                self.selection_changed.emit(payload)
+                return
+        
+        # Check touchpad
+        if self._touchpad_rect:
+            tx, ty, tw, th = self._touchpad_rect
+            if tx <= x <= tx + tw and ty <= y <= ty + th:
+                payload = {
+                    "kind": "touchpad",
+                    "index": -1,
+                    "value": 1.0 if self._touch_contact else 0.0,
+                    "label": "Touchpad",
+                }
+                self.selection_changed.emit(payload)
+                return
 
     def paintEvent(self, event) -> None:
         p = QPainter(self)
@@ -161,6 +237,9 @@ class ControllerMeter(QWidget):
 
     def _draw_stick(self, p: QPainter, x: float, y: float, size: float,
                     x_val: float, y_val: float, label: str) -> None:
+        # Cache hitbox for clicking
+        stick_name = "left" if "L" in label else "right"
+        self._stick_rects[stick_name] = (x, y, size)
         rect = QRectF(x, y, size, size)
         p.setPen(QPen(STICK_BORDER, 1))
         p.setBrush(QBrush(STICK_BG))
@@ -191,6 +270,8 @@ class ControllerMeter(QWidget):
                       raw_value: float, label: str) -> None:
         # Trigger axis is -1 (released) to +1 (fully pressed). Normalize to 0..1.
         normalized = max(0.0, (raw_value + 1.0) / 2.0)
+        # Cache hitbox for clicking
+        self._trigger_rects[label] = (x, y, width, 14)
         bg = QRectF(x, y, width, 14)
         p.setPen(QPen(STICK_BORDER, 1))
         p.setBrush(QBrush(STICK_BG))
@@ -212,6 +293,12 @@ class ControllerMeter(QWidget):
 
     def _draw_button(self, p: QPainter, x: float, y: float, size: float,
                      pressed: bool, label: str) -> None:
+        # Cache hitbox for clicking
+        try:
+            btn_idx = int(label)
+            self._button_rects[btn_idx] = (x, y, size)
+        except ValueError:
+            pass
         rect = QRectF(x, y, size, size)
         p.setPen(QPen(STICK_BORDER, 1))
         p.setBrush(QBrush(BUTTON_ON if pressed else BUTTON_OFF))
@@ -234,6 +321,8 @@ class ControllerMeter(QWidget):
             "down":  (x + size + gap, y + (size + gap) * 2),
         }
         for direction, (px, py) in positions.items():
+            # Cache hitbox for clicking
+            self._dpad_rects[direction] = (px, py, size)
             pressed = self._hats.get(direction, False)
             rect = QRectF(px, py, size, size)
             p.setPen(QPen(STICK_BORDER, 1))
@@ -242,6 +331,8 @@ class ControllerMeter(QWidget):
 
     def _draw_touchpad(self, p: QPainter, x: float, y: float,
                        width: float, height: float) -> None:
+        # Cache hitbox for clicking
+        self._touchpad_rect = (x, y, width, height)
         # Label (matches L STICK / R STICK style)
         p.setPen(QPen(TEXT_DIM))
         f = QFont()

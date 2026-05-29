@@ -13,15 +13,14 @@
 <body>
   <canvas id="c"></canvas>
   <!--
-    Standalone 3D logo viewer for the desktop app's QWebEngineView.
+    Standalone 3D viewer for the desktop app's QWebEngineView.
 
-    Loaded by `logo_view_3d.py`. Three.js + GLTFLoader + DRACOLoader come
-    from the unpkg CDN — the desktop user has internet on first launch
-    every time we'd be showing this (Bluetooth probe etc.), so on-demand
-    is fine. If we ever need an offline build we can bundle the modules.
+    Two modes controlled by the `data-bg` attribute on <body>:
+      - default (logo widget): small fit target 2.8, camera z=6
+      - bg (background visualiser): large fit target 4.8, camera z=5, slow rotation
 
-    The GLB itself ships locally inside `resources/3d/logo.glb` and is
-    served via a custom QWebEngineUrlSchemeHandler (`gmb://logo.glb`).
+    The GLB ships locally in `resources/3d/logo.glb` served via the
+    custom `gmb://` scheme registered in logo_view_3d.py.
   -->
   <script type="importmap">
     {
@@ -36,6 +35,9 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
+    // bg mode: body carries data-bg="1" when used as a window background.
+    const isBg = document.body.dataset.bg === '1';
+
     const canvas = document.getElementById('c');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
@@ -44,13 +46,14 @@
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
-    camera.position.set(0, 0, 6);
+    camera.position.set(0, 0, isBg ? 5 : 6);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-    const key = new THREE.DirectionalLight(0xeaf6ff, 0.85);
+    // Lighting — slightly cooler in bg mode so the model reads as silhouette
+    scene.add(new THREE.AmbientLight(0xffffff, isBg ? 0.45 : 0.65));
+    const key = new THREE.DirectionalLight(0xeaf6ff, isBg ? 0.6 : 0.85);
     key.position.set(3, 4, 5);
     scene.add(key);
-    const rim = new THREE.DirectionalLight(0x5eead4, 0.55);
+    const rim = new THREE.DirectionalLight(0x5eead4, isBg ? 0.35 : 0.55);
     rim.position.set(-3, -2, -4);
     scene.add(rim);
 
@@ -74,8 +77,10 @@
     draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
     draco.setDecoderConfig({ type: 'js' });
     loader.setDRACOLoader(draco);
-    // gmb:// scheme is registered in logo_view_3d.py and serves the
-    // bundled GLB out of the app's resources dir at runtime.
+
+    // bg mode fits to a larger target so the controller fills more of the window
+    const fitTarget = isBg ? 4.8 : 2.8;
+
     loader.load('gmb://logo.glb', (gltf) => {
       const g = gltf.scene;
       g.traverse((node) => {
@@ -89,7 +94,7 @@
           }
         }
       });
-      fitToBox(g, 2.8);
+      fitToBox(g, fitTarget);
       stage.add(g);
     });
 
@@ -103,13 +108,14 @@
     new ResizeObserver(resize).observe(canvas);
     resize();
 
-    // Calm idle rotation — no scroll, just a gentle continuous turn so
-    // the app's logo feels alive without competing with the UI.
+    // Rotation speed: slower in bg mode (atmosphere, not animation)
+    const rotSpeed = isBg ? 0.18 : 0.4;
+
     let last = performance.now();
     function frame(now) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      stage.rotation.y += dt * 0.4;
+      stage.rotation.y += dt * rotSpeed;
       stage.rotation.x = Math.sin(now * 0.0006) * 0.18;
       renderer.render(scene, camera);
       requestAnimationFrame(frame);

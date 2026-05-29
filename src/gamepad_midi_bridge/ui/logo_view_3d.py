@@ -9,22 +9,25 @@ it makes sense) so the Chromium process only spawns when a screen
 actually shows the logo.
 
 Public API:
-    Logo3DView()        — QWidget you can add to any layout.
+    Logo3DView()        — QWidget you can add to any layout (small logo).
     Logo3DView.shutdown() — call before app exit to clean up the engine.
+    BgLogo3DView()      — Full-window background visualiser variant.
+                          Pass bg_opacity (0.0–1.0, default 0.3) to control
+                          how strongly it reads through the foreground chrome.
 """
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QUrl
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt, QUrl
 from PySide6.QtWebEngineCore import (
     QWebEngineUrlScheme,
     QWebEngineUrlSchemeHandler,
     QWebEngineUrlRequestJob,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
 
 _RESOURCES = Path(__file__).resolve().parent.parent / "resources" / "3d"
@@ -116,3 +119,67 @@ class Logo3DView(QWebEngineView):
         """Stop loading + drop the page so Chromium can release the process."""
         self.stop()
         self.setHtml("")
+
+
+class BgLogo3DView(Logo3DView):
+    """Full-window background visualiser variant of Logo3DView.
+
+    Loads the same Three.js scene but with `data-bg="1"` injected into the
+    page body so the HTML knows to use a larger fit target and slower rotation.
+    The widget is rendered at `bg_opacity` opacity so the foreground chrome
+    remains legible.
+
+    Usage (in MainWindow):
+        self._bg_3d = BgLogo3DView(opacity=0.3)
+        # Place as bottom layer of a QStackedLayout with StackAll.
+    """
+
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        opacity: float = 0.3,
+    ) -> None:
+        super().__init__(parent)
+        # Cancel the base-class auto-load — we load lazily on first show_bg()
+        # so the Chromium process doesn't spin up until the user turns 3D on.
+        self.stop()
+        self.setHtml("")
+        # Make the widget expand to fill whatever space the layout gives it.
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # For embedded (non-top-level) widgets, use a QGraphicsOpacityEffect
+        # to render at reduced opacity so the foreground chrome stays legible.
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        fx = QGraphicsOpacityEffect(self)
+        fx.setOpacity(opacity)
+        self.setGraphicsEffect(fx)
+        self._opacity = opacity
+        self._loaded = False
+
+    def _build_bg_url(self) -> QUrl:
+        """Return a file:// URL for index.html with a fragment that the page
+        reads to activate bg mode.  We inject `data-bg` via JS after load
+        because we cannot modify the URL query for file:// pages reliably."""
+        index = _RESOURCES / "index.html"
+        return QUrl.fromLocalFile(str(index))
+
+    # Override load so we inject data-bg after the page finishes loading.
+    def _load_bg(self) -> None:
+        index = _RESOURCES / "index.html"
+        if not index.exists():
+            return
+        self.loadFinished.connect(self._inject_bg_mode, type=Qt.SingleShotConnection)  # type: ignore[attr-defined]
+        self.load(QUrl.fromLocalFile(str(index)))
+
+    def _inject_bg_mode(self, _ok: bool) -> None:
+        """After page load, flip document.body to bg mode via runJavaScript."""
+        self.page().runJavaScript("document.body.dataset.bg = '1';")
+
+    def show_bg(self) -> None:
+        """Lazy-load the page and make the widget visible."""
+        if not self._loaded:
+            self._load_bg()
+            self._loaded = True
+        self.setVisible(True)
+
+    def hide_bg(self) -> None:
+        self.setVisible(False)

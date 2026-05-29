@@ -40,6 +40,7 @@ class MarketplaceTab(QWidget):
 
     preset_chosen = Signal(Mapping)
     status_message = Signal(str)
+    selection_changed = Signal(dict)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -306,6 +307,8 @@ class MarketplaceTab(QWidget):
             f"QFrame {{ background-color: {CARD_BG}; "
             f"border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 14px; }}"
         )
+        # Emit selection when card is clicked
+        card.mousePressEvent = lambda ev, p=preset: self._emit_preset_selection(p)
         h = QHBoxLayout(card)
         h.setContentsMargins(14, 12, 14, 12)
         h.setSpacing(14)
@@ -374,6 +377,20 @@ class MarketplaceTab(QWidget):
         return card
 
     # ---------------------------------------------------------------- actions
+
+    def _emit_preset_selection(self, preset: Dict[str, Any]) -> None:
+        """Emit preset metadata to the inspector panel."""
+        payload = {
+            "kind": "preset",
+            "slug": preset.get("id", ""),
+            "title": preset.get("title", "Untitled"),
+            "downloads": preset.get("downloads", 0),
+            "rating": preset.get("rating", 0),
+            "author": (preset.get("author") or {}).get("display_name") or (preset.get("author") or {}).get("github_handle") or "Anonymous",
+            "description": preset.get("description", ""),
+            "label": preset.get("title", "Untitled preset"),
+        }
+        self.selection_changed.emit(payload)
 
     def _on_install(self, preset: Dict[str, Any]) -> None:
         preset_id = preset.get("id")

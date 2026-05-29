@@ -232,3 +232,109 @@ def render_mapping_selection(payload: dict) -> QWidget:
         v.addLayout(row)
 
     return wrap
+
+
+def render_marketplace_selection(payload: dict) -> QWidget:
+    """Renderer for marketplace preset card selection.
+    
+    Accepts a dict shaped like:
+      { "kind": "preset", "slug": str, "title": str, "downloads": int, 
+        "rating": float, "author": str, "description": str, "label": str }
+    """
+    wrap = QWidget()
+    v = QVBoxLayout(wrap)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(8)
+
+    title = QLabel(str(payload.get("label", "Preset")))
+    title.setStyleSheet("color: #f5f7fa; font-size: 16px; font-weight: 600;")
+    v.addWidget(title)
+
+    author = QLabel(str(payload.get("author", "Anonymous")))
+    author.setAlignment(Qt.AlignCenter)
+    author.setStyleSheet(
+        "color: #8a9099; background: rgba(45, 212, 191, 0.08); "
+        "border: 1px solid rgba(45, 212, 191, 0.2); border-radius: 999px; "
+        "padding: 4px 10px; font-size: 10px; font-weight: 600;"
+    )
+    author.setMaximumWidth(150)
+    v.addWidget(author)
+
+    # Downloads + rating row
+    stats_row = QHBoxLayout()
+    downloads = QLabel(f"📥 {payload.get('downloads', 0)} downloads")
+    downloads.setStyleSheet("color: #8a9099; font-size: 11px;")
+    stats_row.addWidget(downloads)
+    rating = QLabel(f"⭐ {payload.get('rating', 0):.1f}")
+    rating.setStyleSheet("color: #8a9099; font-size: 11px;")
+    stats_row.addWidget(rating)
+    stats_row.addStretch(1)
+    v.addLayout(stats_row)
+
+    # Description
+    description = str(payload.get("description", ""))
+    if description:
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: #c2c6cc; font-size: 11px; margin-top: 8px;")
+        v.addWidget(desc_label)
+
+    # Install button (stub)
+    install_btn = QPushButton("Install Preset")
+    install_btn.setObjectName("PrimaryButton")
+    install_btn.clicked.connect(lambda: print(f"[stub] Install preset: {payload.get('label')}"))
+    v.addWidget(install_btn)
+
+    return wrap
+
+
+def render_live_selection(payload: dict) -> QWidget:
+    """Renderer for live controller selection (axis/button/stick/etc).
+    
+    Accepts a dict shaped like:
+      { "kind": "button"|"axis"|"stick"|"trigger"|"dpad"|"touchpad",
+        "index": int, "value": float, "label": str }
+    """
+    wrap = QWidget()
+    v = QVBoxLayout(wrap)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(8)
+
+    label = str(payload.get("label", "Control"))
+    title = QLabel(label)
+    title.setStyleSheet("color: #f5f7fa; font-size: 16px; font-weight: 600;")
+    v.addWidget(title)
+
+    kind = str(payload.get("kind", "")).upper()
+    kind_chip = QLabel(kind)
+    kind_chip.setAlignment(Qt.AlignCenter)
+    kind_chip.setStyleSheet(
+        "color: #f5c450; background: rgba(245, 196, 80, 0.12); "
+        "border: 1px solid rgba(245, 196, 80, 0.3); border-radius: 999px; "
+        "padding: 4px 10px; font-size: 10px; font-weight: 700; "
+        "letter-spacing: 1.4px;"
+    )
+    kind_chip.setMaximumWidth(100)
+    v.addWidget(kind_chip)
+
+    # Live value indicator
+    value = payload.get("value", 0.0)
+    if isinstance(value, (int, float)):
+        # Normalize to percentage if in 0..1 range, or -1..1 range
+        if -1.0 <= value <= 1.0:
+            pct = int((value + 1.0) / 2.0 * 100) if value >= -1.0 else int(value * 100)
+        else:
+            pct = int(value * 100)
+        value_label = QLabel(f"Value: {value:.2f} ({pct}%)")
+    else:
+        value_label = QLabel(f"Value: {value}")
+    value_label.setStyleSheet("color: #c2c6cc; font-size: 12px; font-family: ui-monospace, Menlo, monospace;")
+    v.addWidget(value_label)
+
+    # Index
+    idx = payload.get("index", "—")
+    idx_label = QLabel(f"Index: {idx}")
+    idx_label.setStyleSheet("color: #8a9099; font-size: 11px;")
+    v.addWidget(idx_label)
+
+    return wrap

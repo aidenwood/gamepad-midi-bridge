@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..license import is_pro
-from ..mapping import Mapping
+from ..mapping import L2_AXIS, R2_AXIS, STICK_AXES, Mapping
 from .pro_lock import ProLockOverlay
 
 
@@ -22,8 +22,11 @@ class MappingEditor(QWidget):
     activate_clicked = Signal()
     # Emitted whenever the user selects a row in one of the three tables.
     # Main window forwards this to the right-hand inspector. Payload shape:
-    #   { "kind": "button"|"axis"|"hat", "index": str, "midi": int, "label": str }
+    #   { "kind": "button"|"axis"|"hat"|"trigger"|"stick"|"touchpad",
+    #     "index": str, "midi": int, "label": str, "config": dataclass|None }
     selection_changed = Signal(dict)
+    # Emitted after any config dataclass mutates so the caller can persist.
+    mapping_changed = Signal()
 
     def __init__(self, mapping: Mapping, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -57,6 +60,13 @@ class MappingEditor(QWidget):
             lambda: self._emit_selection(self._hats_table, "hat")
         )
         v.addWidget(self._hats_table)
+
+        v.addWidget(self._section_label("TOUCHPAD → CC"))
+        self._touchpad_table = self._make_table(["Control", "Info"])
+        self._touchpad_table.itemSelectionChanged.connect(
+            lambda: self._emit_touchpad_selection()
+        )
+        v.addWidget(self._touchpad_table)
 
         self._stack.addWidget(content)
 
@@ -108,6 +118,9 @@ class MappingEditor(QWidget):
         self._fill(self._buttons_table, [(str(k), str(v)) for k, v in sorted(self._mapping.buttons.items())])
         self._fill(self._axes_table, [(str(k), str(v)) for k, v in sorted(self._mapping.axes.items())])
         self._fill(self._hats_table, [(k, str(v)) for k, v in self._mapping.hats.items()])
+        tp = self._mapping.touchpad
+        tp_info = f"x:{tp.x_cc} y:{tp.y_cc} | mode:{tp.mode}" if tp.enabled else "disabled"
+        self._fill(self._touchpad_table, [("DualSense touchpad", tp_info)])
 
     def _fill(self, table: QTableWidget, rows: list) -> None:
         table.setRowCount(len(rows))
@@ -122,8 +135,12 @@ class MappingEditor(QWidget):
 
     def _emit_selection(self, table: QTableWidget, kind: str) -> None:
         """Forward a row-click into a selection payload the inspector can render.
-        Payload keys deliberately match `inspector.render_mapping_selection`'s
-        expected shape so a click immediately lights up the inspector pane."""
+
+        For axis rows that map to triggers (L2=4, R2=5) or sticks (0..3) we
+        promote `kind` to "trigger" or "stick" and attach the corresponding
+        config dataclass under the "config" key so the inspector can render a
+        richer editor instead of the generic key-value view.
+        """
         row = table.currentRow()
         if row < 0 or row >= table.rowCount():
             return
@@ -133,12 +150,59 @@ class MappingEditor(QWidget):
             return
         idx = idx_item.text()
         midi = midi_item.text()
-        label_map = {"button": f"Button {idx}", "axis": f"Axis {idx}", "hat": f"D-pad {idx}"}
-        payload = {
-            "kind": kind,
-            "label": label_map.get(kind, f"{kind} {idx}"),
+        channel = str(self._mapping.midi_channel + 1)
+
+        # Determine whether this axis gets a richer editor.
+        promoted_kind = kind
+        config = None
+        if kind == "axis":
+            try:
+                axis_index = int(idx)
+            except (ValueError, TypeError):
+                axis_index = -1
+
+            if axis_index == L2_AXIS:
+                promoted_kind = "trigger"
+                config = self._mapping.l2_trigger
+                label = "L2 Trigger"
+            elif axis_index == R2_AXIS:
+                promoted_kind = "trigger"
+                config = self._mapping.r2_trigger
+                label = "R2 Trigger"
+            elif axis_index in STICK_AXES:
+                promoted_kind = "stick"
+                if axis_index in (0, 1):
+                    config = self._mapping.left_stick
+                    label = f"Left Stick  (axis {axis_index})"
+                else:
+                    config = self._mapping.right_stick
+                    label = f"Right Stick  (axis {axis_index})"
+            else:
+                label = f"Axis {idx}"
+        else:
+            label_map = {"button": f"Button {idx}", "hat": f"D-pad {idx}"}
+            label = label_map.get(kind, f"{kind} {idx}")
+
+        payload: dict = {
+            "kind": promoted_kind,
+            "label": label,
             "index": idx,
             "midi": midi,
-            "channel": str(self._mapping.midi_channel + 1),
+            "channel": channel,
+        }
+        if config is not None:
+            payload["config"] = config
+
+        self.selection_changed.emit(payload)
+
+    def _emit_touchpad_selection(self) -> None:
+        """Emit a touchpad payload so the inspector renders TouchpadConfig."""
+        row = self._touchpad_table.currentRow()
+        if row < 0:
+            return
+        payload: dict = {
+            "kind": "touchpad",
+            "label": "DualSense Touchpad",
+            "config": self._mapping.touchpad,
         }
         self.selection_changed.emit(payload)
