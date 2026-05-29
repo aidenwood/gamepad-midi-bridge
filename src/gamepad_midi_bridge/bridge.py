@@ -139,6 +139,11 @@ class BridgeWorker(QObject):
         # configured rest value exactly once instead of leaving the receiver
         # stuck on the last trigger value.
         self._trigger_gate_was_held: Dict[int, bool] = {L2_AXIS: False, R2_AXIS: False}
+        # Per-button "modifier gate" state — track gate-button hold per button.
+        self._button_gate_was_held: Dict[int, bool] = {}
+        # Per-trigger latch state for tactile feedback — track previous latch state
+        # to detect threshold crossings and fire haptic clicks.
+        self._prev_latch_state: Dict[int, bool] = {L2_AXIS: False, R2_AXIS: False}
         self._prev_hat = {"up": False, "down": False, "left": False, "right": False}
         self._prev_corner_notes: Dict[str, Optional[int]] = {"L": None, "R": None}
         self._prev_touch_cc: Dict[str, int] = {}
@@ -452,6 +457,27 @@ class BridgeWorker(QObject):
                 return True
         return False
 
+    def _channel_for_button(self, mapping: Mapping, idx: int) -> int:
+        """Return the MIDI channel for a button: override or global default."""
+        override = mapping.button_channels.get(idx)
+        if override is not None:
+            return override & 0x0F
+        return mapping.midi_channel & 0x0F
+
+    def _channel_for_axis(self, mapping: Mapping, idx: int) -> int:
+        """Return the MIDI channel for an axis: override or global default."""
+        override = mapping.axis_channels.get(idx)
+        if override is not None:
+            return override & 0x0F
+        return mapping.midi_channel & 0x0F
+
+    def _channel_for_hat(self, mapping: Mapping, direction: str) -> int:
+        """Return the MIDI channel for a hat direction: override or global default."""
+        override = mapping.hat_channels.get(direction)
+        if override is not None:
+            return override & 0x0F
+        return mapping.midi_channel & 0x0F
+
     def _record_outbound_cc(self, channel: int, cc_number: int, value: int) -> None:
         """Record an outbound CC send for feedback-loop detection."""
         ts_ms = time.time() * 1000.0
@@ -472,26 +498,52 @@ class BridgeWorker(QObject):
                 continue
             self._fire_haptic(binding, intensity)
 
-    def _fire_haptic(self, binding: HapticInputBinding, intensity: float) -> None:
-        """Write the trigger effect and schedule a revert to the static config."""
-        side = "L" if binding.trigger.upper() == "L2" else "R"
+    def _fire_haptic(self, binding_or_side, intensity_or_effect=None, duration_ms=None) -> None:
+        """Write the trigger effect and schedule a revert to the static config.
+
+        Supports two calling patterns:
+        1. _fire_haptic(binding, intensity) — from haptic-input MIDI callback
+        2. _fire_haptic(side, effect, duration_ms=30) — from latch tactile click
+
+        binding_or_side: either a HapticInputBinding or a str ("L"/"R")
+        intensity_or_effect: float (intensity 0..1) or str (effect name)
+        duration_ms: optional override for pulse duration (default _HAPTIC_PULSE_MS)
+        """
+        if isinstance(binding_or_side, HapticInputBinding):
+            # Pattern 1: haptic-input MIDI callback
+            binding = binding_or_side
+            intensity = intensity_or_effect or 0.0
+            side = "L" if binding.trigger.upper() == "L2" else "R"
+            effect = binding.effect
+            pulse_ms = duration_ms if duration_ms is not None else _HAPTIC_PULSE_MS
+            emit_signal = True
+        else:
+            # Pattern 2: latch tactile click
+            side = str(binding_or_side).upper()
+            effect = str(intensity_or_effect or "feedback").lower()
+            intensity = 1.0  # Tactile click is full intensity
+            pulse_ms = duration_ms if duration_ms is not None else 30
+            emit_signal = False  # Don't emit haptic_event signal for internal clicks
+
         # Build the (l2, r2) tuple — only touch the bound side, leave the
         # other at its static config so the user's existing L2/R2 'feel'
         # selection survives the pulse on the opposite trigger.
         m = self._state.mapping
         if side == "L":
-            new_pair = (binding.effect, m.r2_haptic_effect)
+            new_pair = (effect, m.r2_haptic_effect)
         else:
-            new_pair = (m.l2_haptic_effect, binding.effect)
+            new_pair = (m.l2_haptic_effect, effect)
         with self._haptic_lock:
             self._write_trigger_pair(*new_pair)
             self._last_haptic_pair = new_pair
-        self.haptic_event.emit(side, binding.effect, intensity)
+
+        if emit_signal:
+            self.haptic_event.emit(side, effect, intensity)
 
         # Schedule a revert so the trigger relaxes back to the user's static
         # 'feel'. Each binding gets its own timer; if a flurry of notes lands
         # on the same trigger we just keep refreshing the latest revert.
-        t = threading.Timer(_HAPTIC_PULSE_MS / 1000.0, self._revert_to_static)
+        t = threading.Timer(pulse_ms / 1000.0, self._revert_to_static)
         t.daemon = True
         self._haptic_revert_timers.append(t)
         t.start()
@@ -633,14 +685,43 @@ class BridgeWorker(QObject):
                 continue
             pressed = reader.get_button(btn_idx)
             was = self._prev_buttons.get(btn_idx, False)
+
+            # Get per-button channel, falling back to global
+            btn_channel = self._channel_for_button(mapping, btn_idx)
+            btn_note_on = 0x90 | btn_channel
+            btn_note_off = 0x80 | btn_channel
+
+            # Per-button modifier gate check (feature #1)
+            btn_cfg = mapping.button_configs.get(btn_idx)
+            if btn_cfg and btn_cfg.gate_button is not None:
+                gate_held = bool(reader.get_button(btn_cfg.gate_button))
+                was_gate_held = self._button_gate_was_held.get(btn_idx, False)
+                self._button_gate_was_held[btn_idx] = gate_held
+                # Use the same gate_decision logic as triggers
+                should_emit, send_release = shaping.gate_decision(gate_held, was_gate_held)
+                if not should_emit:
+                    # Silently skip if gate is not held
+                    if pressed != was:
+                        self._prev_buttons[btn_idx] = pressed
+                    continue
+                if send_release:
+                    # Gate just released — send the configured release value as velocity
+                    if not osc_only:
+                        midi.port.send_message([btn_note_on, note, btn_cfg.gate_release_value])
+                        self.midi_sent.emit()
+                    self._send_osc_button(btn_idx, False)
+                    self._prev_buttons[btn_idx] = False
+                    self.button_state.emit(btn_idx, False)
+                    continue
+
             if pressed and not was:
                 if not osc_only:
-                    midi.port.send_message([note_on, note, 127])
+                    midi.port.send_message([btn_note_on, note, 127])
                     self.midi_sent.emit()
                 self._send_osc_button(btn_idx, True)
             elif not pressed and was:
                 if not osc_only:
-                    midi.port.send_message([note_off, note, 0])
+                    midi.port.send_message([btn_note_off, note, 0])
                     self.midi_sent.emit()
                 self._send_osc_button(btn_idx, False)
             if pressed != was:
@@ -683,6 +764,20 @@ class BridgeWorker(QObject):
                     latch_threshold=cfg.latch_threshold,
                     state=self._trigger_states.get(axis_idx),
                 )
+
+                # Feature #10: Adaptive trigger tactile click at threshold
+                # In latch mode, detect threshold crossing and fire haptic feedback
+                if cfg.mode == "latch" and cfg.tactile_click:
+                    trigger_state = self._trigger_states.get(axis_idx)
+                    if trigger_state is not None:
+                        latch_now = trigger_state.latched_on
+                        latch_before = self._prev_latch_state.get(axis_idx, False)
+                        if latch_now != latch_before:
+                            # Threshold crossed — fire 30ms haptic feedback on same trigger
+                            trigger_side = "L" if axis_idx == L2_AXIS else "R"
+                            self._fire_haptic(trigger_side, "feedback", duration_ms=30)
+                        self._prev_latch_state[axis_idx] = latch_now
+
                 # Modifier-gate check. If the trigger is configured with a
                 # `gate_button`, the trigger is silent unless the user is
                 # holding that button. On the release edge we send the
@@ -704,8 +799,10 @@ class BridgeWorker(QObject):
                 val = max(0, min(127, val))
             if self._prev_cc.get(axis_idx) != val:
                 if not osc_only:
-                    midi.port.send_message([cc, cc_num, val])
-                    self._record_outbound_cc(mapping.midi_channel, cc_num, val)
+                    axis_channel = self._channel_for_axis(mapping, axis_idx)
+                    axis_cc = 0xB0 | axis_channel
+                    midi.port.send_message([axis_cc, cc_num, val])
+                    self._record_outbound_cc(axis_channel, cc_num, val)
                     self.midi_sent.emit()
                 # OSC sends a 0..1 float, MIDI a 0..127 int — keep both
                 # streams in lock-step but de-dup against last-sent 0..127.
@@ -807,6 +904,9 @@ class BridgeWorker(QObject):
 
     @staticmethod
     def _note_for_sector(cfg, sector: int) -> Optional[int]:
+        if cfg.scale_quantize_enabled:
+            from .scales import note_for_sector
+            return note_for_sector(cfg.scale_root, cfg.scale_name, sector, cfg.n)
         cfg.ensure_notes()
         if 0 <= sector < len(cfg.notes):
             return cfg.notes[sector]
@@ -824,11 +924,15 @@ class BridgeWorker(QObject):
         for direction, note in hats.items():
             now = current[direction]
             was = self._prev_hat[direction]
+            # Get per-hat channel, falling back to global
+            hat_channel = self._channel_for_hat(mapping, direction)
+            hat_note_on = 0x90 | hat_channel
+            hat_note_off = 0x80 | hat_channel
             if now and not was:
-                midi.port.send_message([note_on, note, 127])
+                midi.port.send_message([hat_note_on, note, 127])
                 self.midi_sent.emit()
             elif not now and was:
-                midi.port.send_message([note_off, note, 0])
+                midi.port.send_message([hat_note_off, note, 0])
                 self.midi_sent.emit()
             if now != was:
                 self._prev_hat[direction] = now

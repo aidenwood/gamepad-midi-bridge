@@ -23,6 +23,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--headless", action="store_true",
                    help="Run the bridge with no GUI. Useful for performance rigs and kiosks.")
+    p.add_argument("--background", action="store_true",
+                   help="Start the app in the system tray, hiding the main window. "
+                        "The bridge starts automatically. Use tray icon to show window.")
     p.add_argument("--reset-config", action="store_true",
                    help="Wipe the config file (mapping settings, opt-ins, "
                         "onboarding flag) and exit.")
@@ -137,10 +140,13 @@ def main() -> int:
     if args.headless:
         return _do_headless(args.deep_link, demo=args.demo)
 
-    # GUI path picks demo up from GMB_DEMO env var (multi.py reads it).
+    # GUI path picks demo and background up from env vars.
     if args.demo:
         import os
         os.environ["GMB_DEMO"] = "1"
+    if args.background:
+        import os
+        os.environ["GMB_BACKGROUND"] = "1"
 
     from .app import run
     return run(sys.argv)

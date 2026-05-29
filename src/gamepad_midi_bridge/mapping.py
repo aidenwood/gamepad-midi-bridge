@@ -46,10 +46,33 @@ class TriggerConfig:
                                Default 0 = silence the receiver. Set to a
                                middle value (e.g. 64) if your downstream
                                expects a "rest at centre" idle state.
+      - `tactile_click`      : if True (default), fire 30ms haptic feedback
+                               on the same trigger when latch mode crosses
+                               the threshold (toggle point). Gives tactile
+                               confirmation of when the latch flips.
     """
     mode: str = "linear"
     ceiling: int = 127
     latch_threshold: float = 0.5
+    gate_button: Optional[int] = None
+    gate_release_value: int = 0
+    tactile_click: bool = True
+
+
+@dataclass
+class ButtonConfig:
+    """Per-button gating config for any face button.
+
+    Optional modifier gate: the button is silent unless `gate_button` is held.
+    On release edge we send `gate_release_value` exactly once.
+
+    Fields:
+      - `gate_button`        : optional button INDEX that must be held for
+                               this button to send MIDI. `None` = no gate
+                               (default).
+      - `gate_release_value` : velocity to send on release edge (0 = note-off).
+                               Default 0 = standard note-off.
+    """
     gate_button: Optional[int] = None
     gate_release_value: int = 0
 
@@ -85,6 +108,11 @@ class CornerConfig:
 
     `notes` should have exactly `n` entries — the MIDI note fired for each
     sector. Sector 0 is the +X cardinal (rightward); sectors advance clockwise.
+
+    When `scale_quantize_enabled` is True the `notes` list is ignored and
+    sectors are mapped to consecutive scale degrees instead — the N sectors
+    walk up the chosen scale starting from `scale_root`, wrapping into the
+    next octave when the scale runs out of degrees.
     """
     enabled: bool = False
     n: int = 8                                  # 4, 8, or 16
@@ -92,6 +120,11 @@ class CornerConfig:
     r_enter: float = 0.92
     r_exit: float = 0.75
     corner_haptic_feedback: bool = True        # fire short trigger pulse on corner fire
+
+    # Scale-quantize (optional) — added in feature #24
+    scale_quantize_enabled: bool = False
+    scale_root: int = 60       # MIDI note (60 = C4)
+    scale_name: str = "major"  # one of scales.SCALES
 
     def ensure_notes(self) -> None:
         """Pad or trim `notes` to match `n` so the UI can edit safely."""
@@ -284,6 +317,11 @@ class Mapping:
         "up": 78, "down": 79, "left": 80, "right": 81,
     })
 
+    # Per-control channel overrides (sparse maps, defaults to midi_channel)
+    button_channels: Dict[int, int] = field(default_factory=dict)
+    axis_channels: Dict[int, int] = field(default_factory=dict)
+    hat_channels: Dict[str, int] = field(default_factory=dict)
+
     # V1.1 — Pro features
     left_stick_corners: CornerConfig = field(default_factory=CornerConfig)
     right_stick_corners: CornerConfig = field(default_factory=CornerConfig)
@@ -300,6 +338,10 @@ class Mapping:
     # at "linear" defaults so v2 presets behave identically when loaded.
     l2_trigger: TriggerConfig = field(default_factory=TriggerConfig)
     r2_trigger: TriggerConfig = field(default_factory=TriggerConfig)
+
+    # Per-button gating config (sparse map indexed by button index).
+    # Missing entry = no gate. Additive to v4 — old presets load unchanged.
+    button_configs: Dict[int, ButtonConfig] = field(default_factory=dict)
 
     # V1.3 — per-stick shaping (deadzone, curves, polar). Defaults preserve
     # legacy stick behaviour exactly so old presets load unchanged.
@@ -329,6 +371,9 @@ class Mapping:
     ab_compare_button: int = -1          # -1 = unset, otherwise button index
     ab_b_preset_slug: Optional[str] = None  # slug of the B preset to load
 
+    # Headless/background mode config (feature #12)
+    always_background_on_launch: bool = False  # if True, start with --background
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -336,6 +381,12 @@ class Mapping:
         # JSON keys must be strings — pygame indices are ints
         d["buttons"] = {str(k): v for k, v in self.buttons.items()}
         d["axes"] = {str(k): v for k, v in self.axes.items()}
+        d["button_channels"] = {str(k): v for k, v in self.button_channels.items()}
+        d["axis_channels"] = {str(k): v for k, v in self.axis_channels.items()}
+        # Serialize sparse button_configs dict
+        d["button_configs"] = {
+            str(k): asdict(v) for k, v in self.button_configs.items()
+        }
         return d
 
     @classmethod
@@ -349,6 +400,9 @@ class Mapping:
             buttons={int(k): int(v) for k, v in data.get("buttons", {}).items()},
             axes={int(k): int(v) for k, v in data.get("axes", {}).items()},
             hats={k: int(v) for k, v in data.get("hats", {}).items()},
+            button_channels={int(k): max(0, min(15, int(v))) for k, v in data.get("button_channels", {}).items()},
+            axis_channels={int(k): max(0, min(15, int(v))) for k, v in data.get("axis_channels", {}).items()},
+            hat_channels={k: max(0, min(15, int(v))) for k, v in data.get("hat_channels", {}).items()},
             left_stick_corners=_corner_from_dict(data.get("left_stick_corners")),
             right_stick_corners=_corner_from_dict(data.get("right_stick_corners")),
             touchpad=_touchpad_from_dict(data.get("touchpad")),
@@ -360,12 +414,14 @@ class Mapping:
             r2_trigger=_trigger_from_dict(data.get("r2_trigger")),
             left_stick=_stick_from_dict(data.get("left_stick")),
             right_stick=_stick_from_dict(data.get("right_stick")),
+            button_configs=_button_configs_from_dict(data.get("button_configs")),
             battery_alert=_battery_alert_from_dict(data.get("battery_alert")),
             shift_layer=_shift_layer_from_dict(data.get("shift_layer")),
             auto_reconnect_enabled=bool(data.get("auto_reconnect_enabled", True)),
             ab_compare_enabled=bool(data.get("ab_compare_enabled", False)),
             ab_compare_button=int(data.get("ab_compare_button", -1)),
             ab_b_preset_slug=data.get("ab_b_preset_slug") or None,
+            always_background_on_launch=bool(data.get("always_background_on_launch", False)),
         )
 
 
@@ -388,12 +444,54 @@ def _trigger_from_dict(d: Optional[dict]) -> TriggerConfig:
         latch_threshold=max(0.0, min(1.0, float(d.get("latch_threshold", 0.5)))),
         gate_button=gate_button,
         gate_release_value=max(0, min(127, int(d.get("gate_release_value", 0)))),
+        tactile_click=bool(d.get("tactile_click", True)),
     )
+
+
+def _button_config_from_dict(d: Optional[dict]) -> ButtonConfig:
+    """Hydrate a ButtonConfig from raw dict."""
+    if not d:
+        return ButtonConfig()
+    raw_gate = d.get("gate_button")
+    gate_button: Optional[int] = None
+    if raw_gate is not None:
+        try:
+            gate_button = int(raw_gate)
+            if gate_button < 0:
+                gate_button = None
+        except (TypeError, ValueError):
+            gate_button = None
+    return ButtonConfig(
+        gate_button=gate_button,
+        gate_release_value=max(0, min(127, int(d.get("gate_release_value", 0)))),
+    )
+
+
+def _button_configs_from_dict(d: Optional[dict]) -> Dict[int, ButtonConfig]:
+    """Hydrate the sparse button_configs dict from raw JSON.
+
+    d should be a dict with string keys (button indices) mapping to
+    ButtonConfig dicts. Returns a dict with int keys.
+    """
+    if not d:
+        return {}
+    result: Dict[int, ButtonConfig] = {}
+    for str_idx, cfg_dict in d.items():
+        try:
+            idx = int(str_idx)
+            if isinstance(cfg_dict, dict):
+                result[idx] = _button_config_from_dict(cfg_dict)
+        except (TypeError, ValueError):
+            # Skip malformed entries
+            continue
+    return result
 
 
 def _corner_from_dict(d: Optional[dict]) -> CornerConfig:
     if not d:
         return CornerConfig()
+    scale_root = max(0, min(127, int(d.get("scale_root", 60))))
+    scale_name = str(d.get("scale_name", "major"))
     cfg = CornerConfig(
         enabled=bool(d.get("enabled", False)),
         n=int(d.get("n", 8)),
@@ -401,6 +499,9 @@ def _corner_from_dict(d: Optional[dict]) -> CornerConfig:
         r_enter=float(d.get("r_enter", 0.92)),
         r_exit=float(d.get("r_exit", 0.75)),
         corner_haptic_feedback=bool(d.get("corner_haptic_feedback", True)),
+        scale_quantize_enabled=bool(d.get("scale_quantize_enabled", False)),
+        scale_root=scale_root,
+        scale_name=scale_name,
     )
     cfg.ensure_notes()
     return cfg

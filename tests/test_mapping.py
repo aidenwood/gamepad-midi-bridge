@@ -5,6 +5,7 @@ import pytest
 
 from gamepad_midi_bridge.mapping import (
     BatteryAlertConfig,
+    ButtonConfig,
     CornerConfig,
     Mapping,
     OscConfig,
@@ -12,6 +13,7 @@ from gamepad_midi_bridge.mapping import (
     ShiftLayerConfig,
     StickConfig,
     TouchpadConfig,
+    TriggerConfig,
     _shift_layer_from_dict,
 )
 
@@ -456,6 +458,87 @@ def test_schema_version_unchanged():
     assert SCHEMA_VERSION == 4
 
 
+# ------------------------------------------------------------------ button config (feature #1)
+
+
+def test_button_config_defaults():
+    """ButtonConfig defaults to no gate."""
+    cfg = ButtonConfig()
+    assert cfg.gate_button is None
+    assert cfg.gate_release_value == 0
+
+
+def test_button_config_round_trip():
+    """ButtonConfig serializes and deserializes correctly."""
+    m = Mapping(name="ButtonGateTest")
+    m.button_configs = {
+        0: ButtonConfig(gate_button=4, gate_release_value=64),
+        2: ButtonConfig(gate_button=5),
+    }
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.button_configs[0].gate_button == 4
+    assert restored.button_configs[0].gate_release_value == 64
+    assert restored.button_configs[2].gate_button == 5
+    assert restored.button_configs[2].gate_release_value == 0
+
+
+def test_mapping_with_sparse_button_configs_round_trips():
+    """Sparse button_configs dict (only some buttons gated) round-trips correctly."""
+    m = Mapping(name="SparseButtonGates")
+    m.button_configs = {
+        1: ButtonConfig(gate_button=10),
+        3: ButtonConfig(gate_button=11, gate_release_value=32),
+    }
+    restored = Mapping.from_dict(m.to_dict())
+    assert len(restored.button_configs) == 2
+    assert 0 not in restored.button_configs
+    assert 1 in restored.button_configs
+    assert 3 in restored.button_configs
+    assert restored.button_configs[1].gate_button == 10
+    assert restored.button_configs[3].gate_release_value == 32
+
+
+# ------------------------------------------------------------------ trigger config tactile_click (feature #10)
+
+
+def test_trigger_config_tactile_click_defaults_true():
+    """TriggerConfig tactile_click defaults to True."""
+    cfg = TriggerConfig()
+    assert cfg.tactile_click is True
+
+
+def test_trigger_config_tactile_click_round_trip():
+    """TriggerConfig tactile_click field round-trips correctly."""
+    m = Mapping(name="TactileClickTest")
+    m.l2_trigger = TriggerConfig(mode="latch", tactile_click=False)
+    m.r2_trigger = TriggerConfig(mode="latch", tactile_click=True)
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.l2_trigger.tactile_click is False
+    assert restored.r2_trigger.tactile_click is True
+
+
+def test_v4_preset_without_button_configs_tactile_click_loads_with_defaults():
+    """V4 preset without button_configs and tactile_click loads cleanly with defaults."""
+    v4_dict = {
+        "name": "LegacyV4NoNewFields",
+        "schema_version": 4,
+        "buttons": {"0": 60},
+        "axes": {"0": 3},
+        # Missing: button_configs, l2_trigger/r2_trigger tactile_click
+    }
+    m = Mapping.from_dict(v4_dict)
+    # button_configs should default to empty dict
+    assert m.button_configs == {}
+    # tactile_click should default to True for both triggers
+    assert m.l2_trigger.tactile_click is True
+    assert m.r2_trigger.tactile_click is True
+
+
+def test_schema_version_still_4():
+    """Confirm SCHEMA_VERSION is still 4 after adding features #1 and #10."""
+    assert SCHEMA_VERSION == 4
+
+
 # ------------------------------------------------------------------ A/B compare
 
 
@@ -504,3 +587,69 @@ def test_ab_compare_none_slug_tolerates_cleanly():
     restored = Mapping.from_dict(m.to_dict())
     assert restored.ab_b_preset_slug is None
     assert restored.ab_compare_button == 3
+
+
+def test_per_control_channel_maps_round_trip():
+    """Per-control channel overrides serialize and deserialize correctly."""
+    m = Mapping(name="ChannelOverrides")
+    m.button_channels = {0: 3, 5: 7}
+    m.axis_channels = {1: 2, 4: 8}
+    m.hat_channels = {"up": 5, "left": 10}
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.button_channels == {0: 3, 5: 7}
+    assert restored.axis_channels == {1: 2, 4: 8}
+    assert restored.hat_channels == {"up": 5, "left": 10}
+
+
+def test_per_control_channels_default_to_global():
+    """When channel not in override map, should default to global."""
+    # This test exercises the bridge helpers directly
+    from gamepad_midi_bridge.bridge import BridgeWorker
+
+    worker = BridgeWorker(demo=True)
+    mapping = Mapping(midi_channel=2)
+    mapping.button_channels = {0: 5}  # Only button 0 overridden
+    
+    # Button 0 uses override
+    assert worker._channel_for_button(mapping, 0) == 5
+    # Button 1 not in override map, falls back to global
+    assert worker._channel_for_button(mapping, 1) == 2
+    
+    # Axes and hats behave similarly
+    mapping.axis_channels = {2: 10}
+    assert worker._channel_for_axis(mapping, 2) == 10
+    assert worker._channel_for_axis(mapping, 3) == 2
+    
+    mapping.hat_channels = {"up": 15}
+    assert worker._channel_for_hat(mapping, "up") == 15
+    assert worker._channel_for_hat(mapping, "down") == 2
+
+
+def test_per_control_channel_values_clamped_0_to_15():
+    """Channel values outside 0..15 are clamped on deserialization."""
+    v_dict = {
+        "name": "BadChannels",
+        "button_channels": {"0": -5, "1": 20},  # Should clamp to 0 and 15
+        "axis_channels": {"2": 99},  # Should clamp to 15
+        "hat_channels": {"up": -1},  # Should clamp to 0
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.button_channels[0] == 0
+    assert m.button_channels[1] == 15
+    assert m.axis_channels[2] == 15
+    assert m.hat_channels["up"] == 0
+
+
+def test_background_launch_config_round_trip():
+    """Background launch setting serializes and deserializes correctly."""
+    m = Mapping(name="BackgroundMode")
+    m.always_background_on_launch = True
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.always_background_on_launch is True
+
+    # Default is False
+    m2 = Mapping(name="Default")
+    restored2 = Mapping.from_dict(m2.to_dict())
+    assert restored2.always_background_on_launch is False

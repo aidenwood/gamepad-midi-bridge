@@ -59,7 +59,24 @@ def run(argv: Optional[List[str]] = None) -> int:
         app.setWindowIcon(QIcon(str(icon_path)))
 
     win = MainWindow()
-    win.show()
+
+    # Check for background/headless mode (feature #12)
+    import os
+    background_mode = os.environ.get("GMB_BACKGROUND") == "1"
+    if background_mode:
+        # Start bridge in background — check if tray is available
+        if hasattr(win, "_tray") and win._tray is not None:
+            win.hide()
+            win._on_start()  # Auto-start the bridge
+        else:
+            # Tray not available, show window anyway
+            import logging
+            logging.getLogger("app").warning(
+                "System tray not available; showing window instead of headless mode"
+            )
+            win.show()
+    else:
+        win.show()
 
     # Deep-link wiring — argv on Win/Linux, FileOpen event on macOS.
     for link in _extract_deep_links(argv):

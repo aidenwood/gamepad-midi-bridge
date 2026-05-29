@@ -17,6 +17,7 @@ from .. import presets as _presets
 
 from ..license import is_pro
 from ..mapping import L2_AXIS, R2_AXIS, STICK_AXES, Mapping
+from ..scales import SCALES
 from .pro_lock import ProLockOverlay
 
 
@@ -83,6 +84,12 @@ class MappingEditor(QWidget):
         self._ab_group = self._make_ab_group()
         v.addWidget(self._ab_group)
 
+        v.addWidget(self._section_label("CORNER SCALE QUANTIZE (Pro)"))
+        self._scale_group_left = self._make_scale_group("Left Stick", left=True)
+        v.addWidget(self._scale_group_left)
+        self._scale_group_right = self._make_scale_group("Right Stick", left=False)
+        v.addWidget(self._scale_group_right)
+
         self._stack.addWidget(content)
 
         self._lock = ProLockOverlay(
@@ -112,6 +119,8 @@ class MappingEditor(QWidget):
         self._refresh_tables()
         self._refresh_shift_group()
         self._refresh_ab_group()
+        self._refresh_scale_group(self._scale_group_left, left=True)
+        self._refresh_scale_group(self._scale_group_right, left=False)
         # Re-emit selection if a row was previously selected so the inspector refreshes.
         if self._last_selected_table is not None and self._last_selected_kind is not None:
             self._emit_selection(self._last_selected_table, self._last_selected_kind)
@@ -245,6 +254,84 @@ class MappingEditor(QWidget):
     def _on_ab_preset_changed(self, _index: int) -> None:
         slug = self._ab_preset_combo.currentData()
         self._mapping.ab_b_preset_slug = slug or None
+        self.mapping_changed.emit()
+
+    # ---------------------------------------------------------------- scale quantize
+
+    def _make_scale_group(self, title: str, left: bool) -> QGroupBox:
+        """Build the Scale Quantize inline form group for one stick."""
+        box = QGroupBox(title)
+        box.setFlat(True)
+        form = QFormLayout(box)
+        form.setContentsMargins(0, 4, 0, 4)
+        form.setSpacing(6)
+
+        cfg = self._mapping.left_stick_corners if left else self._mapping.right_stick_corners
+
+        enabled_cb = QCheckBox()
+        enabled_cb.setChecked(cfg.scale_quantize_enabled)
+        enabled_cb.toggled.connect(lambda v, l=left: self._on_scale_enabled(v, l))
+        form.addRow("Scale Quantize", enabled_cb)
+
+        root_spin = QSpinBox()
+        root_spin.setRange(0, 127)
+        root_spin.setValue(cfg.scale_root)
+        root_spin.setToolTip("Root note (0=C-1 … 60=C4 … 127=G9)")
+        root_spin.valueChanged.connect(lambda v, l=left: self._on_scale_root(v, l))
+        form.addRow("Root Note", root_spin)
+
+        scale_combo = QComboBox()
+        for name in sorted(SCALES.keys()):
+            scale_combo.addItem(name, name)
+        current_idx = scale_combo.findData(cfg.scale_name)
+        scale_combo.setCurrentIndex(max(0, current_idx))
+        scale_combo.currentIndexChanged.connect(lambda _i, l=left, c=scale_combo: self._on_scale_name(c.currentData(), l))
+        form.addRow("Scale", scale_combo)
+
+        hint = QLabel("Sectors play scale degrees in ascending pitch; wraps at octave boundary")
+        hint.setStyleSheet("color: #8a9099; font-size: 11px;")
+        hint.setWordWrap(True)
+        form.addRow(hint)
+
+        # Stash widget refs so _refresh can update them.
+        box.setProperty("_sq_enabled_cb", enabled_cb)
+        box.setProperty("_sq_root_spin", root_spin)
+        box.setProperty("_sq_scale_combo", scale_combo)
+        box.setProperty("_sq_left", left)
+        return box
+
+    def _refresh_scale_group(self, box: QGroupBox, left: bool) -> None:
+        """Sync scale quantize widgets to the current mapping."""
+        cfg = self._mapping.left_stick_corners if left else self._mapping.right_stick_corners
+        enabled_cb: QCheckBox = box.property("_sq_enabled_cb")
+        root_spin: QSpinBox = box.property("_sq_root_spin")
+        scale_combo: QComboBox = box.property("_sq_scale_combo")
+        if enabled_cb is None or root_spin is None or scale_combo is None:
+            return
+        enabled_cb.blockSignals(True)
+        root_spin.blockSignals(True)
+        scale_combo.blockSignals(True)
+        enabled_cb.setChecked(cfg.scale_quantize_enabled)
+        root_spin.setValue(cfg.scale_root)
+        idx = scale_combo.findData(cfg.scale_name)
+        scale_combo.setCurrentIndex(max(0, idx))
+        enabled_cb.blockSignals(False)
+        root_spin.blockSignals(False)
+        scale_combo.blockSignals(False)
+
+    def _on_scale_enabled(self, value: bool, left: bool) -> None:
+        cfg = self._mapping.left_stick_corners if left else self._mapping.right_stick_corners
+        cfg.scale_quantize_enabled = value
+        self.mapping_changed.emit()
+
+    def _on_scale_root(self, value: int, left: bool) -> None:
+        cfg = self._mapping.left_stick_corners if left else self._mapping.right_stick_corners
+        cfg.scale_root = max(0, min(127, value))
+        self.mapping_changed.emit()
+
+    def _on_scale_name(self, name: str, left: bool) -> None:
+        cfg = self._mapping.left_stick_corners if left else self._mapping.right_stick_corners
+        cfg.scale_name = name or "major"
         self.mapping_changed.emit()
 
     def _section_label(self, text: str) -> QLabel:

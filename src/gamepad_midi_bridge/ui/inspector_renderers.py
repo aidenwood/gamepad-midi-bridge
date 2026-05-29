@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..shaping import TRIGGER_MODES
+from .curve_sparkline import CurveSparkline
 
 # Curves shared by StickConfig and TouchpadConfig
 _CURVES = ("linear", "exponential", "logarithmic", "s-curve")
@@ -172,6 +173,19 @@ def _spinbox_row(label: str, sb: QWidget) -> QWidget:
     return row
 
 
+def _sparkline_row(sparkline: "CurveSparkline", label: str = "Preview") -> QWidget:
+    """Embed a CurveSparkline with a small label to its left."""
+    row = QWidget()
+    h = QHBoxLayout(row)
+    h.setContentsMargins(0, 4, 0, 4)
+    h.setSpacing(6)
+    lbl = _row_label(label)
+    h.addWidget(lbl)
+    h.addStretch(1)
+    h.addWidget(sparkline)
+    return row
+
+
 # ──────────────────────────────────────────────────────────────────── renderers
 
 def render_trigger_editor(payload: dict) -> QWidget:
@@ -236,11 +250,21 @@ def render_trigger_editor(payload: dict) -> QWidget:
         lambda val: latch_val.setText(f"{val / 100:.2f}")
     )
 
+    # ── sparkline (trigger mode preview) ──
+    # Trigger uses mode-based shaping, not apply_stick_shape.  We show a plain
+    # apply_curve preview so the user gets visual feedback when they switch modes.
+    # For "latch" (toggle, no continuous curve) we hide the sparkline.
+    trig_sparkline = CurveSparkline()
+    trig_sparkline.set_params(mode="trigger")
+    trig_sparkline_row = _sparkline_row(trig_sparkline)
+    trig_sparkline_row.setVisible(cfg.mode != "latch")
+
     # Enable/disable dependent sliders when mode changes
     def _on_mode_change(text: str) -> None:
         setattr(cfg, "mode", text)
         ceil_slider.setEnabled(text == "ceiling")
         latch_slider.setEnabled(text == "latch")
+        trig_sparkline_row.setVisible(text != "latch")
         if on_change:
             on_change()
 
@@ -254,6 +278,7 @@ def render_trigger_editor(payload: dict) -> QWidget:
     v.addWidget(_combo_row("Mode", mode_cb))
     v.addWidget(ceil_row)
     v.addWidget(latch_row)
+    v.addWidget(trig_sparkline_row)
 
     # ── gate ──
     v.addWidget(_divider())
@@ -321,6 +346,7 @@ def render_stick_editor(payload: dict) -> QWidget:
     dz_init = int(round(cfg.inner_deadzone * 100))
     def _on_dz(val: int) -> None:
         setattr(cfg, "inner_deadzone", val / 100.0)
+        stick_sparkline.set_params(inner_deadzone=val / 100.0)
         if on_change:
             on_change()
     dz_slider = _make_float_slider(0, 50, dz_init, _on_dz)
@@ -331,6 +357,7 @@ def render_stick_editor(payload: dict) -> QWidget:
     oc_init = int(round(cfg.outer_clamp * 100))
     def _on_oc(val: int) -> None:
         setattr(cfg, "outer_clamp", val / 100.0)
+        stick_sparkline.set_params(outer_clamp=val / 100.0)
         if on_change:
             on_change()
     oc_slider = _make_float_slider(0, 50, oc_init, _on_oc)
@@ -342,8 +369,20 @@ def render_stick_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
     v.addWidget(_section("RESPONSE CURVE"))
 
+    # Sparkline lives here, between section header and controls.
+    stick_sparkline = CurveSparkline()
+    stick_sparkline.set_params(
+        inner_deadzone=cfg.inner_deadzone,
+        outer_clamp=cfg.outer_clamp,
+        curve=cfg.curve,
+        curve_amount=cfg.curve_amount,
+        mode="stick",
+    )
+    v.addWidget(_sparkline_row(stick_sparkline))
+
     def _on_curve(t: str) -> None:
         setattr(cfg, "curve", t)
+        stick_sparkline.set_params(curve=t)
         if on_change:
             on_change()
     curve_cb = _make_combo(_CURVES, cfg.curve, _on_curve)
@@ -352,6 +391,7 @@ def render_stick_editor(payload: dict) -> QWidget:
     ca_init = int(round(cfg.curve_amount * 100))
     def _on_ca(val: int) -> None:
         setattr(cfg, "curve_amount", val / 100.0)
+        stick_sparkline.set_params(curve_amount=val / 100.0)
         if on_change:
             on_change()
     ca_slider = _make_float_slider(0, 100, ca_init, _on_ca)
@@ -464,8 +504,13 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
     v.addWidget(_section("X AXIS CURVE"))
 
+    x_sparkline = CurveSparkline()
+    x_sparkline.set_params(curve=cfg.x_curve, curve_amount=cfg.x_curve_amount, mode="trigger")
+    v.addWidget(_sparkline_row(x_sparkline, "X preview"))
+
     def _on_xcurve(t: str) -> None:
         setattr(cfg, "x_curve", t)
+        x_sparkline.set_params(curve=t)
         if on_change:
             on_change()
     xcurve_cb = _make_combo(_CURVES, cfg.x_curve, _on_xcurve)
@@ -474,6 +519,7 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     xca_init = int(round(cfg.x_curve_amount * 100))
     def _on_xca(val: int) -> None:
         setattr(cfg, "x_curve_amount", val / 100.0)
+        x_sparkline.set_params(curve_amount=val / 100.0)
         if on_change:
             on_change()
     xca_slider = _make_float_slider(0, 100, xca_init, _on_xca)
@@ -485,8 +531,13 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
     v.addWidget(_section("Y AXIS CURVE"))
 
+    y_sparkline = CurveSparkline()
+    y_sparkline.set_params(curve=cfg.y_curve, curve_amount=cfg.y_curve_amount, mode="trigger")
+    v.addWidget(_sparkline_row(y_sparkline, "Y preview"))
+
     def _on_ycurve(t: str) -> None:
         setattr(cfg, "y_curve", t)
+        y_sparkline.set_params(curve=t)
         if on_change:
             on_change()
     ycurve_cb = _make_combo(_CURVES, cfg.y_curve, _on_ycurve)
@@ -495,6 +546,7 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     yca_init = int(round(cfg.y_curve_amount * 100))
     def _on_yca(val: int) -> None:
         setattr(cfg, "y_curve_amount", val / 100.0)
+        y_sparkline.set_params(curve_amount=val / 100.0)
         if on_change:
             on_change()
     yca_slider = _make_float_slider(0, 100, yca_init, _on_yca)
