@@ -205,9 +205,13 @@ class HapticInputConfig:
     trigger effect, intensity scaled by velocity (notes) or value (CCs).
 
     `listen_channel = -1` means "every channel" — set to 0..15 to filter.
+    
+    `guard_feedback_loop=True` detects when the DAW echoes our outbound CCs
+    back and drops them to prevent feedback loops.
     """
     enabled: bool = False
     listen_channel: int = -1
+    guard_feedback_loop: bool = True
     bindings: List[HapticInputBinding] = field(
         default_factory=lambda: list(_DEFAULT_HAPTIC_BINDINGS)
     )
@@ -317,6 +321,14 @@ class Mapping:
     # Disabled by default so existing presets are completely unaffected.
     shift_layer: ShiftLayerConfig = field(default_factory=ShiftLayerConfig)
 
+    # A/B Compare — hold ab_compare_button (or keyboard Tab) to hot-swap to
+    # a completely different preset for the held duration, then snap back.
+    # Unlike shift-layer (partial overlay), this swaps the WHOLE mapping.
+    # Disabled by default; ab_compare_button=-1 means unset.
+    ab_compare_enabled: bool = False
+    ab_compare_button: int = -1          # -1 = unset, otherwise button index
+    ab_b_preset_slug: Optional[str] = None  # slug of the B preset to load
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -351,6 +363,9 @@ class Mapping:
             battery_alert=_battery_alert_from_dict(data.get("battery_alert")),
             shift_layer=_shift_layer_from_dict(data.get("shift_layer")),
             auto_reconnect_enabled=bool(data.get("auto_reconnect_enabled", True)),
+            ab_compare_enabled=bool(data.get("ab_compare_enabled", False)),
+            ab_compare_button=int(data.get("ab_compare_button", -1)),
+            ab_b_preset_slug=data.get("ab_b_preset_slug") or None,
         )
 
 

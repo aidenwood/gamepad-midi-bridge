@@ -8,9 +8,12 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QFormLayout, QGroupBox, QHeaderView, QLabel, QSpinBox,
-    QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFormLayout, QGroupBox, QHeaderView, QLabel, QPushButton,
+    QSpinBox, QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QWidget,
 )
+
+from .. import presets as _presets
 
 from ..license import is_pro
 from ..mapping import L2_AXIS, R2_AXIS, STICK_AXES, Mapping
@@ -31,6 +34,7 @@ class MappingEditor(QWidget):
     def __init__(self, mapping: Mapping, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._mapping = mapping
+        self._worker = None  # set via set_worker() after construction
         # Track the last selected (table, kind) so set_mapping can re-emit selection.
         self._last_selected_table: Optional[QTableWidget] = None
         self._last_selected_kind: Optional[str] = None
@@ -44,21 +48,21 @@ class MappingEditor(QWidget):
         v.setSpacing(12)
 
         v.addWidget(self._section_label("BUTTONS → NOTES"))
-        self._buttons_table = self._make_table(["Button #", "MIDI Note"])
+        self._buttons_table = self._make_table(["Button #", "MIDI Note"], capture_kind="button")
         self._buttons_table.itemSelectionChanged.connect(
             lambda: self._emit_selection(self._buttons_table, "button")
         )
         v.addWidget(self._buttons_table)
 
         v.addWidget(self._section_label("AXES → CC"))
-        self._axes_table = self._make_table(["Axis #", "MIDI CC"])
+        self._axes_table = self._make_table(["Axis #", "MIDI CC"], capture_kind="axis")
         self._axes_table.itemSelectionChanged.connect(
             lambda: self._emit_selection(self._axes_table, "axis")
         )
         v.addWidget(self._axes_table)
 
         v.addWidget(self._section_label("D-PAD → NOTES"))
-        self._hats_table = self._make_table(["Direction", "MIDI Note"])
+        self._hats_table = self._make_table(["Direction", "MIDI Note"], capture_kind="hat")
         self._hats_table.itemSelectionChanged.connect(
             lambda: self._emit_selection(self._hats_table, "hat")
         )
@@ -74,6 +78,10 @@ class MappingEditor(QWidget):
         v.addWidget(self._section_label("SHIFT LAYER (Pro)"))
         self._shift_group = self._make_shift_group()
         v.addWidget(self._shift_group)
+
+        v.addWidget(self._section_label("A/B COMPARE"))
+        self._ab_group = self._make_ab_group()
+        v.addWidget(self._ab_group)
 
         self._stack.addWidget(content)
 
@@ -92,10 +100,18 @@ class MappingEditor(QWidget):
 
     # ------------------------------------------------------------------ public
 
+    def set_worker(self, worker) -> None:
+        """Provide a reference to the running BridgeWorker so the Capture
+        buttons can listen to controller events.  Safe to call before or after
+        construction; ``None`` is accepted (Capture buttons will open the dialog
+        but never auto-confirm)."""
+        self._worker = worker
+
     def set_mapping(self, mapping: Mapping) -> None:
         self._mapping = mapping
         self._refresh_tables()
         self._refresh_shift_group()
+        self._refresh_ab_group()
         # Re-emit selection if a row was previously selected so the inspector refreshes.
         if self._last_selected_table is not None and self._last_selected_kind is not None:
             self._emit_selection(self._last_selected_table, self._last_selected_kind)
@@ -154,6 +170,83 @@ class MappingEditor(QWidget):
         self._mapping.shift_layer.shift_button = value
         self.mapping_changed.emit()
 
+    # ---------------------------------------------------------------- A/B compare
+
+    def _make_ab_group(self) -> QGroupBox:
+        """Build the A/B Compare inline form group."""
+        box = QGroupBox()
+        box.setFlat(True)
+        form = QFormLayout(box)
+        form.setContentsMargins(0, 4, 0, 4)
+        form.setSpacing(6)
+
+        m = self._mapping
+
+        self._ab_enabled_cb = QCheckBox()
+        self._ab_enabled_cb.setChecked(m.ab_compare_enabled)
+        self._ab_enabled_cb.toggled.connect(self._on_ab_enabled_changed)
+        form.addRow("Enabled", self._ab_enabled_cb)
+
+        self._ab_button_spin = QSpinBox()
+        self._ab_button_spin.setRange(-1, 31)
+        self._ab_button_spin.setSpecialValueText("(unset)")
+        self._ab_button_spin.setValue(m.ab_compare_button)
+        self._ab_button_spin.valueChanged.connect(self._on_ab_button_changed)
+        form.addRow("B Button", self._ab_button_spin)
+
+        self._ab_preset_combo = QComboBox()
+        self._ab_preset_combo.addItem("(none)", None)
+        for slug in _presets.list_presets():
+            self._ab_preset_combo.addItem(slug, slug)
+        current_slug = m.ab_b_preset_slug or ""
+        idx = self._ab_preset_combo.findData(current_slug) if current_slug else 0
+        self._ab_preset_combo.setCurrentIndex(max(0, idx))
+        self._ab_preset_combo.currentIndexChanged.connect(self._on_ab_preset_changed)
+        form.addRow("B Preset", self._ab_preset_combo)
+
+        hint = QLabel("Hold B button to swap to the B preset; release to return to A")
+        hint.setStyleSheet("color: #8a9099; font-size: 11px;")
+        hint.setWordWrap(True)
+        form.addRow(hint)
+
+        return box
+
+    def _refresh_ab_group(self) -> None:
+        """Sync A/B Compare widgets to the current mapping (called on set_mapping)."""
+        m = self._mapping
+        self._ab_enabled_cb.blockSignals(True)
+        self._ab_button_spin.blockSignals(True)
+        self._ab_preset_combo.blockSignals(True)
+
+        self._ab_enabled_cb.setChecked(m.ab_compare_enabled)
+        self._ab_button_spin.setValue(m.ab_compare_button)
+
+        # Repopulate combo in case presets changed since widget was built.
+        self._ab_preset_combo.clear()
+        self._ab_preset_combo.addItem("(none)", None)
+        for slug in _presets.list_presets():
+            self._ab_preset_combo.addItem(slug, slug)
+        current_slug = m.ab_b_preset_slug or ""
+        idx = self._ab_preset_combo.findData(current_slug) if current_slug else 0
+        self._ab_preset_combo.setCurrentIndex(max(0, idx))
+
+        self._ab_enabled_cb.blockSignals(False)
+        self._ab_button_spin.blockSignals(False)
+        self._ab_preset_combo.blockSignals(False)
+
+    def _on_ab_enabled_changed(self, checked: bool) -> None:
+        self._mapping.ab_compare_enabled = checked
+        self.mapping_changed.emit()
+
+    def _on_ab_button_changed(self, value: int) -> None:
+        self._mapping.ab_compare_button = value
+        self.mapping_changed.emit()
+
+    def _on_ab_preset_changed(self, _index: int) -> None:
+        slug = self._ab_preset_combo.currentData()
+        self._mapping.ab_b_preset_slug = slug or None
+        self.mapping_changed.emit()
+
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setStyleSheet(
@@ -162,15 +255,27 @@ class MappingEditor(QWidget):
         )
         return lbl
 
-    def _make_table(self, headers: list) -> QTableWidget:
-        t = QTableWidget(0, len(headers))
-        t.setHorizontalHeaderLabels(headers)
-        t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    def _make_table(self, headers: list, capture_kind: str = "") -> QTableWidget:
+        # When capture_kind is given, add a read-only "Capture" column.
+        all_headers = headers + ["Capture"] if capture_kind else headers
+        t = QTableWidget(0, len(all_headers))
+        t.setHorizontalHeaderLabels(all_headers)
+        if capture_kind:
+            # Data columns stretch equally; capture column stays narrow.
+            hdr = t.horizontalHeader()
+            for col in range(len(headers)):
+                hdr.setSectionResizeMode(col, QHeaderView.Stretch)
+            hdr.setSectionResizeMode(len(headers), QHeaderView.ResizeToContents)
+        else:
+            t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         t.verticalHeader().setVisible(False)
         t.setAlternatingRowColors(False)
         t.setEditTriggers(QTableWidget.AllEditTriggers)
         t.setSelectionBehavior(QTableWidget.SelectRows)
         t.setShowGrid(False)
+        if capture_kind:
+            # Store kind on the widget so _fill can create the right buttons.
+            t.setProperty("capture_kind", capture_kind)
         return t
 
     def _refresh_tables(self) -> None:
@@ -182,6 +287,7 @@ class MappingEditor(QWidget):
         self._fill(self._touchpad_table, [("DualSense touchpad", tp_info)])
 
     def _fill(self, table: QTableWidget, rows: list) -> None:
+        capture_kind = table.property("capture_kind") or ""
         table.setRowCount(len(rows))
         for r, (a, b) in enumerate(rows):
             ai = QTableWidgetItem(a)
@@ -191,6 +297,56 @@ class MappingEditor(QWidget):
             bi = QTableWidgetItem(b)
             bi.setTextAlignment(Qt.AlignCenter)
             table.setItem(r, 1, bi)
+            if capture_kind:
+                btn = QPushButton("⊙")
+                btn.setToolTip("Press a controller input to assign this row")
+                btn.setFixedSize(28, 22)
+                btn.setStyleSheet(
+                    "QPushButton { font-size: 11px; padding: 0; border-radius: 4px; "
+                    "background: #1c1e25; color: #8a9099; border: 1px solid #2c313b; }"
+                    "QPushButton:hover { background: #252830; color: #f5f7fa; }"
+                )
+                btn.clicked.connect(
+                    lambda _checked, row=r, kind=capture_kind, tbl=table:
+                    self._on_capture_clicked(tbl, row, kind)
+                )
+                table.setCellWidget(r, 2, btn)
+
+    def _on_capture_clicked(self, table: QTableWidget, row: int, kind: str) -> None:
+        """Open CaptureDialog; on accept, update the row index and mapping dict."""
+        from .capture_dialog import CaptureDialog
+        dlg = CaptureDialog(self._worker, kind, parent=self)
+        if dlg.exec() != CaptureDialog.Accepted:
+            return
+        new_index = dlg.captured_index
+        if new_index is None:
+            return
+
+        item = table.item(row, 0)
+        if item is None:
+            return
+        old_index_str = item.text()
+        item.setText(str(new_index))
+
+        if kind == "button":
+            try:
+                old_key = int(old_index_str)
+            except (ValueError, TypeError):
+                return
+            value = self._mapping.buttons.pop(old_key, 0)
+            self._mapping.buttons[int(new_index)] = value
+        elif kind == "axis":
+            try:
+                old_key = int(old_index_str)
+            except (ValueError, TypeError):
+                return
+            value = self._mapping.axes.pop(old_key, 0)
+            self._mapping.axes[int(new_index)] = value
+        elif kind == "hat":
+            value = self._mapping.hats.pop(old_index_str, 0)
+            self._mapping.hats[str(new_index)] = value
+
+        self.mapping_changed.emit()
 
     def _emit_selection(self, table: QTableWidget, kind: str) -> None:
         """Forward a row-click into a selection payload the inspector can render.

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from .mapping import Mapping
 from .paths import presets_dir
@@ -42,6 +42,18 @@ def seed_user_presets_once() -> int:
 def list_presets() -> List[str]:
     d = presets_dir()
     return sorted(p.stem for p in d.glob("*.json"))
+
+
+def load_preset_by_slug(slug: str) -> Optional[Mapping]:
+    """Load a preset by slug (stem of its JSON filename). Returns None if not found."""
+    path = presets_dir() / f"{slug}.json"
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return Mapping.from_dict(json.load(f))
+    except Exception:
+        return None
 
 
 def load_preset(name: str) -> Mapping:

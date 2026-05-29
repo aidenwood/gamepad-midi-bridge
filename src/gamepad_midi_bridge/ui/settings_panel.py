@@ -20,6 +20,7 @@ from ..midi_input import INPUT_PORT_NAME
 from ..paths import config_path
 from ..updater import set_opt_in as set_update_opt_in
 from .. import telemetry
+from ..crash_reporter import export_bundle
 from .haptic_input_dialog import HapticInputDialog
 
 
@@ -283,6 +284,14 @@ class SettingsPanel(QWidget):
         row.addWidget(recalib)
         row.addStretch(1)
         calib_layout.addLayout(row)
+        
+        # Export crash bundle button
+        export_row = QHBoxLayout()
+        export_btn = QPushButton("Export crash bundle")
+        export_btn.clicked.connect(self._on_export_bundle)
+        export_row.addWidget(export_btn)
+        export_row.addStretch(1)
+        calib_layout.addLayout(export_row)
 
         outer.addWidget(midi_group)
         outer.addWidget(multi_group)
@@ -435,3 +444,21 @@ class SettingsPanel(QWidget):
         cfg.enabled = True
         cfg.n = {1: 4, 2: 8, 3: 16}[idx]
         cfg.ensure_notes()
+
+    def _on_export_bundle(self) -> None:
+        """Export a crash bundle and show confirmation."""
+        try:
+            bundle_path = export_bundle()
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Crash bundle exported",
+                f"Bundle saved to:\n{bundle_path}\n\nAttach this file to a bug report."
+            )
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Export failed",
+                f"Could not export crash bundle:\n{e}"
+            )

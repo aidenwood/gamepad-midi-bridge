@@ -454,3 +454,53 @@ def test_v4_preset_without_shift_layer_loads_cleanly():
 def test_schema_version_unchanged():
     """SCHEMA_VERSION is still 4 after adding shift layer."""
     assert SCHEMA_VERSION == 4
+
+
+# ------------------------------------------------------------------ A/B compare
+
+
+def test_ab_compare_defaults():
+    """A/B compare fields default to disabled/unset/no slug."""
+    m = Mapping()
+    assert m.ab_compare_enabled is False
+    assert m.ab_compare_button == -1
+    assert m.ab_b_preset_slug is None
+
+
+def test_ab_compare_round_trip():
+    """A/B compare fields round-trip through serialisation."""
+    m = Mapping(name="ABTest")
+    m.ab_compare_enabled = True
+    m.ab_compare_button = 6
+    m.ab_b_preset_slug = "my-b-preset"
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.ab_compare_enabled is True
+    assert restored.ab_compare_button == 6
+    assert restored.ab_b_preset_slug == "my-b-preset"
+
+
+def test_ab_compare_missing_fields_load_defaults():
+    """Preset without ab_compare keys loads cleanly with safe defaults."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "buttons": {"0": 60},
+        # Missing: ab_compare_enabled, ab_compare_button, ab_b_preset_slug
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.ab_compare_enabled is False
+    assert m.ab_compare_button == -1
+    assert m.ab_b_preset_slug is None
+
+
+def test_ab_compare_none_slug_tolerates_cleanly():
+    """Explicitly setting ab_b_preset_slug=None round-trips to None."""
+    m = Mapping(name="ABNoSlug")
+    m.ab_compare_enabled = True
+    m.ab_compare_button = 3
+    m.ab_b_preset_slug = None
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.ab_b_preset_slug is None
+    assert restored.ab_compare_button == 3

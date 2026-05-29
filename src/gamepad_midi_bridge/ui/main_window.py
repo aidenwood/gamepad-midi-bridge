@@ -681,6 +681,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._scrollable(self._visualise), "Visualise")
 
         self._mapping_editor = MappingEditor(self._mapping)
+        self._mapping_editor.set_worker(self._bridge.worker)
         self._mapping_editor.upgrade_clicked.connect(self._open_upgrade)
         self._mapping_editor.activate_clicked.connect(self._enter_license_key)
         # Forward row clicks into the right-hand inspector (Figma pattern).

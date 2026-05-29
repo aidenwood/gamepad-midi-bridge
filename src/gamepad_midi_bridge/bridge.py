@@ -12,8 +12,9 @@ from __future__ import annotations
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (
     QMetaObject, QObject, QThread, Q_ARG, Qt, Signal, Slot,
@@ -27,6 +28,7 @@ from .corner_quantizer import CornerDetector, decode_switch
 from .mapping import HapticInputBinding, L2_AXIS, Mapping, R2_AXIS, STICK_AXES
 from . import shaping
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
+from . import presets as _presets
 from .midi_input import (
     INPUT_PORT_NAME, MidiInputError, OpenedInputPort,
     close_input_port, open_input_port, set_callback as set_input_callback,
@@ -150,11 +152,19 @@ class BridgeWorker(QObject):
         # Battery + touchpad poll less often — they don't need 100Hz
         self._last_battery_poll: float = 0.0
         self._battery_interval = 5.0
+        # A/B compare state — B preset loaded once per set_mapping call.
+        self._b_mapping: Optional[Mapping] = None
+        self._ab_b_active: bool = False
+        # Feedback-loop guard: track recent outbound CC messages to detect echoes
+        # Deque of (channel, cc_number, value, timestamp) tuples, max 50 entries
+        self._recent_outbound_cc: deque = deque(maxlen=50)
+        self._feedback_guard_window_ms = 50  # Drop messages within 50ms of send
 
     # ---------------------------------------------------------------- public API
 
     def set_mapping(self, mapping: Mapping) -> None:
         self._state.mapping = mapping
+        self._cache_b_mapping(mapping)
         self._sync_corner_detectors()
         self._apply_haptics()
         self._sync_osc_sender()
@@ -236,6 +246,36 @@ class BridgeWorker(QObject):
                 self._mac_haptic_handle = _mac_haptics.MacHapticsHandle.open()
             except Exception as e:
                 self.status.emit(f"macOS haptics unavailable: {e}")
+
+    # ---------------------------------------------------------- A/B compare
+
+    def _cache_b_mapping(self, mapping: Mapping) -> None:
+        """Load and cache the B preset whenever the base mapping changes.
+
+        Called by set_mapping so the hot path (_active_mapping) never does I/O.
+        If ab_b_preset_slug is unset or the file doesn't exist, _b_mapping stays
+        None and A/B compare silently no-ops even if the button is pressed.
+        """
+        slug = mapping.ab_b_preset_slug
+        if slug:
+            self._b_mapping = _presets.load_preset_by_slug(slug)
+        else:
+            self._b_mapping = None
+
+    def _active_mapping(self) -> Mapping:
+        """Return the mapping currently active in the poll loop.
+
+        Returns the B preset when A/B compare is enabled, the designated button
+        is held, and the B preset was successfully loaded. Otherwise the base
+        mapping is returned unchanged — zero overhead when the feature is off.
+        """
+        m = self._state.mapping
+        if (m.ab_compare_enabled
+                and m.ab_compare_button >= 0
+                and self._ab_b_active
+                and self._b_mapping is not None):
+            return self._b_mapping
+        return m
 
     def _sync_osc_sender(self) -> None:
         """Open or close the OSC UDP sender to match the mapping's OscConfig."""
@@ -383,10 +423,39 @@ class BridgeWorker(QObject):
             self._dispatch_haptic("note", int(message[1]),
                                   int(message[2]) / 127.0)
         elif msg_type == 0xB0 and len(message) >= 3:
-            self._dispatch_haptic("cc", int(message[1]),
-                                  int(message[2]) / 127.0)
+            cc_num = int(message[1])
+            cc_val = int(message[2])
+            # Check feedback loop guard if enabled
+            if self._state.mapping.haptic_input.guard_feedback_loop:
+                if self._recently_sent(channel, cc_num, cc_val):
+                    # This CC was just sent by us — drop it to avoid feedback
+                    import logging
+                    logging.debug(f"Dropped feedback echo: ch={channel} cc={cc_num} val={cc_val}")
+                    return
+            self._dispatch_haptic("cc", cc_num, cc_val / 127.0)
         # NOTE_OFF, polyphonic aftertouch, program change, etc. are no-ops —
         # haptics naturally decay (we revert after _HAPTIC_PULSE_MS).
+
+    def _recently_sent(self, channel: int, cc_number: int, value: int, window_ms: Optional[int] = None) -> bool:
+        """Check if this (channel, cc_number, value) was sent recently.
+        
+        Returns True if found within the window, False otherwise.
+        Window defaults to _feedback_guard_window_ms (50ms).
+        """
+        if window_ms is None:
+            window_ms = self._feedback_guard_window_ms
+        now_ms = time.time() * 1000.0
+        for ch, cc, val, ts_ms in self._recent_outbound_cc:
+            if now_ms - ts_ms > window_ms:
+                continue
+            if ch == channel and cc == cc_number and val == value:
+                return True
+        return False
+
+    def _record_outbound_cc(self, channel: int, cc_number: int, value: int) -> None:
+        """Record an outbound CC send for feedback-loop detection."""
+        ts_ms = time.time() * 1000.0
+        self._recent_outbound_cc.append((channel, cc_number, value, ts_ms))
 
     def _dispatch_haptic(self, source: str, midi_id: int, normalized: float) -> None:
         """Match an incoming MIDI value against every binding and fire."""
@@ -462,15 +531,18 @@ class BridgeWorker(QObject):
         if reader is None or midi is None:
             return
 
-        mapping = self._state.mapping
+        base_mapping = self._state.mapping
         offsets = self._state.stick_offsets
-        deadzone = mapping.deadzone
-        channel = mapping.midi_channel & 0x0F
+
+        # Derive loop constants from the base mapping (channel / hz never
+        # change mid-performance; if user saves a different channel they'll
+        # restart the bridge anyway).
+        channel = base_mapping.midi_channel & 0x0F
         note_on = 0x90 | channel
         note_off = 0x80 | channel
         cc = 0xB0 | channel
 
-        interval = 1.0 / max(mapping.poll_hz, 1)
+        interval = 1.0 / max(base_mapping.poll_hz, 1)
         n_buttons = reader.num_buttons()
         n_axes = reader.num_axes()
         n_hats = reader.num_hats()
@@ -479,6 +551,17 @@ class BridgeWorker(QObject):
             while self._running:
                 t0 = time.perf_counter()
                 reader.pump()
+
+                # Refresh base mapping reference in case set_mapping was called
+                # between ticks (e.g. user saved edits while bridge was running).
+                base_mapping = self._state.mapping
+
+                # A/B compare — track button edge and update _ab_b_active.
+                self._update_ab_state(reader, base_mapping, n_buttons)
+
+                # Active mapping: B preset when A/B button held, else base.
+                mapping = self._active_mapping()
+                deadzone = mapping.deadzone
 
                 self._poll_buttons(reader, mapping, midi, note_on, note_off, n_buttons)
                 self._poll_axes(reader, mapping, offsets, deadzone, midi, cc, n_axes)
@@ -500,6 +583,28 @@ class BridgeWorker(QObject):
             self.status.emit("Stopped")
 
     # ---------------------------------------------------------- inner-loop chunks
+
+    def _update_ab_state(self, reader, base_mapping: Mapping, n_buttons: int) -> None:
+        """Track A/B compare button edge and update _ab_b_active.
+
+        Only runs when the feature is enabled and a valid button is configured.
+        Logs once on each A→B and B→A transition so the operator can see it.
+        """
+        m = base_mapping
+        if not m.ab_compare_enabled or m.ab_compare_button < 0 or self._b_mapping is None:
+            if self._ab_b_active:
+                self._ab_b_active = False
+            return
+        btn = m.ab_compare_button
+        if btn >= n_buttons:
+            return
+        held = bool(reader.get_button(btn))
+        if held and not self._ab_b_active:
+            self._ab_b_active = True
+            self.status.emit(f"A/B: swapped to B preset '{m.ab_b_preset_slug}'")
+        elif not held and self._ab_b_active:
+            self._ab_b_active = False
+            self.status.emit("A/B: back to A preset")
 
     def _active_mappings_view(self, mapping):
         """Return (buttons, axes, hats) dicts with the shift overlay merged in.
@@ -600,6 +705,7 @@ class BridgeWorker(QObject):
             if self._prev_cc.get(axis_idx) != val:
                 if not osc_only:
                     midi.port.send_message([cc, cc_num, val])
+                    self._record_outbound_cc(mapping.midi_channel, cc_num, val)
                     self.midi_sent.emit()
                 # OSC sends a 0..1 float, MIDI a 0..127 int — keep both
                 # streams in lock-step but de-dup against last-sent 0..127.
@@ -645,11 +751,13 @@ class BridgeWorker(QObject):
             if self._prev_cc.get(angle_key) != angle_cc_val:
                 if not osc_only:
                     midi.port.send_message([cc, stick_cfg.polar_angle_cc, angle_cc_val])
+                    self._record_outbound_cc(mapping.midi_channel, stick_cfg.polar_angle_cc, angle_cc_val)
                     self.midi_sent.emit()
                 self._prev_cc[angle_key] = angle_cc_val
             if self._prev_cc.get(mag_key) != mag_cc_val:
                 if not osc_only:
                     midi.port.send_message([cc, stick_cfg.polar_mag_cc, mag_cc_val])
+                    self._record_outbound_cc(mapping.midi_channel, stick_cfg.polar_mag_cc, mag_cc_val)
                     self.midi_sent.emit()
                 self._prev_cc[mag_key] = mag_cc_val
 
