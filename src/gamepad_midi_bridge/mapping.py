@@ -142,6 +142,36 @@ class ButtonConfig:
 
 
 @dataclass
+class StickLfoConfig:
+    """Per-axis free-running LFO modulator.
+
+    When enabled the LFO drives the CC autonomously at rest. When the user
+    moves the stick the user value is combined with the LFO according to
+    blend_mode.
+
+    Fields:
+      - `enabled`           : master switch (default False — no LFO).
+      - `waveform`          : "sine" | "triangle" | "square" | "saw" | "random".
+                              Unknown values fall back to "sine".
+      - `rate_hz`           : LFO frequency in Hz (0.01..20).
+      - `depth`             : blend factor 0..1. Scales the LFO contribution.
+      - `phase_lock_to_bpm` : if True, rate = mapping.midi_clock.bpm / 60 * subdivision.
+                              subdivision is expressed as a beat fraction (e.g. 1.0 = quarter).
+      - `blend_mode`        : how user input and LFO combine.
+                              "add"      — lfo*depth + user (clips to ±1).
+                              "replace"  — lfo*depth when user is near 0, user otherwise.
+                              "multiply" — user * (1 + lfo*depth - 0.5).
+                              Unknown values fall back to "add".
+    """
+    enabled: bool = False
+    waveform: str = "sine"       # "sine" | "triangle" | "square" | "saw" | "random"
+    rate_hz: float = 0.5         # 0.01..20
+    depth: float = 0.5           # 0..1
+    phase_lock_to_bpm: bool = False
+    blend_mode: str = "add"      # "add" | "replace" | "multiply"
+
+
+@dataclass
 class StickConfig:
     """Per-stick shaping config (left or right).
 
@@ -177,6 +207,8 @@ class StickConfig:
     random_mod_cc: int = 16
     random_mod_rate_hz: float = 2.0
     random_mod_smoothing_ms: int = 200
+    # LFO modulator — free-running waveform added to / replacing user input.
+    lfo: StickLfoConfig = field(default_factory=StickLfoConfig)
 
 
 @dataclass
@@ -598,6 +630,30 @@ class TouchpadConfig:
 
 
 @dataclass
+class PatternRecorderConfig:
+    """Configuration for the pattern/loop recorder.
+
+    Different from the Macro recorder: patterns play continuously at a fixed
+    length while held, and the user can overdub new events on top while the
+    loop runs.
+
+    Fields:
+      - ``enabled``           : master switch (default False).
+      - ``record_button``     : hold to record. -1 = unset.
+      - ``overdub_button``    : hold while loop is playing to layer new events.
+      - ``cancel_button``     : press to stop the running loop. -1 = unset.
+      - ``loop_length_bars``  : loop length in bars (default 1).
+      - ``quantize_to_grid``  : snap recorded events to the 1/16 grid.
+    """
+    enabled: bool = False
+    record_button: int = -1
+    overdub_button: int = -1
+    cancel_button: int = -1
+    loop_length_bars: int = 1
+    quantize_to_grid: bool = True
+
+
+@dataclass
 class Midi2Config:
     """MIDI 2.0 / Universal MIDI Packet (UMP) emission config.
 
@@ -761,6 +817,10 @@ class Mapping:
     # continue to emit standard MIDI 1.0 without any change.
     midi2: Midi2Config = field(default_factory=Midi2Config)
 
+    # Pattern recorder — loop-based recording with overdub. Disabled by default
+    # so existing presets are completely unaffected. Additive-only schema field.
+    pattern_recorder: PatternRecorderConfig = field(default_factory=PatternRecorderConfig)
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -829,6 +889,7 @@ class Mapping:
             color_tag=color_tag,
             favourite=bool(data.get("favourite", False)),
             midi2=_midi2_from_dict(data.get("midi2")),
+            pattern_recorder=_pattern_recorder_from_dict(data.get("pattern_recorder")),
         )
 
 
@@ -1072,6 +1133,28 @@ def _touchpad_from_dict(d: Optional[dict]) -> TouchpadConfig:
     )
 
 
+def _stick_lfo_from_dict(d: Optional[dict]) -> "StickLfoConfig":
+    """Hydrate a StickLfoConfig from raw dict, defaulting to disabled."""
+    if not d:
+        return StickLfoConfig()
+    allowed_waveforms = {"sine", "triangle", "square", "saw", "random"}
+    waveform = str(d.get("waveform", "sine"))
+    if waveform not in allowed_waveforms:
+        waveform = "sine"
+    allowed_blend = {"add", "replace", "multiply"}
+    blend_mode = str(d.get("blend_mode", "add"))
+    if blend_mode not in allowed_blend:
+        blend_mode = "add"
+    return StickLfoConfig(
+        enabled=bool(d.get("enabled", False)),
+        waveform=waveform,
+        rate_hz=max(0.01, min(20.0, float(d.get("rate_hz", 0.5)))),
+        depth=max(0.0, min(1.0, float(d.get("depth", 0.5)))),
+        phase_lock_to_bpm=bool(d.get("phase_lock_to_bpm", False)),
+        blend_mode=blend_mode,
+    )
+
+
 def _stick_from_dict(d: Optional[dict]) -> StickConfig:
     """Hydrate a StickConfig from raw dict, defaulting to legacy behaviour."""
     if not d:
@@ -1095,6 +1178,7 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
         random_mod_cc=max(0, min(127, int(d.get("random_mod_cc", 16)))),
         random_mod_rate_hz=max(0.01, float(d.get("random_mod_rate_hz", 2.0))),
         random_mod_smoothing_ms=max(0, int(d.get("random_mod_smoothing_ms", 200))),
+        lfo=_stick_lfo_from_dict(d.get("lfo")),
     )
 
 
@@ -1310,4 +1394,21 @@ def _midi2_from_dict(d: Optional[dict]) -> Midi2Config:
         enabled=bool(d.get("enabled", False)),
         group=max(0, min(15, int(d.get("group", 0)))),
         fallback_to_midi1=bool(d.get("fallback_to_midi1", True)),
+    )
+
+
+def _pattern_recorder_from_dict(d: Optional[dict]) -> "PatternRecorderConfig":
+    """Hydrate a PatternRecorderConfig from raw dict, defaulting to disabled.
+
+    Missing/None returns a default disabled config so old presets load cleanly.
+    """
+    if not d:
+        return PatternRecorderConfig()
+    return PatternRecorderConfig(
+        enabled=bool(d.get("enabled", False)),
+        record_button=int(d.get("record_button", -1)),
+        overdub_button=int(d.get("overdub_button", -1)),
+        cancel_button=int(d.get("cancel_button", -1)),
+        loop_length_bars=max(1, int(d.get("loop_length_bars", 1))),
+        quantize_to_grid=bool(d.get("quantize_to_grid", True)),
     )

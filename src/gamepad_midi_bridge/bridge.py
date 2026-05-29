@@ -25,8 +25,10 @@ from .calibration import calibrate
 from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
+from .mouse_controller import MouseControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, Midi2Config, MidiClockConfig, PassthroughConfig, QuantizeConfig, R2_AXIS, STICK_AXES, StickFlickConfig, TriggerAftertouchConfig
+from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, Midi2Config, MidiClockConfig, PassthroughConfig, PatternRecorderConfig, QuantizeConfig, R2_AXIS, STICK_AXES, StickFlickConfig, StickLfoConfig, TriggerAftertouchConfig
+from .pattern import PatternEngine, PatternState
 from . import midi2 as _midi2
 from .rtp_midi import RtpMidiSender
 from . import shaping
@@ -118,7 +120,8 @@ class BridgeWorker(QObject):
     def __init__(self, slot_index: int = 0,
                  midi_port_name: Optional[str] = None,
                  demo: bool = False,
-                 keyboard: bool = False) -> None:
+                 keyboard: bool = False,
+                 mouse: bool = False) -> None:
         """Multi-controller plumbing — slot_index picks which pygame joystick
         this worker binds to, and midi_port_name overrides the virtual port so
         two workers don't fight over a single "Universal Controller MIDI" port name.
@@ -132,6 +135,7 @@ class BridgeWorker(QObject):
         self._midi_port_name = midi_port_name or DEFAULT_PORT_NAME
         self._demo = bool(demo)
         self._keyboard = bool(keyboard)
+        self._mouse = bool(mouse)
         self._state = BridgeState()
         self._reader: Optional[ControllerReader] = None
         self._midi: Optional[OpenedPort] = None
@@ -206,6 +210,11 @@ class BridgeWorker(QObject):
         self._recording: bool = False
         self._recording_start_ms: float = 0.0
         self._recording_events: List[MacroEvent] = []
+        # Pattern recorder — loop engine (None = feature disabled / not yet started)
+        self._pattern_engine: Optional[PatternEngine] = None
+        self._pattern_rec_was_held: bool = False   # edge-detect for record_button
+        self._pattern_ovd_was_held: bool = False   # edge-detect for overdub_button
+        self._pattern_cxl_was_held: bool = False   # edge-detect for cancel_button
         # Setlist mode — current position in the ordered preset list.
         self._setlist_index: int = 0
         # Stick-flick state — per axis: (prev_shaped_val, prev_timestamp)
@@ -227,6 +236,8 @@ class BridgeWorker(QObject):
         # Random-mod state — keyed by axis_idx.
         # Values: (last_sample_ms, current_value) where current_value is 0..127.
         self._random_mod_state: Dict[int, tuple] = {}
+        # LFO phase state — keyed by axis_idx, value is current phase in 0..2π.
+        self._lfo_phase: Dict[int, float] = {}
         # Arp playback state — keyed by button_idx.
         # Values: (QTimer, event_index, macro_name) or None when idle.
         self._arp_state: Dict[int, Optional[object]] = {}
@@ -278,6 +289,8 @@ class BridgeWorker(QObject):
         """Entry point — invoked once when the worker's thread starts."""
         if self._keyboard:
             self._reader = KeyboardControllerReader(slot_index=self._slot_index)
+        elif self._mouse:
+            self._reader = MouseControllerReader(slot_index=self._slot_index)
         elif self._demo:
             self._reader = SyntheticControllerReader(slot_index=self._slot_index)
         else:
@@ -434,16 +447,18 @@ class BridgeWorker(QObject):
         """Capture one outbound MIDI message if recording is active.
 
         Called from every send site. Cheap no-op when _recording is False.
+        Also forwards to the PatternEngine when it is in RECORDING or OVERDUB.
         """
-        if not self._recording:
-            return
-        delay_ms = int((time.time() * 1000.0) - self._recording_start_ms)
-        self._recording_events.append(MacroEvent(
-            delay_ms=max(0, delay_ms),
-            status=status,
-            data1=data1,
-            data2=data2,
-        ))
+        if self._recording:
+            delay_ms = int((time.time() * 1000.0) - self._recording_start_ms)
+            self._recording_events.append(MacroEvent(
+                delay_ms=max(0, delay_ms),
+                status=status,
+                data1=data1,
+                data2=data2,
+            ))
+        if self._pattern_engine is not None:
+            self._pattern_engine.record_event(status, data1, data2)
 
     def _play_macro(self, macro: "Macro", midi: "OpenedPort") -> None:
         """Replay a recorded macro sequence using QTimer for timing.
@@ -1285,6 +1300,84 @@ class BridgeWorker(QObject):
                 self._prev_buttons[btn_idx] = pressed
                 self.button_state.emit(btn_idx, pressed)
 
+    def _poll_pattern_buttons(self, reader, mapping, midi, n_buttons: int) -> None:
+        """Handle pattern-recorder button edges (record / overdub / cancel).
+
+        Detects rising/falling edges on the three configured buttons and drives
+        the PatternEngine state machine accordingly.  Also provides the
+        MIDI-send callback to the engine so playback events go to the real port.
+        """
+        cfg: PatternRecorderConfig = mapping.pattern_recorder
+
+        def _send(status: int, d1: int, d2: int) -> None:
+            if midi is None:
+                return
+            try:
+                midi.port.send_message([status, d1, d2])
+                self.midi_sent.emit()
+                self._emit_midi_message("sent", status, d1, d2, f"PAT d1={d1} d2={d2}")
+            except Exception:
+                pass
+
+        def _read_btn(idx: int) -> bool:
+            if idx < 0 or idx >= n_buttons:
+                return False
+            return bool(reader.get_button(idx))
+
+        rec_held = _read_btn(cfg.record_button)
+        ovd_held = _read_btn(cfg.overdub_button)
+        cxl_held = _read_btn(cfg.cancel_button)
+
+        # Lazily create the engine on first enable
+        if self._pattern_engine is None or (
+            self._pattern_engine.loop_ms
+            != self._compute_pattern_loop_ms(mapping)
+        ):
+            self._pattern_engine = PatternEngine(
+                send_fn=_send,
+                bpm=mapping.midi_clock.bpm if mapping.midi_clock.enabled else 120.0,
+                loop_length_bars=cfg.loop_length_bars,
+                quantize_to_grid=cfg.quantize_to_grid,
+            )
+        else:
+            # Always refresh the send_fn so it captures the current midi handle
+            self._pattern_engine._send_fn = _send
+
+        eng = self._pattern_engine
+
+        # --- record button: hold = record, release = play
+        rec_edge_down = rec_held and not self._pattern_rec_was_held
+        rec_edge_up = not rec_held and self._pattern_rec_was_held
+
+        if rec_edge_down and eng.state == PatternState.IDLE:
+            eng.start_recording()
+        if rec_edge_up and eng.state == PatternState.RECORDING:
+            eng.stop_recording()
+
+        # --- overdub button: hold = overdub (only while playing)
+        if ovd_held and not self._pattern_ovd_was_held:
+            if eng.state == PatternState.PLAYING:
+                eng.start_overdub()
+        if not ovd_held and self._pattern_ovd_was_held:
+            if eng.state == PatternState.OVERDUB:
+                eng.stop_overdub()
+
+        # --- cancel button: press = stop loop (any playing/recording state)
+        if cxl_held and not self._pattern_cxl_was_held:
+            if eng.state in (PatternState.PLAYING, PatternState.OVERDUB, PatternState.RECORDING):
+                eng.stop_loop()
+
+        self._pattern_rec_was_held = rec_held
+        self._pattern_ovd_was_held = ovd_held
+        self._pattern_cxl_was_held = cxl_held
+
+    def _compute_pattern_loop_ms(self, mapping: "Mapping") -> int:
+        """Compute the expected loop duration in ms from the current mapping config."""
+        bpm = mapping.midi_clock.bpm if mapping.midi_clock.enabled else 120.0
+        bars = mapping.pattern_recorder.loop_length_bars
+        beat_ms = (60.0 / max(1.0, bpm)) * 1000.0
+        return max(1, int(round(beat_ms * 4.0 * bars)))
+
     def _poll_buttons(self, reader, mapping, midi, note_on, note_off, n_buttons) -> None:
         # --- MIDI clock button handling (tap-tempo, start, stop) ---
         clk = mapping.midi_clock
@@ -1293,6 +1386,13 @@ class BridgeWorker(QObject):
 
         # --- Setlist step-through ---
         self._poll_setlist_buttons(reader, mapping, n_buttons)
+
+        # --- Pattern recorder ---
+        if mapping.pattern_recorder.enabled:
+            self._poll_pattern_buttons(reader, mapping, midi, n_buttons)
+            # Advance the loop playback tick each poll cycle
+            if self._pattern_engine is not None:
+                self._pattern_engine.tick()
 
         buttons, _axes, _hats = self._active_mappings_view(mapping)
         osc_only = self._osc_only()
@@ -1477,6 +1577,9 @@ class BridgeWorker(QObject):
                 # Random-mod (feature #A2) — sample a random CC at configured rate
                 if stick_cfg.random_mod_enabled:
                     self._tick_random_mod(axis_idx, stick_cfg, mapping, midi)
+                # LFO modulator — blend free-running waveform with user input
+                if stick_cfg.lfo.enabled:
+                    raw = self._apply_lfo(axis_idx, raw, stick_cfg.lfo, mapping)
                 # Convert to 0..127 range
                 val = int(round((raw + 1.0) * 63.5))
                 val = max(0, min(127, val))
@@ -1791,6 +1894,85 @@ class BridgeWorker(QObject):
         else:
             # Keep current value in state (no resample yet)
             self._random_mod_state.setdefault(axis_idx, (last_ms, current_val))
+
+    def _apply_lfo(self, axis_idx: int, user_val: float,
+                   lfo_cfg: "StickLfoConfig", mapping: "Mapping") -> float:
+        """Compute the LFO sample for this axis and combine with user input.
+
+        Advances `_lfo_phase[axis_idx]` each call based on elapsed wall-clock
+        time and the configured rate_hz (or BPM-locked rate when
+        phase_lock_to_bpm is True).  The LFO waveform is evaluated in -1..+1
+        and combined with user_val according to blend_mode:
+
+          add      — lfo*depth + user  (hard-clipped to ±1)
+          replace  — lfo*depth when |user| < 0.05 (stick at rest), else user
+          multiply — user * (1 + lfo*depth - 0.5)
+
+        Returns the blended value in -1..+1.
+        """
+        import math
+        import random as _random
+
+        # Determine effective rate (Hz)
+        rate = max(0.01, min(20.0, lfo_cfg.rate_hz))
+        if lfo_cfg.phase_lock_to_bpm:
+            bpm = mapping.midi_clock.bpm if mapping.midi_clock.enabled else 120.0
+            rate = bpm / 60.0  # 1 cycle per beat (quarter-note subdivision)
+
+        # Advance phase
+        now = time.perf_counter()
+        _TWO_PI = 2.0 * math.pi
+        if axis_idx not in self._lfo_phase:
+            self._lfo_phase[axis_idx] = 0.0
+        # We compute phase directly from time so phase is consistent even when
+        # the rate changes mid-performance, avoiding clicks.
+        phase = (now * rate * _TWO_PI) % _TWO_PI
+
+        # Evaluate waveform → -1..+1
+        wf = lfo_cfg.waveform
+        if wf == "sine":
+            lfo_val = math.sin(phase)
+        elif wf == "triangle":
+            t = (now * rate) % 1.0
+            lfo_val = 2.0 * abs(2.0 * t - 1.0) - 1.0
+        elif wf == "square":
+            lfo_val = 1.0 if phase < math.pi else -1.0
+        elif wf == "saw":
+            t = (now * rate) % 1.0
+            lfo_val = 2.0 * t - 1.0
+        elif wf == "random":
+            # Sample-and-hold: one new sample per cycle
+            cycle = int(now * rate)
+            prev_cycle, prev_lfo = self._lfo_phase.get(axis_idx, (None, 0.0)) \
+                if isinstance(self._lfo_phase.get(axis_idx), tuple) else (None, 0.0)
+            if prev_cycle != cycle:
+                lfo_val = _random.uniform(-1.0, 1.0)
+                self._lfo_phase[axis_idx] = (cycle, lfo_val)
+            else:
+                lfo_val = prev_lfo
+        else:
+            lfo_val = math.sin(phase)  # fallback to sine
+
+        # For non-random waveforms, store phase (kept as float for simplicity)
+        if wf != "random":
+            self._lfo_phase[axis_idx] = phase
+
+        depth = max(0.0, min(1.0, lfo_cfg.depth))
+        mode = lfo_cfg.blend_mode
+
+        if mode == "replace":
+            # At rest (|user| < 0.05) the LFO drives; otherwise user wins
+            if abs(user_val) < 0.05:
+                result = lfo_val * depth
+            else:
+                result = user_val
+        elif mode == "multiply":
+            result = user_val * (1.0 + lfo_val * depth - 0.5)
+        else:
+            # "add" (default / fallback)
+            result = user_val + lfo_val * depth
+
+        return max(-1.0, min(1.0, result))
 
     def _poll_polar_sticks(self, reader, mapping, offsets, midi, cc, n_axes) -> None:
         """Emit polar (angle, magnitude) pairs for sticks in polar_mode.
@@ -2623,7 +2805,8 @@ class BridgeController(QObject):
                  slot_index: int = 0,
                  midi_port_name: Optional[str] = None,
                  demo: bool = False,
-                 keyboard: bool = False) -> None:
+                 keyboard: bool = False,
+                 mouse: bool = False) -> None:
         super().__init__(parent)
         self.slot_index = max(0, int(slot_index))
         self.worker = BridgeWorker(
@@ -2631,6 +2814,7 @@ class BridgeController(QObject):
             midi_port_name=midi_port_name,
             demo=demo,
             keyboard=keyboard,
+            mouse=mouse,
         )
         self.thread = QThread()
         self.worker.moveToThread(self.thread)

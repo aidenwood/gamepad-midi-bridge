@@ -53,11 +53,14 @@ def run(argv: Optional[List[str]] = None) -> int:
     # after loading the current preset's theme preference.
     apply_theme(app, "system")
 
-    # Install keyboard event filter if requested
+    # Install keyboard and mouse event filters if requested
     import os
     if os.environ.get("GMB_KEYBOARD") == "1":
         from .keyboard_bus import install_keyboard_filter
         install_keyboard_filter(app)
+    if os.environ.get("GMB_MOUSE") == "1":
+        from .mouse_bus import install_mouse_filter
+        install_mouse_filter(app)
 
     icon_path = Path(__file__).parent / "resources" / "icon.png"
     if icon_path.exists():

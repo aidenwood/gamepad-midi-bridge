@@ -44,6 +44,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keyboard", action="store_true",
                    help="Run with keyboard as controller (WASD + arrows + keys). "
                         "Useful for testing without hardware.")
+    p.add_argument("--mouse", action="store_true",
+                   help="Run with mouse as controller (cursor movement + clicks). "
+                        "Useful for demo mode and testing without hardware.")
     p.add_argument("deep_link", nargs="?", default=None,
                    help="Optional gmb:// URL handed in by the OS URL handler.")
     return p
@@ -91,7 +94,7 @@ def _do_import_pack(path_str: str) -> int:
     return 0
 
 
-def _do_headless(deep_link: str | None, demo: bool = False, keyboard: bool = False) -> int:
+def _do_headless(deep_link: str | None, demo: bool = False, keyboard: bool = False, mouse: bool = False) -> int:
     """Run the bridge with no GUI. Uses QCoreApplication for the event loop."""
     import logging
     from PySide6.QtCore import QCoreApplication
@@ -104,7 +107,10 @@ def _do_headless(deep_link: str | None, demo: bool = False, keyboard: bool = Fal
     if keyboard:
         from .keyboard_bus import install_keyboard_filter
         install_keyboard_filter(app)
-    bridge = BridgeController(demo=demo, keyboard=keyboard)
+    if mouse:
+        from .mouse_bus import install_mouse_filter
+        install_mouse_filter(app)
+    bridge = BridgeController(demo=demo, keyboard=keyboard, mouse=mouse)
     bridge.worker.set_mapping(Mapping())
     bridge.worker.status.connect(lambda msg: log.info("status: %s", msg))
     bridge.worker.error.connect(lambda msg: log.error("error: %s", msg))
@@ -144,7 +150,7 @@ def main() -> int:
     setup_logging(console=args.debug)
 
     if args.headless:
-        return _do_headless(args.deep_link, demo=args.demo, keyboard=args.keyboard)
+        return _do_headless(args.deep_link, demo=args.demo, keyboard=args.keyboard, mouse=args.mouse)
 
     # GUI path picks demo, keyboard and background up from env vars.
     if args.demo:
@@ -153,6 +159,9 @@ def main() -> int:
     if args.keyboard:
         import os
         os.environ["GMB_KEYBOARD"] = "1"
+    if args.mouse:
+        import os
+        os.environ["GMB_MOUSE"] = "1"
     if args.background:
         import os
         os.environ["GMB_BACKGROUND"] = "1"
