@@ -46,7 +46,11 @@ class BluetoothTab(QWidget):
         sub = QLabel(
             "Pairing happens once in your OS settings — we'll see the "
             "controller as soon as it connects. Battery + signal show "
-            "up here when the OS exposes them."
+            "up here when the OS exposes them.\n\n"
+            "Tip: If your controller isn't showing up, try:\n"
+            "• Check it's powered on and in pairing mode\n"
+            "• Click 'Open system Bluetooth settings' to pair it\n"
+            "• Re-scan after pairing to refresh the list"
         )
         sub.setStyleSheet("color: #8a9099;")
         sub.setWordWrap(True)
@@ -58,8 +62,12 @@ class BluetoothTab(QWidget):
         self._open_settings.clicked.connect(self._on_open_settings)
         self._refresh = QPushButton("Re-scan")
         self._refresh.clicked.connect(self.refresh)
+        self._docs_link = QPushButton("📖 Connection guide")
+        self._docs_link.setStyleSheet("color: #666; text-decoration: underline;")
+        self._docs_link.clicked.connect(self._on_docs_link)
         action_row.addWidget(self._open_settings)
         action_row.addWidget(self._refresh)
+        action_row.addWidget(self._docs_link)
         action_row.addStretch(1)
         outer.addLayout(action_row)
 
@@ -167,3 +175,7 @@ class BluetoothTab(QWidget):
                 "Open it manually and pair the controller — it'll show up here "
                 "on the next refresh.",
             )
+
+    def _on_docs_link(self) -> None:
+        import webbrowser
+        webbrowser.open("https://ps5-midi-bridge.local/docs/installation/connect-bluetooth")

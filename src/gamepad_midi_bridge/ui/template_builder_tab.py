@@ -18,11 +18,12 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QSplitter,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..mapping import Mapping
+from ..templates import TEMPLATES, Template
 
 
 # Palette matches controller_meter.py + global teal accent.
@@ -357,11 +358,130 @@ class TemplateBuilderTab(QWidget):
         actions.addStretch(1)
         v.addLayout(actions)
 
+        v.addWidget(self._build_templates_panel())
+
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 55)
         splitter.setStretchFactor(1, 45)
         splitter.setSizes([550, 450])
         root.addWidget(splitter, 1)
+
+    # --------------------------------------------------------- starter templates
+
+    # Tag colour accents — muted but distinct so cards scan quickly.
+    _TAG_COLORS: Dict[str, str] = {
+        "Drums":     "#e05c5c",
+        "DJ":        "#e09a5c",
+        "VJ":        "#9a5ce0",
+        "Synth":     "#5c9ae0",
+        "Modular":   "#5ce07a",
+        "Streaming": "#e05ca0",
+    }
+
+    def _build_templates_panel(self) -> QWidget:
+        """Scrollable row of starter-template cards with one-click Apply."""
+        outer = QFrame()
+        outer.setObjectName("TemplatesPanel")
+        outer.setStyleSheet(
+            "QFrame#TemplatesPanel { background:#0e0f12; border:1px solid #24262d; "
+            "border-radius:8px; padding:6px; }"
+        )
+        ol = QVBoxLayout(outer); ol.setContentsMargins(6, 6, 6, 6); ol.setSpacing(4)
+
+        hdr = QLabel("Starter Templates")
+        hdr.setStyleSheet("color:#f5f7fa; font-size:12px; font-weight:600;")
+        ol.addWidget(hdr)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFixedHeight(104)
+        scroll.setStyleSheet("background:transparent; border:none;")
+
+        cards_widget = QWidget()
+        cards_widget.setStyleSheet("background:transparent;")
+        cards_layout = QHBoxLayout(cards_widget)
+        cards_layout.setContentsMargins(0, 0, 0, 0)
+        cards_layout.setSpacing(8)
+
+        for tmpl in TEMPLATES:
+            cards_layout.addWidget(self._make_template_card(tmpl))
+        cards_layout.addStretch(1)
+
+        scroll.setWidget(cards_widget)
+        ol.addWidget(scroll)
+        return outer
+
+    def _make_template_card(self, tmpl: Template) -> QWidget:
+        """One compact card: tag badge + name + description + Apply button."""
+        accent = self._TAG_COLORS.get(tmpl.tag, "#2dd4bf")
+
+        card = QFrame()
+        card.setObjectName("TemplateCard")
+        card.setFixedWidth(160)
+        card.setStyleSheet(
+            f"QFrame#TemplateCard {{ background:#16181d; border:1px solid #24262d; "
+            f"border-radius:6px; }}"
+            f"QFrame#TemplateCard:hover {{ border:1px solid {accent}; }}"
+        )
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(8, 6, 8, 6)
+        cl.setSpacing(3)
+
+        tag_lbl = QLabel(tmpl.tag)
+        tag_lbl.setStyleSheet(
+            f"background:{accent}22; color:{accent}; font-size:9px; "
+            f"font-weight:700; border-radius:3px; padding:1px 5px;"
+        )
+        tag_lbl.setFixedHeight(16)
+        cl.addWidget(tag_lbl)
+
+        name_lbl = QLabel(tmpl.name)
+        name_lbl.setStyleSheet("color:#f5f7fa; font-size:11px; font-weight:600;")
+        cl.addWidget(name_lbl)
+
+        # Truncate description to keep cards compact.
+        desc = tmpl.description
+        if len(desc) > 72:
+            desc = desc[:69] + "…"
+        desc_lbl = QLabel(desc)
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet("color:#8a9099; font-size:9px;")
+        desc_lbl.setFixedHeight(30)
+        cl.addWidget(desc_lbl)
+
+        apply_btn = QPushButton("Apply")
+        apply_btn.setFixedHeight(22)
+        apply_btn.setStyleSheet(
+            f"background:{accent}; color:#0e0f12; font-size:10px; "
+            f"font-weight:700; border-radius:4px; padding:0 6px;"
+        )
+        apply_btn.setToolTip(tmpl.description)
+        # Capture tmpl in the lambda via default arg to avoid late-binding.
+        apply_btn.clicked.connect(lambda _=False, t=tmpl: self._on_apply_template(t))
+        cl.addWidget(apply_btn)
+
+        return card
+
+    def _on_apply_template(self, tmpl: Template) -> None:
+        """Load a starter template, replacing the current working mapping."""
+        resp = QMessageBox.question(
+            self,
+            f'Apply "{tmpl.name}"?',
+            f'This replaces the current bindings with the "{tmpl.name}" template.\n'
+            "Unsaved changes will be lost. Continue?",
+        )
+        if resp != QMessageBox.Yes:
+            return
+        self._mapping = tmpl.build_mapping()
+        self._labels = {}
+        self._selected = None
+        self._diagram.set_selected(None)
+        self._sel_header.setText("Selected: —")
+        self._refresh_diagram()
+        self._refresh_table()
+        self.mapping_changed.emit(self._mapping)
 
     # --------------------------------------------------------- selection
 

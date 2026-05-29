@@ -36,7 +36,7 @@ def tmp_user_data(tmp_path, monkeypatch):
         return d
 
     monkeypatch.setattr(paths_mod, "user_data_dir", fake_user_data_dir)
-    # The license + portable modules imported `license_path` / `presets_dir`
+    # The license + portable modules imported `license_path` / `presets_dir` / `user_data_dir`
     # by name, so they bypass the patched `user_data_dir` unless we redirect
     # those re-exports too.
     monkeypatch.setattr(license_mod, "license_path",
@@ -45,6 +45,7 @@ def tmp_user_data(tmp_path, monkeypatch):
                         lambda: fake_user_data_dir() / "license.key")
     monkeypatch.setattr(portable_mod, "presets_dir",
                         lambda: _ensure_dir(fake_user_data_dir() / "presets"))
+    monkeypatch.setattr(portable_mod, "user_data_dir", fake_user_data_dir)
 
     # Reset the license module's process-wide cache between tests.
     monkeypatch.setattr(license_mod, "_cached_state", None, raising=False)
