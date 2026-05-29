@@ -51,12 +51,14 @@ from .midi_log_panel import MidiLogPanel
 from .marketplace_tab import MarketplaceTab
 from .onboarding import OnboardingWizard, is_first_launch, mark_complete
 from .preset_manager import PresetManager
+from .shortcuts_dialog import ShortcutsDialog
 from .reconnect_overlay import ReconnectOverlay
 from .settings_panel import SettingsPanel
 from .template_builder_tab import TemplateBuilderTab
 from .command_palette import Command, CommandPalette
 from .tray import TrayController, is_available as tray_available
 from .visualise_tab import VisualiseTab
+from .hud_overlay import HudOverlay
 
 
 from .about_tab import AboutTab
@@ -370,6 +372,13 @@ class MainWindow(QMainWindow):
             self._tray.about_requested.connect(self._menu_show_about)
             self._tray.quit_requested.connect(self._quit_from_tray)
 
+        # HUD overlay — always-on-top status widget for tray/background mode.
+        # Created lazily when the user enables it; destroyed when disabled.
+        self._hud: Optional[HudOverlay] = None
+        # Restore persisted visibility preference.
+        if HudOverlay.read_visible():
+            self._toggle_hud(True)
+
         # Auto-backup of the mapping every 60 seconds
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setInterval(60_000)
@@ -500,6 +509,12 @@ class MainWindow(QMainWindow):
         bg3d_action.setShortcut(QKeySequence("Ctrl+Alt+3"))
         bg3d_action.triggered.connect(self._toggle_3d)
 
+        # HUD overlay — checkable; toggle creates/destroys the overlay.
+        self._hud_action = view_menu.addAction("Show &HUD overlay")
+        self._hud_action.setCheckable(True)
+        self._hud_action.setChecked(HudOverlay.read_visible())
+        self._hud_action.triggered.connect(self._toggle_hud)
+
         view_menu.addSeparator()
 
         # Command palette (Cmd-K)
@@ -553,24 +568,8 @@ class MainWindow(QMainWindow):
 
     def _menu_show_keyboard_shortcuts(self) -> None:
         """Help > Keyboard shortcuts"""
-        shortcuts = (
-            "Start / Stop bridge: Ctrl+Return\n"
-            "Command palette: Ctrl+K\n"
-            "Panic (all notes off): Ctrl+Shift+P\n\n"
-            "View toggles:\n"
-            "  Split: Ctrl+Alt+S\n"
-            "  Console: Ctrl+Alt+C\n"
-            "  Inspector: Ctrl+Alt+I\n"
-            "  3D: Ctrl+Alt+3\n\n"
-            "File:\n"
-            "  Open preset: Ctrl+O\n"
-            "  Save preset: Ctrl+S\n"
-            "  Save As: Ctrl+Shift+S\n"
-            "  Quit: Ctrl+Q\n\n"
-            "Edit:\n"
-            "  Preferences: Ctrl+,"
-        )
-        QMessageBox.information(self, "Keyboard shortcuts", shortcuts)
+        dialog = ShortcutsDialog(self)
+        dialog.exec()
 
     def _menu_report_bug(self) -> None:
         """Help > Report bug"""
@@ -840,6 +839,25 @@ class MainWindow(QMainWindow):
         if self._inspect_btn.isChecked() != any_visible:
             self._inspect_btn.setChecked(any_visible)
         self._rebalance_content_splitter()
+
+    def _toggle_hud(self, visible: bool) -> None:
+        """Create or destroy the HUD overlay and persist the preference."""
+        HudOverlay.write_visible(visible)
+        # Keep menu action in sync regardless of how this was called.
+        if hasattr(self, "_hud_action"):
+            self._hud_action.setChecked(visible)
+        if visible:
+            if self._hud is None:
+                self._hud = HudOverlay()
+                # Seed current state so the HUD isn't stale on first show.
+                self._hud.set_preset(getattr(self._mapping, "name", "—") or "—")
+                self._hud.set_status(self._stop_btn.isEnabled())
+            self._hud.show()
+        else:
+            if self._hud is not None:
+                self._hud.hide()
+                self._hud.deleteLater()
+                self._hud = None
 
     def _rebalance_content_splitter(self) -> None:
         """Recompute pane widths after a visibility toggle so panels don't
@@ -1292,6 +1310,9 @@ class MainWindow(QMainWindow):
                              controller=_anonymise(controller_name))
         if self._tray is not None:
             self._tray.set_running(True)
+        if self._hud is not None:
+            self._hud.set_status(True)
+            self._hud.set_preset(getattr(self._mapping, "name", "—") or "—")
         if self._calibration_dialog and not self._calibration_dialog.isVisible():
             # Dialog already closed by user — nothing to do.
             self._calibration_dialog = None
@@ -1304,6 +1325,8 @@ class MainWindow(QMainWindow):
         self._meter.set_connected(False)
         if self._tray is not None:
             self._tray.set_running(False)
+        if self._hud is not None:
+            self._hud.set_status(False)
 
     def _on_error(self, message: str) -> None:
         QMessageBox.critical(self, "Bridge error", message)
@@ -1400,6 +1423,8 @@ class MainWindow(QMainWindow):
         self._mapping_editor.set_mapping(mapping)
         _save_last_mapping(mapping)
         QMessageBox.information(self, "Preset loaded", f"Loaded '{mapping.name}'.")
+        if self._hud is not None:
+            self._hud.set_preset(mapping.name or "—")
 
     def _on_preset_mapping_changed(self, mapping: Mapping) -> None:
         """Setlist (and future dialogs) on the Presets tab saved edits to the mapping.
@@ -1513,6 +1538,8 @@ class MainWindow(QMainWindow):
             self._rate_label.setText(f"{rounded}/s")
         elif self._rate_label.text():
             self._rate_label.setText("")
+        if self._hud is not None:
+            self._hud.set_throughput(rate)
         self._midi_count = 0
 
     def _on_midi_sent(self) -> None:

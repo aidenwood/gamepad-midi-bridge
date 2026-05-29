@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from .shortcuts_dialog import ShortcutsDialog
+
 from .. import APP_NAME, __version__
 from ..crash_reporter import crash_dir
 from ..logger import log_path
@@ -395,6 +397,9 @@ class HelpTab(QWidget):
         row1 = QHBoxLayout()
         row1.setSpacing(8)
         row1.addWidget(self._link_button(
+            "Keyboard shortcuts", lambda: self._show_shortcuts_dialog()
+        ))
+        row1.addWidget(self._link_button(
             "Open user data folder", self._open_user_data_folder
         ))
         row1.addWidget(self._link_button(
@@ -501,6 +506,11 @@ class HelpTab(QWidget):
         subject = f"{APP_NAME} - v{__version__}"
         # `webbrowser.open` handles mailto: on every platform we ship to.
         webbrowser.open(f"mailto:{SUPPORT_EMAIL}?subject={subject}")
+
+    def _show_shortcuts_dialog(self) -> None:
+        """Show the keyboard shortcuts reference dialog."""
+        dialog = ShortcutsDialog(self)
+        dialog.exec()
 
     @staticmethod
     def _open_user_data_folder() -> bool:

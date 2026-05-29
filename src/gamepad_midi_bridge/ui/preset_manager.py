@@ -5,7 +5,7 @@ from typing import Optional
 from pathlib import Path
 import os
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget, QMessageBox,
     QPushButton, QStackedLayout, QVBoxLayout, QWidget,
@@ -42,6 +42,8 @@ class PresetManager(QWidget):
         v.addWidget(QLabel("Saved presets"))
         self._list = QListWidget()
         self._list.itemClicked.connect(self._on_list_selection_changed)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
         v.addWidget(self._list, 1)
 
         row = QHBoxLayout()
@@ -84,12 +86,37 @@ class PresetManager(QWidget):
         self.refresh_lock()
 
     def refresh(self) -> None:
+        """Populate list with presets grouped by category (folder)."""
         self._list.clear()
-        for name in preset_io.list_presets():
-            self._list.addItem(name)
+        categories = preset_io.list_categories()
+        all_presets = preset_io.list_presets()
+        
+        # Show presets grouped by folder
+        # First, add presets from each category as a header with child items
+        for category in categories:
+            cat_item = self._list.addItem(f"📁 {category}")
+            cat_idx = self._list.count() - 1
+            # Add presets in this category
+            for preset_name in all_presets:
+                if "/" in preset_name and preset_name.split("/")[0] == category:
+                    self._list.addItem(f"  └ {preset_name.split('/', 1)[1]}")
+        
+        # Then add top-level presets
+        for preset_name in all_presets:
+            if "/" not in preset_name:
+                self._list.addItem(preset_name)
 
     def refresh_lock(self) -> None:
         self._stack.setCurrentIndex(0 if is_pro() else 1)
+    def _clean_preset_name(self, raw_name: str) -> str:
+        """Extract actual preset name from display text with decorations."""
+        preset_name = raw_name.strip()
+        if preset_name.startswith("📁 "):
+            return ""  # Skip category headers
+        if preset_name.startswith("  └ "):
+            return preset_name[4:]  # Remove indent marker
+        return preset_name
+
 
     # ------------------------------------------------------------------ actions
 
@@ -97,7 +124,13 @@ class PresetManager(QWidget):
         item = self._list.currentItem()
         if item is None:
             return
-        preset_name = item.text()
+        raw_name = item.text()
+        # Clean up display decorations from preset name
+        preset_name = raw_name.strip()
+        if preset_name.startswith("📁 "):
+            return  # Skip category headers
+        if preset_name.startswith("  └ "):
+            preset_name = preset_name[4:]  # Remove indent marker
         try:
             # Get file path and stats
             from .. import paths
@@ -124,7 +157,10 @@ class PresetManager(QWidget):
         item = self._list.currentItem()
         if item is None:
             return
-        mapping = preset_io.load_preset(item.text())
+        preset_name = self._clean_preset_name(item.text())
+        if not preset_name:
+            return
+        mapping = preset_io.load_preset(preset_name)
         self.preset_loaded.emit(mapping)
 
     def _on_save(self) -> None:
@@ -141,7 +177,10 @@ class PresetManager(QWidget):
         item = self._list.currentItem()
         if item is None:
             return
-        preset_io.delete_preset(item.text())
+        preset_name = self._clean_preset_name(item.text())
+        if not preset_name:
+            return
+        preset_io.delete_preset(preset_name)
         self.refresh()
 
     def _on_compare(self) -> None:
@@ -250,4 +289,54 @@ class PresetManager(QWidget):
                 self,
                 "Export failed",
                 f"Could not write PDF:\n{exc}",
+            )
+
+
+    def _on_context_menu(self, position) -> None:
+        """Show context menu with Move to folder option."""
+        item = self._list.itemAt(position)
+        if item is None:
+            return
+        
+        preset_name = self._clean_preset_name(item.text())
+        if not preset_name:
+            return
+        
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        
+        # Move to folder action
+        move_action = menu.addAction("Move to folder…")
+        move_action.triggered.connect(lambda: self._move_preset_to_folder(preset_name))
+        
+        menu.exec(self._list.mapToGlobal(position))
+
+    def _move_preset_to_folder(self, preset_name: str) -> None:
+        """Show dialog to move preset to a folder."""
+        categories = preset_io.list_categories()
+        
+        from PySide6.QtWidgets import QInputDialog
+        
+        items = ["(Top-level)"] + categories
+        folder, ok = QInputDialog.getItem(
+            self,
+            "Move preset to folder",
+            "Select folder:",
+            items,
+            0,
+            False
+        )
+        
+        if not ok:
+            return
+        
+        target_folder = "" if folder == "(Top-level)" else folder
+        try:
+            preset_io.move_preset(preset_name, target_folder)
+            self.refresh()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(
+                self,
+                "Move failed",
+                f"Could not move preset:\n{exc}",
             )

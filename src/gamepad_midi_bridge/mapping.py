@@ -327,6 +327,50 @@ class HapticInputBinding:
 
 
 
+QUANTIZE_GRIDS = ("1/4", "1/8", "1/8t", "1/16", "1/16t", "1/32")
+
+
+@dataclass
+class QuantizeConfig:
+    """Beat-grid quantization for button note-on events.
+
+    When enabled, note-on events are delayed to the nearest grid boundary
+    so a sloppy player still lands on the beat.
+
+    Fields:
+      - `enabled`           : master switch (default False — no delay).
+      - `grid`              : grid division — one of QUANTIZE_GRIDS.
+                              Unknown values fall back to "1/16".
+      - `swing_pct`         : swing percentage (0..50). Adds swing_pct% of
+                              the grid duration to off-beat boundaries so
+                              alternating 16ths get a shuffled feel.
+      - `quantize_buttons`  : route button note-ons through the grid (True).
+      - `quantize_cc`       : route CC changes through the grid (False by
+                              default — sticks/triggers usually feel laggy).
+    """
+    enabled: bool = False
+    grid: str = "1/16"
+    swing_pct: int = 0
+    quantize_buttons: bool = True
+    quantize_cc: bool = False
+
+
+def _quantize_from_dict(d: Optional[dict]) -> "QuantizeConfig":
+    """Hydrate a QuantizeConfig from raw dict, defaulting to disabled."""
+    if not d:
+        return QuantizeConfig()
+    raw_grid = str(d.get("grid", "1/16"))
+    grid = raw_grid if raw_grid in QUANTIZE_GRIDS else "1/16"
+    swing = max(0, min(50, int(d.get("swing_pct", 0))))
+    return QuantizeConfig(
+        enabled=bool(d.get("enabled", False)),
+        grid=grid,
+        swing_pct=swing,
+        quantize_buttons=bool(d.get("quantize_buttons", True)),
+        quantize_cc=bool(d.get("quantize_cc", False)),
+    )
+
+
 @dataclass
 class RtpMidiConfig:
     """Optional RTP-MIDI (AppleMIDI / Network MIDI) output.
@@ -661,6 +705,10 @@ class Mapping:
     # receivers. Disabled by default; no UDP traffic unless explicitly enabled.
     rtp_midi: RtpMidiConfig = field(default_factory=RtpMidiConfig)
 
+    # Beat-grid quantization — defer button note-ons to the nearest grid
+    # boundary so sloppy playing lands on the beat. Disabled by default.
+    quantize: QuantizeConfig = field(default_factory=QuantizeConfig)
+
     # Color tag for visual show planning (one of COLOR_TAGS)
     color_tag: str = "none"
 
@@ -731,6 +779,7 @@ class Mapping:
             setlist=_setlist_config_from_dict(data.get("setlist")),
             passthrough=_passthrough_from_dict(data.get("passthrough")),
             rtp_midi=_rtp_midi_from_dict(data.get("rtp_midi")),
+            quantize=_quantize_from_dict(data.get("quantize")),
             color_tag=color_tag,
             favourite=bool(data.get("favourite", False)),
         )

@@ -26,7 +26,7 @@ from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, PassthroughConfig, R2_AXIS, STICK_AXES, StickFlickConfig, TriggerAftertouchConfig
+from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, PassthroughConfig, QuantizeConfig, R2_AXIS, STICK_AXES, StickFlickConfig, TriggerAftertouchConfig
 from .rtp_midi import RtpMidiSender
 from . import shaping
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
@@ -225,6 +225,11 @@ class BridgeWorker(QObject):
         # Arp playback state — keyed by button_idx.
         # Values: (QTimer, event_index, macro_name) or None when idle.
         self._arp_state: Dict[int, Optional[object]] = {}
+        # Quantize: epoch (perf_counter) when the clock loop started its current beat.
+        # Updated by _run_midi_clock_loop each quarter-note so the quantize helper
+        # can compute the current beat phase without separate bookkeeping.
+        self._clock_beat_epoch: float = 0.0   # perf_counter timestamp of last beat start
+        self._clock_bpm_live: float = 120.0   # BPM currently running in the clock thread
 
     # ---------------------------------------------------------------- public API
 
@@ -1258,11 +1263,16 @@ class BridgeWorker(QObject):
                     # Latency self-test: capture MIDI-send timestamp (output side).
                     if self._latency_test_active:
                         _latency_test.tracker().record_output(time.perf_counter())
-                    midi.port.send_message([btn_note_on, note, velocity])
-                    self._rtp_send(btn_note_on, note, velocity)
-                    self._record_midi_send(btn_note_on, note, velocity)
-                    self.midi_sent.emit()
-                    self._emit_midi_message("sent", btn_note_on, note, velocity, f"NOTE-ON #{note}")
+                    qcfg = mapping.quantize
+                    if qcfg.enabled and qcfg.quantize_buttons:
+                        delay = self._quantize_delay_ms(qcfg)
+                        self._schedule_quantized_note(btn_note_on, note, velocity, delay)
+                    else:
+                        midi.port.send_message([btn_note_on, note, velocity])
+                        self._rtp_send(btn_note_on, note, velocity)
+                        self._record_midi_send(btn_note_on, note, velocity)
+                        self.midi_sent.emit()
+                        self._emit_midi_message("sent", btn_note_on, note, velocity, f"NOTE-ON #{note}")
                 self._send_osc_button(btn_idx, True)
                 _usage_stats.tracker().record("button", btn_idx)
             elif not pressed and was:
@@ -2060,6 +2070,105 @@ class BridgeWorker(QObject):
 
     # ---------------------------------------------------------- MIDI clock
 
+    # ---------------------------------------------------------- beat-grid quantization
+
+    @staticmethod
+    def _grid_duration_ms(bpm: float, grid: str) -> float:
+        """Return the duration of one grid cell in milliseconds.
+
+        Supports standard and triplet subdivisions:
+          "1/4"   = one quarter-note
+          "1/8"   = one eighth-note
+          "1/8t"  = one eighth-note triplet (2/3 of a quarter)
+          "1/16"  = one sixteenth-note
+          "1/16t" = one sixteenth-note triplet (1/3 of a quarter)
+          "1/32"  = one thirty-second-note
+        """
+        beat_ms = 60_000.0 / max(bpm, 1.0)   # ms per quarter-note
+        return {
+            "1/4":   beat_ms,
+            "1/8":   beat_ms / 2.0,
+            "1/8t":  beat_ms * 2.0 / 3.0,
+            "1/16":  beat_ms / 4.0,
+            "1/16t": beat_ms / 6.0,
+            "1/32":  beat_ms / 8.0,
+        }.get(grid, beat_ms / 4.0)   # unknown → 1/16 fallback
+
+    def _quantize_delay_ms(self, qcfg: "QuantizeConfig") -> float:
+        """Compute milliseconds to delay until the next grid boundary.
+
+        Uses `_clock_beat_epoch` (set by the clock thread each quarter-note)
+        to determine the current beat phase.  If the clock is not running the
+        epoch is 0.0 and we fall back to an immediate send (delay = 0).
+
+        Swing: off-beat grid cells (odd-numbered boundaries within a beat)
+        are pushed forward by ``swing_pct``% of the grid duration.
+        """
+        bpm = self._clock_bpm_live
+        beat_epoch = self._clock_beat_epoch
+        if beat_epoch == 0.0:
+            return 0.0
+
+        grid_ms = self._grid_duration_ms(bpm, qcfg.grid)
+        beat_ms = 60_000.0 / max(bpm, 1.0)
+        cells_per_beat = max(1, round(beat_ms / grid_ms))
+
+        now_ms = time.perf_counter() * 1000.0
+        epoch_ms = beat_epoch * 1000.0
+        elapsed_in_beat = (now_ms - epoch_ms) % beat_ms
+
+        # Which cell boundary is next?
+        cell_index = int(elapsed_in_beat / grid_ms)
+        next_cell = cell_index + 1
+        delay = (next_cell * grid_ms) - elapsed_in_beat
+
+        # Wrap around to avoid negative/over-beat delays from float drift
+        if delay <= 0 or delay > beat_ms:
+            delay = grid_ms
+
+        # Apply swing to off-beat cells (odd indices within the beat).
+        if qcfg.swing_pct > 0 and next_cell % 2 == 1:
+            delay += grid_ms * (qcfg.swing_pct / 100.0)
+
+        return max(0.0, delay)
+
+    def _schedule_quantized_note(
+        self,
+        status: int,
+        note: int,
+        velocity: int,
+        delay_ms: float,
+    ) -> None:
+        """Schedule a note-on via QTimer.singleShot after delay_ms.
+
+        If delay_ms <= 1 we just send immediately to avoid unnecessary timer
+        overhead for notes that are already essentially on the grid.
+        """
+        if delay_ms <= 1.0:
+            self._send_quantized(status, note, velocity)
+            return
+        QTimer.singleShot(
+            int(delay_ms),
+            lambda s=status, n=note, v=velocity: self._send_quantized(s, n, v),
+        )
+
+    def _send_quantized(self, status: int, note: int, velocity: int) -> None:
+        """Deliver a quantize-deferred note-on to the MIDI port."""
+        midi = self._midi
+        if midi is None:
+            return
+        try:
+            midi.port.send_message([status, note, velocity])
+            self._rtp_send(status, note, velocity)
+            self._record_midi_send(status, note, velocity)
+            self.midi_sent.emit()
+            self._emit_midi_message(
+                "sent", status, note, velocity,
+                f"NOTE-ON #{note} (quantized)",
+            )
+        except Exception:
+            pass
+
     def _sync_midi_clock(self) -> None:
         """Start or stop the clock thread to match the current mapping config."""
         clk = self._state.mapping.midi_clock
@@ -2096,13 +2205,19 @@ class BridgeWorker(QObject):
         """Clock thread body: sends 0xF8 at 24 PPQN for bpm with drift correction."""
         interval = 60.0 / (bpm * 24.0)
         next_tick = time.perf_counter()
+        self._clock_bpm_live = bpm
+        tick_count = 0
         while self._clock_running:
+            # Record beat epoch every 24 ticks (one quarter-note).
+            if tick_count % 24 == 0:
+                self._clock_beat_epoch = time.perf_counter()
             midi = self._midi
             if midi is not None:
                 try:
                     midi.port.send_message([0xF8])
                 except Exception:
                     pass
+            tick_count += 1
             next_tick += interval
             now = time.perf_counter()
             remaining = next_tick - now
