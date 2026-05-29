@@ -223,6 +223,12 @@ def render_trigger_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     mode_cb = _make_combo(TRIGGER_MODES, cfg.mode, _on_mode_combo)
+    mode_cb.setToolTip(
+        "linear: Continuous 0→127 ramp (default). "
+        "ceiling: Caps max output to CC value below. "
+        "inverted: Rest=127, press=0 (polarity flip). "
+        "latch: Toggle on threshold cross (push-to-on, release-to-off with hysteresis)."
+    )
 
     # ── ceiling ──
     ceil_enabled = cfg.mode == "ceiling"
@@ -231,6 +237,7 @@ def render_trigger_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     ceil_slider = _make_int_slider(0, 127, cfg.ceiling, _on_ceil, enabled=ceil_enabled)
+    ceil_slider.setToolTip("Max CC value when mode is 'Ceiling' (0 = mute, 127 = full)")
     ceil_row, ceil_val = _slider_row("Ceiling CC", ceil_slider, str(cfg.ceiling))
 
     # ── latch threshold ──
@@ -241,6 +248,7 @@ def render_trigger_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     latch_slider = _make_float_slider(0, 100, latch_init, _on_latch, enabled=latch_enabled)
+    latch_slider.setToolTip("Pressure level (0.00–1.00) where latch flips on/off with ±0.025 hysteresis")
     latch_row, latch_val = _slider_row("Latch threshold", latch_slider,
                                        f"{cfg.latch_threshold:.2f}")
 
@@ -294,6 +302,7 @@ def render_trigger_editor(payload: dict) -> QWidget:
 
     gate_sb = _make_int_spinbox(-1, 31, gate_init, _on_gate_button_changed)
     gate_sb.setSpecialValueText("none")
+    gate_sb.setToolTip("Button index that must be held for this trigger to send MIDI. -1 = no gate")
     v.addWidget(_spinbox_row("Gate button (−1 = off)", gate_sb))
 
     def _on_release(val: int) -> None:
@@ -301,6 +310,7 @@ def render_trigger_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     release_slider = _make_int_slider(0, 127, cfg.gate_release_value, _on_release)
+    release_slider.setToolTip("CC value sent once when gate releases. 0 = silence the receiver")
     release_row, release_val = _slider_row("Release value", release_slider,
                                            str(cfg.gate_release_value))
     release_slider.valueChanged.connect(lambda val: release_val.setText(str(val)))
@@ -350,6 +360,7 @@ def render_stick_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     dz_slider = _make_float_slider(0, 50, dz_init, _on_dz)
+    dz_slider.setToolTip("Magnitudes below this snap to 0 (centre, in 0.00–0.50 range)")
     dz_row, dz_val = _slider_row("Inner deadzone", dz_slider, f"{cfg.inner_deadzone:.2f}")
     dz_slider.valueChanged.connect(lambda val: dz_val.setText(f"{val / 100:.2f}"))
     v.addWidget(dz_row)
@@ -361,6 +372,7 @@ def render_stick_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     oc_slider = _make_float_slider(0, 50, oc_init, _on_oc)
+    oc_slider.setToolTip("Top fraction of stick travel that pegs to ±1 (0 = no clamp, 0.50 = full)")
     oc_row, oc_val = _slider_row("Outer clamp", oc_slider, f"{cfg.outer_clamp:.2f}")
     oc_slider.valueChanged.connect(lambda val: oc_val.setText(f"{val / 100:.2f}"))
     v.addWidget(oc_row)
@@ -386,6 +398,10 @@ def render_stick_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     curve_cb = _make_combo(_CURVES, cfg.curve, _on_curve)
+    curve_cb.setToolTip(
+        "linear: Proportional response (default). exponential: Fast near start, slow near end. "
+        "logarithmic: Slow near start, fast near end. s-curve: Slow ends, fast middle."
+    )
     v.addWidget(_combo_row("Curve", curve_cb))
 
     ca_init = int(round(cfg.curve_amount * 100))
@@ -395,6 +411,7 @@ def render_stick_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     ca_slider = _make_float_slider(0, 100, ca_init, _on_ca)
+    ca_slider.setToolTip("Strength of the curve (0.00 = linear, 1.00 = full curve applied)")
     ca_row, ca_val = _slider_row("Curve amount", ca_slider, f"{cfg.curve_amount:.2f}")
     ca_slider.valueChanged.connect(lambda val: ca_val.setText(f"{val / 100:.2f}"))
     v.addWidget(ca_row)
@@ -415,7 +432,9 @@ def render_stick_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
     angle_sb = _make_int_spinbox(0, 127, cfg.polar_angle_cc, _on_angle)
+    angle_sb.setToolTip("CC number for the angle when polar_mode is on (0–127)")
     mag_sb = _make_int_spinbox(0, 127, cfg.polar_mag_cc, _on_mag)
+    mag_sb.setToolTip("CC number for the magnitude when polar_mode is on (0–127)")
 
     # Enable CC spinboxes only when polar mode is on
     angle_sb.setEnabled(cfg.polar_mode)
@@ -429,6 +448,7 @@ def render_stick_editor(payload: dict) -> QWidget:
         if on_change:
             on_change()
 
+    polar_chk.setToolTip("Emit (angle, magnitude) as 2 CCs instead of (X, Y)")
     polar_chk.stateChanged.connect(_on_polar)
 
     v.addWidget(_check_row("Polar mode", polar_chk))

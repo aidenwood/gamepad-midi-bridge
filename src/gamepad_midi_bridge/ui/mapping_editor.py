@@ -6,9 +6,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFormLayout, QGroupBox, QHeaderView, QLabel, QPushButton,
+    QCheckBox, QComboBox, QFormLayout, QFrame, QGroupBox, QHeaderView,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget,
 )
@@ -47,6 +48,69 @@ class MappingEditor(QWidget):
         v = QVBoxLayout(content)
         v.setContentsMargins(20, 20, 20, 20)
         v.setSpacing(12)
+
+        # ── Onboarding tip (feature #24) ──
+        self._tip_dismissed = False
+        # Load dismissal state from config if available
+        settings = QSettings()
+        self._tip_dismissed = bool(settings.value("mapping_editor_tip_dismissed", False))
+        
+        if not self._tip_dismissed:
+            tip_strip = QWidget()
+            # Style belongs on the widget, not on its layout — QHBoxLayout
+            # has no setStyleSheet method.
+            tip_strip.setStyleSheet("background: #1c2d44; border-radius: 4px;")
+            tip_layout = QHBoxLayout(tip_strip)
+            tip_layout.setContentsMargins(10, 8, 10, 8)
+            tip_layout.setSpacing(8)
+            
+            tip_icon = QLabel("💡")
+            tip_icon.setStyleSheet("font-size: 16px; color: #3b82f6;")
+            tip_layout.addWidget(tip_icon)
+            
+            tip_text = QLabel("Click any row to edit its config in the right panel. 4 trigger modes available — try Latch for toggle-style triggers.")
+            tip_text.setStyleSheet("color: #93c5fd; font-size: 11px;")
+            tip_text.setWordWrap(True)
+            tip_layout.addWidget(tip_text, 1)
+            
+            def _dismiss_tip() -> None:
+                self._tip_dismissed = True
+                settings.setValue("mapping_editor_tip_dismissed", True)
+                tip_strip.setVisible(False)
+            
+            close_btn = QPushButton("×")
+            close_btn.setStyleSheet(
+                "color: #93c5fd; border: none; background: transparent; "
+                "font-size: 16px; padding: 0; min-width: 20px;"
+            )
+            close_btn.setFlat(True)
+            close_btn.clicked.connect(_dismiss_tip)
+            tip_layout.addWidget(close_btn)
+            
+            v.addWidget(tip_strip)
+
+        # ── Port name override (feature #23) ──
+        v.addWidget(self._section_label("MIDI PORT"))
+        port_row = QWidget()
+        port_layout = QHBoxLayout(port_row)
+        port_layout.setContentsMargins(0, 0, 0, 0)
+        port_layout.setSpacing(6)
+        port_layout.addWidget(QLabel("Override port name:"))
+        self._port_name_input = QLineEdit()
+        self._port_name_input.setPlaceholderText("Leave empty for default")
+        if self._mapping.port_name_override:
+            self._port_name_input.setText(self._mapping.port_name_override)
+        def _on_port_name_changed(text: str) -> None:
+            self._mapping.port_name_override = text or None
+            self.mapping_changed.emit()
+        self._port_name_input.textChanged.connect(_on_port_name_changed)
+        port_layout.addWidget(self._port_name_input, 1)
+        v.addWidget(port_row)
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet('color: #1c1e25;')
+        v.addWidget(line)
+
 
         v.addWidget(self._section_label("BUTTONS → NOTES"))
         self._buttons_table = self._make_table(["Button #", "MIDI Note"], capture_kind="button")
@@ -90,6 +154,10 @@ class MappingEditor(QWidget):
         self._scale_group_right = self._make_scale_group("Right Stick", left=False)
         v.addWidget(self._scale_group_right)
 
+        v.addWidget(self._section_label("PROGRAM CHANGE → PRESET"))
+        self._pc_group = self._make_pc_group()
+        v.addWidget(self._pc_group)
+
         self._stack.addWidget(content)
 
         self._lock = ProLockOverlay(
@@ -121,6 +189,7 @@ class MappingEditor(QWidget):
         self._refresh_ab_group()
         self._refresh_scale_group(self._scale_group_left, left=True)
         self._refresh_scale_group(self._scale_group_right, left=False)
+        self._refresh_pc_group()
         # Re-emit selection if a row was previously selected so the inspector refreshes.
         if self._last_selected_table is not None and self._last_selected_kind is not None:
             self._emit_selection(self._last_selected_table, self._last_selected_kind)
@@ -332,6 +401,147 @@ class MappingEditor(QWidget):
     def _on_scale_name(self, name: str, left: bool) -> None:
         cfg = self._mapping.left_stick_corners if left else self._mapping.right_stick_corners
         cfg.scale_name = name or "major"
+        self.mapping_changed.emit()
+
+    # ---------------------------------------------------------------- program change
+
+    def _make_pc_group(self) -> QGroupBox:
+        """Build the Program Change -> Preset inline form group."""
+        box = QGroupBox()
+        box.setFlat(True)
+        form = QFormLayout(box)
+        form.setContentsMargins(0, 4, 0, 4)
+        form.setSpacing(6)
+
+        cfg = self._mapping.program_change
+
+        self._pc_enabled_cb = QCheckBox()
+        self._pc_enabled_cb.setChecked(cfg.enabled)
+        self._pc_enabled_cb.toggled.connect(self._on_pc_enabled_changed)
+        form.addRow("Enabled", self._pc_enabled_cb)
+
+        self._pc_channel_spin = QSpinBox()
+        self._pc_channel_spin.setRange(-1, 15)
+        self._pc_channel_spin.setSpecialValueText("any")
+        self._pc_channel_spin.setValue(cfg.listen_channel)
+        self._pc_channel_spin.setToolTip("-1 = any channel; 0-15 = specific channel")
+        self._pc_channel_spin.valueChanged.connect(self._on_pc_channel_changed)
+        form.addRow("Listen Channel", self._pc_channel_spin)
+
+        self._pc_table = QTableWidget(0, 2)
+        self._pc_table.setHorizontalHeaderLabels(["PC #", "Preset Slug"])
+        self._pc_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self._pc_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self._pc_table.verticalHeader().setVisible(False)
+        self._pc_table.setAlternatingRowColors(False)
+        self._pc_table.setShowGrid(False)
+        self._pc_table.setSelectionBehavior(QTableWidget.SelectRows)
+        form.addRow(self._pc_table)
+
+        btn_row = QWidget()
+        btn_layout = QHBoxLayout(btn_row)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setSpacing(6)
+        add_btn = QPushButton("Add")
+        add_btn.setFixedWidth(60)
+        add_btn.clicked.connect(self._on_pc_add)
+        remove_btn = QPushButton("Remove")
+        remove_btn.setFixedWidth(70)
+        remove_btn.clicked.connect(self._on_pc_remove)
+        btn_layout.addWidget(add_btn)
+        btn_layout.addWidget(remove_btn)
+        btn_layout.addStretch()
+        form.addRow(btn_row)
+
+        hint = QLabel("DAW sends PC# -> app loads the mapped preset slug instantly")
+        hint.setStyleSheet("color: #8a9099; font-size: 11px;")
+        hint.setWordWrap(True)
+        form.addRow(hint)
+
+        self._fill_pc_table()
+        return box
+
+    def _fill_pc_table(self) -> None:
+        """Populate the PC bindings table from the current mapping."""
+        cfg = self._mapping.program_change
+        bindings = sorted(cfg.bindings.items())
+        self._pc_table.setRowCount(len(bindings))
+        for r, (pc_num, slug) in enumerate(bindings):
+            pc_item = QTableWidgetItem(str(pc_num))
+            pc_item.setTextAlignment(Qt.AlignCenter)
+            self._pc_table.setItem(r, 0, pc_item)
+
+            slug_combo = QComboBox()
+            slug_combo.addItem("(none)", "")
+            for s in _presets.list_presets():
+                slug_combo.addItem(s, s)
+            idx = slug_combo.findData(slug)
+            slug_combo.setCurrentIndex(max(0, idx))
+            slug_combo.currentIndexChanged.connect(
+                lambda _i, row=r, combo=slug_combo:
+                self._on_pc_slug_changed(row, combo.currentData() or "")
+            )
+            self._pc_table.setCellWidget(r, 1, slug_combo)
+
+    def _refresh_pc_group(self) -> None:
+        """Sync Program Change widgets to the current mapping (called on set_mapping)."""
+        cfg = self._mapping.program_change
+        self._pc_enabled_cb.blockSignals(True)
+        self._pc_channel_spin.blockSignals(True)
+        self._pc_enabled_cb.setChecked(cfg.enabled)
+        self._pc_channel_spin.setValue(cfg.listen_channel)
+        self._pc_enabled_cb.blockSignals(False)
+        self._pc_channel_spin.blockSignals(False)
+        self._fill_pc_table()
+
+    def _on_pc_enabled_changed(self, checked: bool) -> None:
+        self._mapping.program_change.enabled = checked
+        self.mapping_changed.emit()
+
+    def _on_pc_channel_changed(self, value: int) -> None:
+        self._mapping.program_change.listen_channel = value
+        self.mapping_changed.emit()
+
+    def _on_pc_add(self) -> None:
+        """Add a new PC->slug binding row with the next unused PC number."""
+        cfg = self._mapping.program_change
+        used = set(cfg.bindings.keys())
+        new_pc = next((i for i in range(128) if i not in used), None)
+        if new_pc is None:
+            return
+        cfg.bindings[new_pc] = ""
+        self._fill_pc_table()
+        self.mapping_changed.emit()
+
+    def _on_pc_remove(self) -> None:
+        """Remove the selected PC binding row."""
+        row = self._pc_table.currentRow()
+        if row < 0:
+            return
+        item = self._pc_table.item(row, 0)
+        if item is None:
+            return
+        try:
+            pc_num = int(item.text())
+        except (ValueError, TypeError):
+            return
+        self._mapping.program_change.bindings.pop(pc_num, None)
+        self._fill_pc_table()
+        self.mapping_changed.emit()
+
+    def _on_pc_slug_changed(self, row: int, slug: str) -> None:
+        """Update the slug for the binding at row."""
+        item = self._pc_table.item(row, 0)
+        if item is None:
+            return
+        try:
+            pc_num = int(item.text())
+        except (ValueError, TypeError):
+            return
+        if slug:
+            self._mapping.program_change.bindings[pc_num] = slug
+        else:
+            self._mapping.program_change.bindings.pop(pc_num, None)
         self.mapping_changed.emit()
 
     def _section_label(self, text: str) -> QLabel:

@@ -884,6 +884,9 @@ class MainWindow(QMainWindow):
         w.battery_changed.connect(meter.on_battery)
         w.touchpad_xy.connect(meter.on_touchpad)
         w.transport_changed.connect(meter.on_transport)
+        # Feature #15: Program Change → preset hot-swap (primary bridge only).
+        if primary:
+            w.preset_change_requested.connect(self._on_pc_preset_requested)
 
     # ============================================================== slots
 
@@ -1033,6 +1036,24 @@ class MainWindow(QMainWindow):
         self._mapping_editor.set_mapping(mapping)
         _save_last_mapping(mapping)
         QMessageBox.information(self, "Preset loaded", f"Loaded '{mapping.name}'.")
+
+    def _on_pc_preset_requested(self, slug: str) -> None:
+        """Feature #15: DAW sent a Program Change — load the matching preset.
+
+        Runs on the GUI thread (queued connection from the rtmidi callback
+        thread). Silent if the slug doesn't resolve so a mis-mapped PC number
+        doesn't interrupt a live performance with a dialog.
+        """
+        from . import presets as _presets
+        mapping = _presets.load_preset_by_slug(slug)
+        if mapping is None:
+            self._on_status(f"PC hot-swap: preset '{slug}' not found")
+            return
+        self._mapping = mapping
+        self._multi.apply_mapping(mapping)
+        self._mapping_editor.set_mapping(mapping)
+        _save_last_mapping(mapping)
+        self._on_status(f"PC hot-swap: loaded '{mapping.name}'")
 
     def _on_corner_triggered(self, side: str, kind: str, sector: int) -> None:
         # Flash the activity dot and surface the event in the status subtitle.

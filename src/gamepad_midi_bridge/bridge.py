@@ -95,6 +95,11 @@ class BridgeWorker(QObject):
     # fired a trigger effect. (side="L"/"R", effect name, intensity 0..1).
     haptic_event = Signal(str, str, float)
 
+    # --- Feature #15: Program Change → preset hot-swap. Emitted on the
+    # rtmidi callback thread; main window connects to _on_preset_change_requested
+    # which runs on the GUI thread via a queued connection.
+    preset_change_requested = Signal(str)  # preset slug
+
     def __init__(self, slot_index: int = 0,
                  midi_port_name: Optional[str] = None,
                  demo: bool = False) -> None:
@@ -169,6 +174,12 @@ class BridgeWorker(QObject):
 
     def set_mapping(self, mapping: Mapping) -> None:
         self._state.mapping = mapping
+        # Check if port_name_override changed; if running, restart with new name
+        if self._running and self._midi:
+            old_name = self._midi_port_name
+            new_name = mapping.port_name_override or old_name
+            if new_name != old_name:
+                self._update_port_name(new_name)
         self._cache_b_mapping(mapping)
         self._sync_corner_detectors()
         self._apply_haptics()
@@ -318,6 +329,38 @@ class BridgeWorker(QObject):
         return (self._state.mapping.osc.enabled
                 and self._state.mapping.osc.mode == "only")
 
+    def _update_port_name(self, new_name: str) -> None:
+        """Close the current MIDI port and reopen with a new name.
+        
+        If reopening fails, attempts to reopen with the old name.
+        """
+        old_name = self._midi_port_name
+        self._midi_port_name = new_name
+        
+        # Close current port if open
+        if self._midi:
+            try:
+                self._midi.close()
+            except Exception as e:
+                self.error.emit(f"Error closing MIDI port: {e}")
+                self._midi = None
+        
+        # Try to reopen with new name
+        try:
+            from .connectors import open_port
+            self._midi = open_port(new_name)
+            self.status.emit(f"MIDI port switched to: {new_name}")
+        except Exception as e:
+            # Attempt to revert to old name
+            self.error.emit(f"Failed to open MIDI port '{new_name}': {e}. Reverting to '{old_name}'.")
+            self._midi_port_name = old_name
+            try:
+                self._midi = open_port(old_name)
+                self.status.emit(f"Reverted to MIDI port: {old_name}")
+            except Exception as revert_err:
+                self.error.emit(f"Also failed to revert: {revert_err}")
+                self._midi = None
+
     def _sync_corner_detectors(self) -> None:
         m = self._state.mapping
         self._left_corner = self._build_detector(m.left_stick_corners)
@@ -364,31 +407,31 @@ class BridgeWorker(QObject):
     # ---------------------------------------------------------- haptic input
 
     def _sync_haptic_input(self) -> None:
-        """Open / close the virtual MIDI input port based on mapping.haptic_input.
+        """Open / close the virtual MIDI input port.
 
+        The port is needed when either haptic_input OR program_change is
+        enabled — both features piggyback on the same rtmidi callback.
         Re-entrant: called on start() AND every set_mapping() so the user can
-        toggle the feature live from the Settings panel. If the port can't
-        open (no loopMIDI on Windows, broken CoreMIDI, etc.) we surface it
-        through `status` so the GUI shows the failure without crashing.
+        toggle either feature live from the UI.
         """
-        cfg = self._state.mapping.haptic_input
-        if not cfg.enabled:
+        need_port = (self._state.mapping.haptic_input.enabled
+                     or self._state.mapping.program_change.enabled)
+        if not need_port:
             if self._midi_in is not None:
                 close_input_port(self._midi_in)
                 self._midi_in = None
             return
         if self._midi_in is not None:
-            # Already open — just keep using it. Bindings live on `self._state`
-            # so changes propagate without re-opening the port.
+            # Already open — bindings live on self._state so no re-open needed.
             return
         try:
             self._midi_in = open_input_port(INPUT_PORT_NAME)
             set_input_callback(self._midi_in, self._on_midi_in)
             self.status.emit(
-                f"Haptic-in listening on '{self._midi_in.name}'"
+                f"MIDI-in listening on '{self._midi_in.name}'"
             )
         except MidiInputError as e:
-            self.status.emit(f"Haptic-in unavailable: {e}")
+            self.status.emit(f"MIDI-in unavailable: {e}")
             self._midi_in = None
 
     def _on_midi_in(self, event, _data) -> None:
@@ -411,15 +454,32 @@ class BridgeWorker(QObject):
             return
         if not message:
             return
-        cfg = self._state.mapping.haptic_input
-        if not cfg.enabled or not cfg.bindings:
-            return
         try:
             status_byte = message[0]
         except IndexError:
             return
         msg_type = status_byte & 0xF0
         channel = status_byte & 0x0F
+
+        # --- Feature #15: Program Change → preset hot-swap. Runs regardless
+        # of haptic_input.enabled so DAWs can drive preset loads even when the
+        # user hasn't set up adaptive-trigger feedback.
+        if msg_type == 0xC0 and len(message) >= 2:
+            pc_num = int(message[1])
+            pc_cfg = self._state.mapping.program_change
+            if pc_cfg.enabled:
+                ch_match = (pc_cfg.listen_channel < 0
+                            or channel == (pc_cfg.listen_channel & 0x0F))
+                if ch_match:
+                    slug = pc_cfg.bindings.get(pc_num)
+                    if slug:
+                        self.preset_change_requested.emit(slug)
+            return
+
+        # --- Haptic input (NOTE_ON, CC → adaptive-trigger effects)
+        cfg = self._state.mapping.haptic_input
+        if not cfg.enabled or not cfg.bindings:
+            return
         if cfg.listen_channel >= 0 and channel != (cfg.listen_channel & 0x0F):
             return
 
@@ -438,7 +498,7 @@ class BridgeWorker(QObject):
                     logging.debug(f"Dropped feedback echo: ch={channel} cc={cc_num} val={cc_val}")
                     return
             self._dispatch_haptic("cc", cc_num, cc_val / 127.0)
-        # NOTE_OFF, polyphonic aftertouch, program change, etc. are no-ops —
+        # NOTE_OFF, polyphonic aftertouch, channel pressure, etc. are no-ops —
         # haptics naturally decay (we revert after _HAPTIC_PULSE_MS).
 
     def _recently_sent(self, channel: int, cc_number: int, value: int, window_ms: Optional[int] = None) -> bool:

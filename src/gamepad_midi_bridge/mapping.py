@@ -187,6 +187,21 @@ class OscConfig:
 
 
 @dataclass
+class ProgramChangeConfig:
+    """Bind incoming MIDI Program Change messages to preset loads.
+
+    When `enabled=True` and a PC message arrives on `listen_channel` (or
+    any channel if listen_channel=-1), the matching preset slug is loaded
+    and made active. Off by default.
+
+    bindings maps a PC number (0..127) to a preset slug.
+    """
+    enabled: bool = False
+    listen_channel: int = -1   # -1 = any channel
+    bindings: Dict[int, str] = field(default_factory=dict)  # PC# -> preset slug
+
+
+@dataclass
 class HapticInputBinding:
     """One incoming-MIDI → trigger-effect rule.
 
@@ -271,6 +286,16 @@ class TouchpadConfig:
       - `y_curve`        : response curve for Y axis.
       - `x_curve_amount` : curve aggressiveness for X (0..1).
       - `y_curve_amount` : curve aggressiveness for Y (0..1).
+
+    Zone mode (drum pad grid):
+      - `zone_mode`      : if True, divide touchpad into NxN grid; each zone
+                           fires a different MIDI note (like an MPC drum pad).
+      - `zone_grid`      : grid size N (1..4); so 2 = 2x2 grid (4 zones),
+                           3 = 3x3 (9 zones), 4 = 4x4 (16 zones).
+      - `zone_notes`     : list of MIDI notes corresponding to zones (left-to-
+                           right, top-to-bottom linear order). If shorter than
+                           zone_grid², padded with the last value.
+      - `zone_velocity`  : velocity (0..127) when firing zone notes.
     """
     enabled: bool = False
     x_cc: int = 16                 # primary finger X
@@ -286,6 +311,10 @@ class TouchpadConfig:
     y_curve: str = "linear"        # response curve for Y
     x_curve_amount: float = 0.5    # curve aggressiveness (0..1)
     y_curve_amount: float = 0.5
+    zone_mode: bool = False        # if True, use NxN grid for note-on/off
+    zone_grid: int = 2            # grid size N (1..4)
+    zone_notes: List[int] = field(default_factory=lambda: [36, 38, 40, 42])  # default 2x2 grid notes
+    zone_velocity: int = 100       # velocity for zone notes
 
 
 @dataclass
@@ -374,6 +403,14 @@ class Mapping:
     # Headless/background mode config (feature #12)
     always_background_on_launch: bool = False  # if True, start with --background
 
+    # Per-preset MIDI port name override (feature #23)
+    # If set, BridgeWorker uses this instead of the default "Universal Controller MIDI"
+    port_name_override: Optional[str] = None
+
+    # Program Change → preset hot-swap (feature #15). Disabled by default so
+    # existing users don't get DAW PC messages hijacking their controller config.
+    program_change: ProgramChangeConfig = field(default_factory=ProgramChangeConfig)
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -387,6 +424,9 @@ class Mapping:
         d["button_configs"] = {
             str(k): asdict(v) for k, v in self.button_configs.items()
         }
+        # Ensure port_name_override is included
+        if self.port_name_override:
+            d["port_name_override"] = self.port_name_override
         return d
 
     @classmethod
@@ -422,6 +462,8 @@ class Mapping:
             ab_compare_button=int(data.get("ab_compare_button", -1)),
             ab_b_preset_slug=data.get("ab_b_preset_slug") or None,
             always_background_on_launch=bool(data.get("always_background_on_launch", False)),
+            port_name_override=data.get("port_name_override") or None,
+            program_change=_program_change_from_dict(data.get("program_change")),
         )
 
 
@@ -629,4 +671,28 @@ def _shift_layer_from_dict(d: Optional[dict]) -> ShiftLayerConfig:
         buttons={int(k): int(v) for k, v in d.get("buttons", {}).items()},
         axes={int(k): int(v) for k, v in d.get("axes", {}).items()},
         hats={k: int(v) for k, v in d.get("hats", {}).items()},
+    )
+
+
+def _program_change_from_dict(d: Optional[dict]) -> ProgramChangeConfig:
+    """Hydrate a ProgramChangeConfig from raw dict, defaulting to disabled.
+
+    JSON keys are strings (PC numbers) — convert to ints internally.
+    Missing/empty dict returns a disabled config so old presets are unaffected.
+    """
+    if not d:
+        return ProgramChangeConfig()
+    raw_bindings = d.get("bindings") or {}
+    bindings: Dict[int, str] = {}
+    for str_pc, slug in raw_bindings.items():
+        try:
+            pc = int(str_pc)
+            if 0 <= pc <= 127 and isinstance(slug, str) and slug:
+                bindings[pc] = slug
+        except (TypeError, ValueError):
+            continue
+    return ProgramChangeConfig(
+        enabled=bool(d.get("enabled", False)),
+        listen_channel=int(d.get("listen_channel", -1)),
+        bindings=bindings,
     )

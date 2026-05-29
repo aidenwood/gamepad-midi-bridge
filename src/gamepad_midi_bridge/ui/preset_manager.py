@@ -5,8 +5,8 @@ from typing import Optional
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QPushButton, QStackedLayout,
-    QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QLabel, QListWidget, QMessageBox,
+    QPushButton, QStackedLayout, QVBoxLayout, QWidget,
 )
 
 from .. import presets as preset_io
@@ -39,12 +39,15 @@ class PresetManager(QWidget):
         self._load_btn = QPushButton("Load")
         self._save_btn = QPushButton("Save current as…")
         self._delete_btn = QPushButton("Delete")
+        self._export_btn = QPushButton("Export cheat sheet")
         self._load_btn.clicked.connect(self._on_load)
         self._save_btn.clicked.connect(self._on_save)
         self._delete_btn.clicked.connect(self._on_delete)
+        self._export_btn.clicked.connect(self._on_export_cheatsheet)
         row.addWidget(self._load_btn)
         row.addWidget(self._save_btn)
         row.addWidget(self._delete_btn)
+        row.addWidget(self._export_btn)
         row.addStretch(1)
         v.addLayout(row)
 
@@ -95,3 +98,34 @@ class PresetManager(QWidget):
             return
         preset_io.delete_preset(item.text())
         self.refresh()
+
+    def _on_export_cheatsheet(self) -> None:
+        from pathlib import Path
+        from .. import cheatsheet as cheatsheet_mod
+
+        mapping = self._get_current()
+        safe_name = mapping.name.replace(" ", "_").replace("/", "-") or "mapping"
+        default_path = str(
+            Path.home() / "Desktop" / f"{safe_name}_cheatsheet.pdf"
+        )
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export cheat sheet",
+            default_path,
+            "PDF Files (*.pdf)",
+        )
+        if not dest:
+            return
+        try:
+            cheatsheet_mod.render_cheatsheet(mapping, Path(dest))
+            QMessageBox.information(
+                self,
+                "Cheat sheet exported",
+                f"Saved to:\n{dest}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(
+                self,
+                "Export failed",
+                f"Could not write PDF:\n{exc}",
+            )

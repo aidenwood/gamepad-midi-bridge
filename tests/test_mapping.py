@@ -9,11 +9,13 @@ from gamepad_midi_bridge.mapping import (
     CornerConfig,
     Mapping,
     OscConfig,
+    ProgramChangeConfig,
     SCHEMA_VERSION,
     ShiftLayerConfig,
     StickConfig,
     TouchpadConfig,
     TriggerConfig,
+    _program_change_from_dict,
     _shift_layer_from_dict,
 )
 
@@ -653,3 +655,124 @@ def test_background_launch_config_round_trip():
     m2 = Mapping(name="Default")
     restored2 = Mapping.from_dict(m2.to_dict())
     assert restored2.always_background_on_launch is False
+
+
+# ------------------------------------------------------------------ port_name_override (feature #23)
+
+
+def test_port_name_override_defaults_to_none():
+    """port_name_override defaults to None."""
+    m = Mapping()
+    assert m.port_name_override is None
+
+
+def test_port_name_override_round_trip():
+    """port_name_override serializes and deserializes correctly."""
+    m = Mapping(name="PortNameTest")
+    m.port_name_override = "Logic Pro MIDI Input"
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.port_name_override == "Logic Pro MIDI Input"
+
+
+def test_port_name_override_empty_string_becomes_none():
+    """Empty string port_name_override becomes None on deserialization."""
+    v_dict = {
+        "name": "EmptyPort",
+        "port_name_override": "",
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.port_name_override is None
+
+
+# ------------------------------------------------------------------ program change (feature #15)
+
+
+def test_program_change_config_defaults():
+    """ProgramChangeConfig defaults to disabled with empty bindings."""
+    cfg = ProgramChangeConfig()
+    assert cfg.enabled is False
+    assert cfg.listen_channel == -1
+    assert cfg.bindings == {}
+
+
+def test_program_change_config_round_trip():
+    """ProgramChangeConfig serialises and deserialises end-to-end via Mapping."""
+    m = Mapping(name="PCHotSwap")
+    m.program_change = ProgramChangeConfig(
+        enabled=True,
+        listen_channel=0,
+        bindings={0: "verse-groove", 5: "chorus-punch", 127: "outro-quiet"},
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    pc = restored.program_change
+    assert pc.enabled is True
+    assert pc.listen_channel == 0
+    assert pc.bindings[0] == "verse-groove"
+    assert pc.bindings[5] == "chorus-punch"
+    assert pc.bindings[127] == "outro-quiet"
+
+
+def test_program_change_config_missing_fields_load_defaults():
+    """Preset without program_change key loads cleanly; feature disabled."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "buttons": {"0": 60},
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.program_change.enabled is False
+    assert m.program_change.listen_channel == -1
+    assert m.program_change.bindings == {}
+
+
+def test_program_change_from_dict_handles_missing_fields():
+    """_program_change_from_dict fills in defaults for absent keys."""
+    pc = _program_change_from_dict({"enabled": True})
+    assert pc.enabled is True
+    assert pc.listen_channel == -1
+    assert pc.bindings == {}
+
+
+def test_program_change_from_dict_none_returns_disabled():
+    """_program_change_from_dict(None) returns a disabled default."""
+    pc = _program_change_from_dict(None)
+    assert pc.enabled is False
+    assert pc.bindings == {}
+
+
+def test_program_change_from_dict_string_keys_parse_to_int():
+    """JSON string keys in bindings are converted to int PC numbers."""
+    raw = {
+        "enabled": True,
+        "listen_channel": -1,
+        "bindings": {"0": "kick-map", "63": "snare-map", "127": "fill-map"},
+    }
+    pc = _program_change_from_dict(raw)
+    assert 0 in pc.bindings
+    assert 63 in pc.bindings
+    assert 127 in pc.bindings
+    assert pc.bindings[0] == "kick-map"
+    assert pc.bindings[63] == "snare-map"
+    assert pc.bindings[127] == "fill-map"
+
+
+def test_program_change_from_dict_skips_malformed_entries():
+    """Malformed bindings entries (bad PC key or empty slug) are skipped."""
+    raw = {
+        "enabled": True,
+        "bindings": {
+            "not_a_number": "valid-slug",  # bad key
+            "5": "",                        # empty slug skipped
+            "10": "good-slug",
+        },
+    }
+    pc = _program_change_from_dict(raw)
+    assert "not_a_number" not in str(pc.bindings)
+    assert 5 not in pc.bindings   # empty slug excluded
+    assert pc.bindings.get(10) == "good-slug"
+
+
+def test_schema_version_unchanged_after_feature_15():
+    """SCHEMA_VERSION is still 4 after adding program change."""
+    assert SCHEMA_VERSION == 4

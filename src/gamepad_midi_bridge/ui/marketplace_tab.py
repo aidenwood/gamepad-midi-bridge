@@ -389,6 +389,7 @@ class MarketplaceTab(QWidget):
             "author": (preset.get("author") or {}).get("display_name") or (preset.get("author") or {}).get("github_handle") or "Anonymous",
             "description": preset.get("description", ""),
             "label": preset.get("title", "Untitled preset"),
+            "json_blob": preset.get("json_blob") or {},
         }
         self.selection_changed.emit(payload)
 

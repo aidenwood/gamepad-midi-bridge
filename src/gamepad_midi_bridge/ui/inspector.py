@@ -236,11 +236,14 @@ def render_mapping_selection(payload: dict) -> QWidget:
 
 def render_marketplace_selection(payload: dict) -> QWidget:
     """Renderer for marketplace preset card selection.
-    
+
     Accepts a dict shaped like:
-      { "kind": "preset", "slug": str, "title": str, "downloads": int, 
-        "rating": float, "author": str, "description": str, "label": str }
+      { "kind": "preset", "slug": str, "title": str, "downloads": int,
+        "rating": float, "author": str, "description": str, "label": str,
+        "json_blob": dict }
     """
+    from .controller_preview import ControllerPreview
+
     wrap = QWidget()
     v = QVBoxLayout(wrap)
     v.setContentsMargins(0, 0, 0, 0)
@@ -278,6 +281,23 @@ def render_marketplace_selection(payload: dict) -> QWidget:
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("color: #c2c6cc; font-size: 11px; margin-top: 8px;")
         v.addWidget(desc_label)
+
+    # Controller preview diagram
+    divider = QFrame()
+    divider.setFrameShape(QFrame.HLine)
+    divider.setStyleSheet("color: #24262d;")
+    v.addWidget(divider)
+
+    preview_label = QLabel("MAPPING PREVIEW")
+    preview_label.setStyleSheet(
+        "color: #5a606b; font-size: 9px; font-weight: 700; letter-spacing: 1.2px;"
+    )
+    v.addWidget(preview_label)
+
+    preview = ControllerPreview()
+    json_blob = payload.get("json_blob") or {}
+    preview.set_mapping_data(json_blob if isinstance(json_blob, dict) else {})
+    v.addWidget(preview, 0, Qt.AlignLeft)
 
     # Install button (stub)
     install_btn = QPushButton("Install Preset")
