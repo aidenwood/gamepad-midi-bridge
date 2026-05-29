@@ -41,6 +41,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         argv = sys.argv
 
     QCoreApplication.setApplicationName(APP_NAME)
+    QCoreApplication.setApplicationDisplayName(APP_NAME)
     QCoreApplication.setOrganizationName("Aidxn Design")
     QCoreApplication.setOrganizationDomain("aidxn.com")
     QGuiApplication.setDesktopFileName(APP_ID)
