@@ -40,6 +40,7 @@ from .mapping_editor import MappingEditor
 from .marketplace_tab import MarketplaceTab
 from .onboarding import OnboardingWizard, is_first_launch, mark_complete
 from .preset_manager import PresetManager
+from .reconnect_overlay import ReconnectOverlay
 from .settings_panel import SettingsPanel
 from .template_builder_tab import TemplateBuilderTab
 from .tray import TrayController, is_available as tray_available
@@ -135,6 +136,12 @@ class MainWindow(QMainWindow):
         self._activity_timer = QTimer(self)
         self._activity_timer.setSingleShot(True)
         self._activity_timer.timeout.connect(self._fade_activity)
+
+        # Debounced autosave for mapping changes (500ms, single-shot).
+        self._mapping_save_timer = QTimer(self)
+        self._mapping_save_timer.setSingleShot(True)
+        self._mapping_save_timer.setInterval(500)
+        self._mapping_save_timer.timeout.connect(self._on_mapping_save_timeout)
 
         # MIDI throughput counter — incremented on midi_sent and flushed to
         # the status bar at 2Hz so the user can see a live rate without the
@@ -299,6 +306,23 @@ class MainWindow(QMainWindow):
         self._autosave_timer.setInterval(60_000)
         self._autosave_timer.timeout.connect(self._autosave_tick)
         self._autosave_timer.start()
+
+        # ---- Auto-reconnect overlay ----
+        # Instantiated once; kept hidden until a disconnect happens while the
+        # bridge is running.  The overlay lives as a direct child of the
+        # centralWidget so it can cover the full chrome area.
+        self._reconnect_overlay = ReconnectOverlay(self.centralWidget())
+        self._reconnect_overlay.cancel_requested.connect(self._on_reconnect_cancelled)
+        self._reconnect_overlay.retry_requested.connect(self._on_reconnect_retry)
+        # 1-second retry ticker — fires each tick while the overlay is counting.
+        self._reconnect_retry_timer = QTimer(self)
+        self._reconnect_retry_timer.setInterval(1000)
+        self._reconnect_retry_timer.timeout.connect(self._on_reconnect_tick)
+
+        # Esc dismisses the overlay (spec §6).
+        esc_shortcut = QShortcut(QKeySequence("Escape"), self)
+        esc_shortcut.setContext(Qt.ApplicationShortcut)
+        esc_shortcut.activated.connect(self._on_reconnect_esc)
 
         # First-launch onboarding. Deferred so the main window paints before the
         # modal appears — keeps the welcome moment from feeling like a blocker.
@@ -597,6 +621,18 @@ class MainWindow(QMainWindow):
             tab = "mapping"
         self.push_inspector_selection(tab, payload)
 
+    def _on_mapping_changed(self) -> None:
+        """Debounced handler: restart the 500ms timer whenever the mapping
+        mutates. Only persist when the timer finally expires (user stops
+        dragging/tweaking).
+        """
+        self._mapping_save_timer.stop()
+        self._mapping_save_timer.start()
+
+    def _on_mapping_save_timeout(self) -> None:
+        """Persist the mapping to disk after debounce window expires."""
+        _save_last_mapping(self._mapping)
+
     def _build_tabs(self) -> QTabWidget:
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
@@ -653,6 +689,8 @@ class MainWindow(QMainWindow):
         self._mapping_editor.selection_changed.connect(
             self._on_mapping_selection
         )
+        # Debounced persistence on config mutations in the inspector.
+        self._mapping_editor.mapping_changed.connect(self._on_mapping_changed)
         tabs.addTab(self._scrollable(self._mapping_editor), "Mapping")
 
         # Templates — visual mapping builder + multi-format exporter.
@@ -930,8 +968,19 @@ class MainWindow(QMainWindow):
     def _on_controller_info(self, info) -> None:
         if info is None:
             self._meter.set_connected(False)
+            # Only start the reconnect flow if the bridge was actively running
+            # AND auto-reconnect is enabled in the current mapping.
+            if (self._stop_btn.isEnabled()
+                    and self._mapping.auto_reconnect_enabled
+                    and not self._reconnect_overlay.isVisible()):
+                self._start_reconnect_flow()
         else:
             self._meter.set_connected(True, info.name)
+            # If the overlay is counting/retrying, a non-None info means
+            # reconnect succeeded — notify the overlay and stop retrying.
+            if self._reconnect_overlay.isVisible():
+                self._reconnect_retry_timer.stop()
+                self._reconnect_overlay.notify_success()
 
     def _on_calibration_progress(self, fraction: float) -> None:
         if self._calibration_dialog is not None:
@@ -989,6 +1038,55 @@ class MainWindow(QMainWindow):
         if kind == "on":
             self._status_sub.setText(f"Corner {side}{sector} → MIDI note fired")
         self._on_midi_sent()
+
+    # ============================================================== auto-reconnect
+
+    def _start_reconnect_flow(self) -> None:
+        """Begin the auto-reconnect loop after a controller drop."""
+        _log.info("Auto-reconnect: controller lost — starting retry loop")
+        self._status_sub.setText("Controller disconnected — retrying…")
+        self._reconnect_overlay.start_countdown()
+        self._reconnect_retry_timer.start()
+        # Trigger an immediate first retry without waiting 1 second.
+        self._attempt_reconnect()
+
+    def _on_reconnect_tick(self) -> None:
+        """Called every second while the overlay is counting. Try to restart."""
+        # Only attempt while the overlay is still in counting state (it may have
+        # already timed out and moved to FAILED, in which case we stop the timer).
+        if not self._reconnect_overlay.isVisible():
+            self._reconnect_retry_timer.stop()
+            return
+        self._attempt_reconnect()
+
+    def _attempt_reconnect(self) -> None:
+        """Try to spin the bridge back up via a fresh start cycle."""
+        try:
+            # Gracefully stop any partially-running bridge state before restarting.
+            self._multi.stop()
+            slot_count = self._multi.configure(
+                self._mapping, self._settings.current_multi_mode(),
+            )
+            self._bridge = self._multi.primary()
+            self._sync_live_layout(slot_count)
+            self._multi.start()
+        except Exception as e:
+            _log.debug("Auto-reconnect attempt failed: %s", e)
+
+    def _on_reconnect_cancelled(self) -> None:
+        """User dismissed the overlay — stop the retry ticker and go idle."""
+        self._reconnect_retry_timer.stop()
+        self._multi.stop()
+        self._on_stopped()
+
+    def _on_reconnect_retry(self) -> None:
+        """User clicked Retry from the FAILED state — reset and try again."""
+        self._attempt_reconnect()
+
+    def _on_reconnect_esc(self) -> None:
+        """Esc key — only acts if the overlay is visible."""
+        if self._reconnect_overlay.isVisible():
+            self._reconnect_overlay.dismiss()
 
     def _flush_rate(self) -> None:
         # Convert the half-second tally to a per-second rate, round to nearest 10.

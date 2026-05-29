@@ -186,6 +186,7 @@ def render_trigger_editor(payload: dict) -> QWidget:
     """
     cfg = payload.get("config")
     label = str(payload.get("label", "Trigger"))
+    on_change = payload.get("on_change")  # Callback to emit when config mutates
 
     wrap = QWidget()
     v = QVBoxLayout(wrap)
@@ -203,21 +204,29 @@ def render_trigger_editor(payload: dict) -> QWidget:
 
     # ── mode ──
     v.addWidget(_section("SHAPING"))
-    mode_cb = _make_combo(TRIGGER_MODES, cfg.mode, lambda t: setattr(cfg, "mode", t))
+    def _on_mode_combo(t: str) -> None:
+        setattr(cfg, "mode", t)
+        if on_change:
+            on_change()
+    mode_cb = _make_combo(TRIGGER_MODES, cfg.mode, _on_mode_combo)
 
     # ── ceiling ──
     ceil_enabled = cfg.mode == "ceiling"
-    ceil_slider = _make_int_slider(0, 127, cfg.ceiling,
-                                   lambda val: setattr(cfg, "ceiling", val),
-                                   enabled=ceil_enabled)
+    def _on_ceil(val: int) -> None:
+        setattr(cfg, "ceiling", val)
+        if on_change:
+            on_change()
+    ceil_slider = _make_int_slider(0, 127, cfg.ceiling, _on_ceil, enabled=ceil_enabled)
     ceil_row, ceil_val = _slider_row("Ceiling CC", ceil_slider, str(cfg.ceiling))
 
     # ── latch threshold ──
     latch_enabled = cfg.mode == "latch"
     latch_init = int(round(cfg.latch_threshold * 100))
-    latch_slider = _make_float_slider(0, 100, latch_init,
-                                      lambda val: setattr(cfg, "latch_threshold", val / 100.0),
-                                      enabled=latch_enabled)
+    def _on_latch(val: int) -> None:
+        setattr(cfg, "latch_threshold", val / 100.0)
+        if on_change:
+            on_change()
+    latch_slider = _make_float_slider(0, 100, latch_init, _on_latch, enabled=latch_enabled)
     latch_row, latch_val = _slider_row("Latch threshold", latch_slider,
                                        f"{cfg.latch_threshold:.2f}")
 
@@ -232,6 +241,8 @@ def render_trigger_editor(payload: dict) -> QWidget:
         setattr(cfg, "mode", text)
         ceil_slider.setEnabled(text == "ceiling")
         latch_slider.setEnabled(text == "latch")
+        if on_change:
+            on_change()
 
     # Disconnect the simple setter and reconnect with the richer one
     try:
@@ -251,15 +262,20 @@ def render_trigger_editor(payload: dict) -> QWidget:
     # gate_button: -1 means "no gate" in the UI (maps to None in the dataclass)
     gate_init = -1 if cfg.gate_button is None else cfg.gate_button
 
-    def _on_gate_button(val: int) -> None:
+    def _on_gate_button_changed(val: int) -> None:
         cfg.gate_button = None if val < 0 else val
+        if on_change:
+            on_change()
 
-    gate_sb = _make_int_spinbox(-1, 31, gate_init, _on_gate_button)
+    gate_sb = _make_int_spinbox(-1, 31, gate_init, _on_gate_button_changed)
     gate_sb.setSpecialValueText("none")
     v.addWidget(_spinbox_row("Gate button (−1 = off)", gate_sb))
 
-    release_slider = _make_int_slider(0, 127, cfg.gate_release_value,
-                                      lambda val: setattr(cfg, "gate_release_value", val))
+    def _on_release(val: int) -> None:
+        setattr(cfg, "gate_release_value", val)
+        if on_change:
+            on_change()
+    release_slider = _make_int_slider(0, 127, cfg.gate_release_value, _on_release)
     release_row, release_val = _slider_row("Release value", release_slider,
                                            str(cfg.gate_release_value))
     release_slider.valueChanged.connect(lambda val: release_val.setText(str(val)))
@@ -283,6 +299,7 @@ def render_stick_editor(payload: dict) -> QWidget:
     """
     cfg = payload.get("config")
     label = str(payload.get("label", "Stick"))
+    on_change = payload.get("on_change")  # Callback to emit when config mutates
 
     wrap = QWidget()
     v = QVBoxLayout(wrap)
@@ -302,15 +319,21 @@ def render_stick_editor(payload: dict) -> QWidget:
     v.addWidget(_section("DEADZONE"))
 
     dz_init = int(round(cfg.inner_deadzone * 100))
-    dz_slider = _make_float_slider(0, 50, dz_init,
-                                   lambda val: setattr(cfg, "inner_deadzone", val / 100.0))
+    def _on_dz(val: int) -> None:
+        setattr(cfg, "inner_deadzone", val / 100.0)
+        if on_change:
+            on_change()
+    dz_slider = _make_float_slider(0, 50, dz_init, _on_dz)
     dz_row, dz_val = _slider_row("Inner deadzone", dz_slider, f"{cfg.inner_deadzone:.2f}")
     dz_slider.valueChanged.connect(lambda val: dz_val.setText(f"{val / 100:.2f}"))
     v.addWidget(dz_row)
 
     oc_init = int(round(cfg.outer_clamp * 100))
-    oc_slider = _make_float_slider(0, 50, oc_init,
-                                   lambda val: setattr(cfg, "outer_clamp", val / 100.0))
+    def _on_oc(val: int) -> None:
+        setattr(cfg, "outer_clamp", val / 100.0)
+        if on_change:
+            on_change()
+    oc_slider = _make_float_slider(0, 50, oc_init, _on_oc)
     oc_row, oc_val = _slider_row("Outer clamp", oc_slider, f"{cfg.outer_clamp:.2f}")
     oc_slider.valueChanged.connect(lambda val: oc_val.setText(f"{val / 100:.2f}"))
     v.addWidget(oc_row)
@@ -319,12 +342,19 @@ def render_stick_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
     v.addWidget(_section("RESPONSE CURVE"))
 
-    curve_cb = _make_combo(_CURVES, cfg.curve, lambda t: setattr(cfg, "curve", t))
+    def _on_curve(t: str) -> None:
+        setattr(cfg, "curve", t)
+        if on_change:
+            on_change()
+    curve_cb = _make_combo(_CURVES, cfg.curve, _on_curve)
     v.addWidget(_combo_row("Curve", curve_cb))
 
     ca_init = int(round(cfg.curve_amount * 100))
-    ca_slider = _make_float_slider(0, 100, ca_init,
-                                   lambda val: setattr(cfg, "curve_amount", val / 100.0))
+    def _on_ca(val: int) -> None:
+        setattr(cfg, "curve_amount", val / 100.0)
+        if on_change:
+            on_change()
+    ca_slider = _make_float_slider(0, 100, ca_init, _on_ca)
     ca_row, ca_val = _slider_row("Curve amount", ca_slider, f"{cfg.curve_amount:.2f}")
     ca_slider.valueChanged.connect(lambda val: ca_val.setText(f"{val / 100:.2f}"))
     v.addWidget(ca_row)
@@ -336,10 +366,16 @@ def render_stick_editor(payload: dict) -> QWidget:
     polar_chk = QCheckBox()
     polar_chk.setChecked(cfg.polar_mode)
 
-    angle_sb = _make_int_spinbox(0, 127, cfg.polar_angle_cc,
-                                 lambda val: setattr(cfg, "polar_angle_cc", val))
-    mag_sb = _make_int_spinbox(0, 127, cfg.polar_mag_cc,
-                               lambda val: setattr(cfg, "polar_mag_cc", val))
+    def _on_angle(val: int) -> None:
+        setattr(cfg, "polar_angle_cc", val)
+        if on_change:
+            on_change()
+    def _on_mag(val: int) -> None:
+        setattr(cfg, "polar_mag_cc", val)
+        if on_change:
+            on_change()
+    angle_sb = _make_int_spinbox(0, 127, cfg.polar_angle_cc, _on_angle)
+    mag_sb = _make_int_spinbox(0, 127, cfg.polar_mag_cc, _on_mag)
 
     # Enable CC spinboxes only when polar mode is on
     angle_sb.setEnabled(cfg.polar_mode)
@@ -350,6 +386,8 @@ def render_stick_editor(payload: dict) -> QWidget:
         cfg.polar_mode = on
         angle_sb.setEnabled(on)
         mag_sb.setEnabled(on)
+        if on_change:
+            on_change()
 
     polar_chk.stateChanged.connect(_on_polar)
 
@@ -373,6 +411,7 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     """
     cfg = payload.get("config")
     label = str(payload.get("label", "Touchpad"))
+    on_change = payload.get("on_change")  # Callback to emit when config mutates
 
     wrap = QWidget()
     v = QVBoxLayout(wrap)
@@ -391,13 +430,20 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     # ── mode + arm ──
     v.addWidget(_section("BEHAVIOUR"))
 
-    mode_cb = _make_combo(("absolute", "relative"), cfg.mode,
-                          lambda t: setattr(cfg, "mode", t))
+    def _on_tp_mode(t: str) -> None:
+        setattr(cfg, "mode", t)
+        if on_change:
+            on_change()
+    mode_cb = _make_combo(("absolute", "relative"), cfg.mode, _on_tp_mode)
     v.addWidget(_combo_row("Mode", mode_cb))
 
     arm_chk = QCheckBox()
     arm_chk.setChecked(cfg.click_to_arm)
-    arm_chk.stateChanged.connect(lambda s: setattr(cfg, "click_to_arm", bool(s)))
+    def _on_arm(s: int) -> None:
+        setattr(cfg, "click_to_arm", bool(s))
+        if on_change:
+            on_change()
+    arm_chk.stateChanged.connect(_on_arm)
     v.addWidget(_check_row("Click to arm", arm_chk))
 
     # ── deadzone ──
@@ -405,8 +451,11 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     v.addWidget(_section("DEADZONE"))
 
     dz_init = int(round(cfg.inner_deadzone * 100))
-    dz_slider = _make_float_slider(0, 49, dz_init,
-                                   lambda val: setattr(cfg, "inner_deadzone", val / 100.0))
+    def _on_tp_dz(val: int) -> None:
+        setattr(cfg, "inner_deadzone", val / 100.0)
+        if on_change:
+            on_change()
+    dz_slider = _make_float_slider(0, 49, dz_init, _on_tp_dz)
     dz_row, dz_val = _slider_row("Inner deadzone", dz_slider, f"{cfg.inner_deadzone:.2f}")
     dz_slider.valueChanged.connect(lambda val: dz_val.setText(f"{val / 100:.2f}"))
     v.addWidget(dz_row)
@@ -415,12 +464,19 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
     v.addWidget(_section("X AXIS CURVE"))
 
-    xcurve_cb = _make_combo(_CURVES, cfg.x_curve, lambda t: setattr(cfg, "x_curve", t))
+    def _on_xcurve(t: str) -> None:
+        setattr(cfg, "x_curve", t)
+        if on_change:
+            on_change()
+    xcurve_cb = _make_combo(_CURVES, cfg.x_curve, _on_xcurve)
     v.addWidget(_combo_row("X curve", xcurve_cb))
 
     xca_init = int(round(cfg.x_curve_amount * 100))
-    xca_slider = _make_float_slider(0, 100, xca_init,
-                                    lambda val: setattr(cfg, "x_curve_amount", val / 100.0))
+    def _on_xca(val: int) -> None:
+        setattr(cfg, "x_curve_amount", val / 100.0)
+        if on_change:
+            on_change()
+    xca_slider = _make_float_slider(0, 100, xca_init, _on_xca)
     xca_row, xca_val = _slider_row("X amount", xca_slider, f"{cfg.x_curve_amount:.2f}")
     xca_slider.valueChanged.connect(lambda val: xca_val.setText(f"{val / 100:.2f}"))
     v.addWidget(xca_row)
@@ -429,12 +485,19 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
     v.addWidget(_section("Y AXIS CURVE"))
 
-    ycurve_cb = _make_combo(_CURVES, cfg.y_curve, lambda t: setattr(cfg, "y_curve", t))
+    def _on_ycurve(t: str) -> None:
+        setattr(cfg, "y_curve", t)
+        if on_change:
+            on_change()
+    ycurve_cb = _make_combo(_CURVES, cfg.y_curve, _on_ycurve)
     v.addWidget(_combo_row("Y curve", ycurve_cb))
 
     yca_init = int(round(cfg.y_curve_amount * 100))
-    yca_slider = _make_float_slider(0, 100, yca_init,
-                                    lambda val: setattr(cfg, "y_curve_amount", val / 100.0))
+    def _on_yca(val: int) -> None:
+        setattr(cfg, "y_curve_amount", val / 100.0)
+        if on_change:
+            on_change()
+    yca_slider = _make_float_slider(0, 100, yca_init, _on_yca)
     yca_row, yca_val = _slider_row("Y amount", yca_slider, f"{cfg.y_curve_amount:.2f}")
     yca_slider.valueChanged.connect(lambda val: yca_val.setText(f"{val / 100:.2f}"))
     v.addWidget(yca_row)

@@ -4,12 +4,15 @@ from __future__ import annotations
 import pytest
 
 from gamepad_midi_bridge.mapping import (
+    BatteryAlertConfig,
     CornerConfig,
     Mapping,
     OscConfig,
     SCHEMA_VERSION,
+    ShiftLayerConfig,
     StickConfig,
     TouchpadConfig,
+    _shift_layer_from_dict,
 )
 
 
@@ -317,3 +320,137 @@ def test_v3_preset_loads_with_v4_stick_defaults():
     assert m.left_stick.inner_deadzone == pytest.approx(0.05, abs=1e-6)
     assert m.right_stick.curve == "linear"
     assert m.right_stick.polar_mode is False
+
+
+def test_battery_alert_config_defaults():
+    """BatteryAlertConfig has sensible defaults."""
+    cfg = BatteryAlertConfig()
+    assert cfg.enabled is False
+    assert cfg.threshold_percent == 15
+    assert cfg.note == 60
+    assert cfg.velocity == 100
+    assert cfg.channel_override is None
+
+
+def test_battery_alert_config_round_trip():
+    """BatteryAlertConfig serializes and deserializes correctly."""
+    m = Mapping(name="BatteryAlert")
+    m.battery_alert = BatteryAlertConfig(
+        enabled=True,
+        threshold_percent=20,
+        note=64,
+        velocity=80,
+        channel_override=5,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.battery_alert.enabled is True
+    assert restored.battery_alert.threshold_percent == 20
+    assert restored.battery_alert.note == 64
+    assert restored.battery_alert.velocity == 80
+    assert restored.battery_alert.channel_override == 5
+
+
+def test_corner_config_haptic_feedback_round_trip():
+    """CornerConfig corner_haptic_feedback field round-trips correctly."""
+    m = Mapping(name="CornerHaptic")
+    m.left_stick_corners = CornerConfig(
+        enabled=True,
+        n=8,
+        notes=list(range(60, 68)),
+        corner_haptic_feedback=False,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.left_stick_corners.enabled is True
+    assert restored.left_stick_corners.corner_haptic_feedback is False
+
+
+def test_corner_config_haptic_feedback_default_is_true():
+    """CornerConfig defaults corner_haptic_feedback to True."""
+    cfg = CornerConfig()
+    assert cfg.corner_haptic_feedback is True
+
+
+def test_v4_preset_without_battery_alert_loads_with_defaults():
+    """V4 preset (no battery_alert field) loads cleanly with defaults."""
+    v4_dict = {
+        "name": "LegacyV4",
+        "schema_version": 4,
+        "buttons": {"0": 60},
+        "axes": {"0": 3},
+        # Missing: battery_alert
+    }
+    m = Mapping.from_dict(v4_dict)
+    assert m.battery_alert.enabled is False
+    assert m.battery_alert.threshold_percent == 15
+    assert m.battery_alert.note == 60
+    assert m.battery_alert.velocity == 100
+    assert m.battery_alert.channel_override is None
+
+
+# ------------------------------------------------------------------ shift layer
+
+
+def test_shift_layer_config_defaults():
+    """ShiftLayerConfig defaults to disabled/unset."""
+    sl = ShiftLayerConfig()
+    assert sl.enabled is False
+    assert sl.shift_button == -1
+    assert sl.buttons == {}
+    assert sl.axes == {}
+    assert sl.hats == {}
+
+
+def test_shift_layer_config_round_trip():
+    """ShiftLayerConfig serialises and deserialises end-to-end via Mapping."""
+    m = Mapping(name="ShiftTest")
+    m.shift_layer = ShiftLayerConfig(
+        enabled=True,
+        shift_button=4,
+        buttons={0: 72, 1: 74},
+        axes={0: 10},
+        hats={"up": 90},
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    sl = restored.shift_layer
+    assert sl.enabled is True
+    assert sl.shift_button == 4
+    assert sl.buttons == {0: 72, 1: 74}
+    assert sl.axes == {0: 10}
+    assert sl.hats == {"up": 90}
+
+
+def test_shift_layer_from_dict_handles_missing_fields():
+    """_shift_layer_from_dict fills in defaults for any absent keys."""
+    sl = _shift_layer_from_dict({"enabled": True})
+    assert sl.enabled is True
+    assert sl.shift_button == -1
+    assert sl.buttons == {}
+    assert sl.axes == {}
+    assert sl.hats == {}
+
+
+def test_shift_layer_from_dict_none_returns_disabled():
+    """_shift_layer_from_dict(None) returns a disabled default."""
+    sl = _shift_layer_from_dict(None)
+    assert sl.enabled is False
+    assert sl.shift_button == -1
+
+
+def test_v4_preset_without_shift_layer_loads_cleanly():
+    """V4 preset (no shift_layer field) loads cleanly; shift layer disabled."""
+    v4_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "buttons": {"0": 60},
+        "axes": {"0": 3},
+        # Missing: shift_layer
+    }
+    m = Mapping.from_dict(v4_dict)
+    assert m.shift_layer.enabled is False
+    assert m.shift_layer.shift_button == -1
+    assert m.shift_layer.buttons == {}
+
+
+def test_schema_version_unchanged():
+    """SCHEMA_VERSION is still 4 after adding shift layer."""
+    assert SCHEMA_VERSION == 4

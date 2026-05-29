@@ -91,6 +91,7 @@ class CornerConfig:
     notes: List[int] = field(default_factory=list)
     r_enter: float = 0.92
     r_exit: float = 0.75
+    corner_haptic_feedback: bool = True        # fire short trigger pulse on corner fire
 
     def ensure_notes(self) -> None:
         """Pad or trim `notes` to match `n` so the UI can edit safely."""
@@ -102,6 +103,38 @@ class CornerConfig:
             ]
         elif len(self.notes) > self.n:
             self.notes = self.notes[: self.n]
+
+
+@dataclass
+class ShiftLayerConfig:
+    """Optional shift-layer mapping. When `enabled=True` and the user holds
+    `shift_button`, the bridge swaps its active mapping for this overlay.
+
+    Behaviour is purely additive — the overlay only OVERRIDES the keys it
+    explicitly defines. Buttons/axes/hats not present in the overlay fall
+    through to the base mapping. This lets users say things like 'hold L1
+    to remap face buttons to scene 2 cues, but keep the sticks doing the
+    same thing'.
+    """
+    enabled: bool = False
+    shift_button: int = -1                # -1 = unset; otherwise a button index
+    buttons: Dict[int, int] = field(default_factory=dict)
+    axes: Dict[int, int] = field(default_factory=dict)
+    hats: Dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class BatteryAlertConfig:
+    """Emit a MIDI note when DualSense battery drops below a threshold.
+
+    Fires once on threshold breach, resets when battery rises back above
+    threshold (so plugging in for a charge re-arms the alert).
+    """
+    enabled: bool = False
+    threshold_percent: int = 15
+    note: int = 60
+    velocity: int = 100
+    channel_override: Optional[int] = None     # uses mapping.midi_channel if None
 
 
 @dataclass
@@ -273,6 +306,17 @@ class Mapping:
     # so V1.1 users don't get their behaviour changed under them.
     haptic_input: HapticInputConfig = field(default_factory=HapticInputConfig)
 
+    # Battery-low alert — fires a MIDI note when battery drops below threshold
+    battery_alert: BatteryAlertConfig = field(default_factory=BatteryAlertConfig)
+
+    # Auto-reconnect — show countdown overlay and retry when a controller drops.
+    # Default ON so stage performers get the safety net automatically.
+    auto_reconnect_enabled: bool = True
+
+    # Shift-layer overlay — hold shift_button to swap the active mapping.
+    # Disabled by default so existing presets are completely unaffected.
+    shift_layer: ShiftLayerConfig = field(default_factory=ShiftLayerConfig)
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -304,6 +348,9 @@ class Mapping:
             r2_trigger=_trigger_from_dict(data.get("r2_trigger")),
             left_stick=_stick_from_dict(data.get("left_stick")),
             right_stick=_stick_from_dict(data.get("right_stick")),
+            battery_alert=_battery_alert_from_dict(data.get("battery_alert")),
+            shift_layer=_shift_layer_from_dict(data.get("shift_layer")),
+            auto_reconnect_enabled=bool(data.get("auto_reconnect_enabled", True)),
         )
 
 
@@ -338,6 +385,7 @@ def _corner_from_dict(d: Optional[dict]) -> CornerConfig:
         notes=[int(v) for v in d.get("notes", [])],
         r_enter=float(d.get("r_enter", 0.92)),
         r_exit=float(d.get("r_exit", 0.75)),
+        corner_haptic_feedback=bool(d.get("corner_haptic_feedback", True)),
     )
     cfg.ensure_notes()
     return cfg
@@ -425,4 +473,44 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
         polar_mode=bool(d.get("polar_mode", False)),
         polar_angle_cc=int(d.get("polar_angle_cc", 7)),
         polar_mag_cc=int(d.get("polar_mag_cc", 8)),
+    )
+
+
+def _battery_alert_from_dict(d: Optional[dict]) -> BatteryAlertConfig:
+    """Hydrate a BatteryAlertConfig from raw dict with sensible defaults."""
+    if not d:
+        return BatteryAlertConfig()
+    raw_override = d.get("channel_override")
+    channel_override: Optional[int] = None
+    if raw_override is not None:
+        try:
+            channel_override = int(raw_override)
+            if channel_override < 0 or channel_override > 15:
+                channel_override = None
+        except (TypeError, ValueError):
+            channel_override = None
+    return BatteryAlertConfig(
+        enabled=bool(d.get("enabled", False)),
+        threshold_percent=max(0, min(100, int(d.get("threshold_percent", 15)))),
+        note=max(0, min(127, int(d.get("note", 60)))),
+        velocity=max(0, min(127, int(d.get("velocity", 100)))),
+        channel_override=channel_override,
+    )
+
+
+def _shift_layer_from_dict(d: Optional[dict]) -> ShiftLayerConfig:
+    """Hydrate a ShiftLayerConfig from raw dict, defaulting to disabled.
+
+    Missing fields fall back to defaults so presets without a `shift_layer`
+    key load cleanly (shift layer stays disabled, schema version unchanged).
+    """
+    if not d:
+        return ShiftLayerConfig()
+    shift_button = int(d.get("shift_button", -1))
+    return ShiftLayerConfig(
+        enabled=bool(d.get("enabled", False)),
+        shift_button=shift_button,
+        buttons={int(k): int(v) for k, v in d.get("buttons", {}).items()},
+        axes={int(k): int(v) for k, v in d.get("axes", {}).items()},
+        hats={k: int(v) for k, v in d.get("hats", {}).items()},
     )

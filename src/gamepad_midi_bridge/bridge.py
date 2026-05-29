@@ -143,6 +143,7 @@ class BridgeWorker(QObject):
         self._prev_touch_value: Dict[str, float] = {}  # tracks relative-mode state per axis
         self._touch_armed: bool = False  # for click_to_arm mode
         self._prev_battery: Optional[tuple] = None
+        self._battery_alert_fired: bool = False  # track if alert has fired for current low state
         # Telemetry throttle — emit GUI updates at ~30Hz max even at 100Hz polling
         self._last_telemetry: float = 0.0
         self._telemetry_interval = 1.0 / 30.0
@@ -500,9 +501,29 @@ class BridgeWorker(QObject):
 
     # ---------------------------------------------------------- inner-loop chunks
 
+    def _active_mappings_view(self, mapping):
+        """Return (buttons, axes, hats) dicts with the shift overlay merged in.
+
+        If the shift layer is enabled AND the designated shift button is
+        currently held, each dict is formed as {**base, **overlay} so the
+        overlay wins on any key it defines while unmentioned controls fall
+        through unchanged. Otherwise the base mapping dicts are returned
+        as-is (no copy, no allocation).
+        """
+        sl = mapping.shift_layer
+        if (sl.enabled
+                and sl.shift_button >= 0
+                and self._prev_buttons.get(sl.shift_button, False)):
+            buttons = {**mapping.buttons, **sl.buttons}
+            axes = {**mapping.axes, **sl.axes}
+            hats = {**mapping.hats, **sl.hats}
+            return buttons, axes, hats
+        return mapping.buttons, mapping.axes, mapping.hats
+
     def _poll_buttons(self, reader, mapping, midi, note_on, note_off, n_buttons) -> None:
+        buttons, _axes, _hats = self._active_mappings_view(mapping)
         osc_only = self._osc_only()
-        for btn_idx, note in mapping.buttons.items():
+        for btn_idx, note in buttons.items():
             if btn_idx >= n_buttons:
                 continue
             pressed = reader.get_button(btn_idx)
@@ -522,8 +543,9 @@ class BridgeWorker(QObject):
                 self.button_state.emit(btn_idx, pressed)
 
     def _poll_axes(self, reader, mapping, offsets, deadzone, midi, cc, n_axes) -> None:
+        _buttons, axes, _hats = self._active_mappings_view(mapping)
         osc_only = self._osc_only()
-        for axis_idx, cc_num in mapping.axes.items():
+        for axis_idx, cc_num in axes.items():
             if axis_idx >= n_axes:
                 continue
             raw = reader.get_axis(axis_idx)
@@ -652,6 +674,8 @@ class BridgeWorker(QObject):
                     self.midi_sent.emit()
                     self._prev_corner_notes[side] = note
                     self.corner_triggered.emit(side, "on", event.sector)
+                    # Fire corner haptic feedback on the matching trigger
+                    self._fire_corner_haptic(side, mapping)
             elif event.kind == "off":
                 note = self._prev_corner_notes[side]
                 if note is not None:
@@ -681,6 +705,7 @@ class BridgeWorker(QObject):
         return None
 
     def _poll_hat(self, reader, mapping, midi, note_on, note_off) -> None:
+        _buttons, _axes, hats = self._active_mappings_view(mapping)
         hat_x, hat_y = reader.get_hat(0)
         current = {
             "up":    hat_y ==  1,
@@ -688,7 +713,7 @@ class BridgeWorker(QObject):
             "left":  hat_x == -1,
             "right": hat_x ==  1,
         }
-        for direction, note in mapping.hats.items():
+        for direction, note in hats.items():
             now = current[direction]
             was = self._prev_hat[direction]
             if now and not was:
@@ -718,6 +743,9 @@ class BridgeWorker(QObject):
                 self._prev_battery = snapshot
                 self.battery_changed.emit(*snapshot)
             self._last_battery_poll = now
+
+            # Battery alert: fire once on threshold breach, reset on recovery
+            self._check_battery_alert(mapping, midi, state.battery.level_percent)
 
         # Touchpad — primary finger always; second finger when two_finger mode on.
         if mapping.touchpad.enabled:
@@ -756,6 +784,52 @@ class BridgeWorker(QObject):
                         bx, by = tb.normalized()
                         self._send_touch_cc(midi, cc, tp_cfg.b_x_cc, bx, tp_cfg, "x")
                         self._send_touch_cc(midi, cc, tp_cfg.b_y_cc, by, tp_cfg, "y")
+
+    def _check_battery_alert(self, mapping: Mapping, midi: OpenedPort,
+                             percent: int) -> None:
+        """Check battery level and fire MIDI note alert if threshold breached.
+
+        Fires once when percent < threshold, resets when percent >= threshold.
+        """
+        cfg = mapping.battery_alert
+        if not cfg.enabled:
+            return
+
+        threshold = cfg.threshold_percent
+        below_threshold = percent < threshold
+
+        if below_threshold and not self._battery_alert_fired:
+            # Threshold just breached — fire the alert
+            channel = (cfg.channel_override if cfg.channel_override is not None
+                       else mapping.midi_channel) & 0x0F
+            note_on = 0x90 | channel
+            midi.port.send_message([note_on, cfg.note, cfg.velocity])
+            self.midi_sent.emit()
+            self._battery_alert_fired = True
+        elif not below_threshold and self._battery_alert_fired:
+            # Battery recovered above threshold — reset the alert so it fires again
+            # on the next low-battery event
+            self._battery_alert_fired = False
+
+    def _fire_corner_haptic(self, side: str, mapping: Mapping) -> None:
+        """Fire a short haptic pulse on the stick's matching trigger.
+
+        L-side corner → L2 trigger pulse. R-side corner → R2 trigger pulse.
+        """
+        cfg = mapping.left_stick_corners if side == "L" else mapping.right_stick_corners
+        if not cfg.corner_haptic_feedback:
+            return
+
+        # Use the existing haptic infrastructure: write the feedback effect
+        # for ~_HAPTIC_PULSE_MS then revert via a timer
+        binding = HapticInputBinding(
+            trigger="L2" if side == "L" else "R2",
+            source="note",
+            midi_id=0,
+            effect="feedback",
+            intensity_scale=1.0,
+        )
+        self._fire_haptic(binding, intensity=1.0)
 
     def _send_touch_cc(self, midi, cc, cc_num: int, normalized: float,
                        cfg: Optional["Mapping.TouchpadConfig"] = None,

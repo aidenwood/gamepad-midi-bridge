@@ -8,8 +8,8 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QHeaderView, QLabel, QStackedLayout, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QCheckBox, QFormLayout, QGroupBox, QHeaderView, QLabel, QSpinBox,
+    QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..license import is_pro
@@ -31,6 +31,9 @@ class MappingEditor(QWidget):
     def __init__(self, mapping: Mapping, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._mapping = mapping
+        # Track the last selected (table, kind) so set_mapping can re-emit selection.
+        self._last_selected_table: Optional[QTableWidget] = None
+        self._last_selected_kind: Optional[str] = None
 
         # Stacked: actual editor underneath, lock overlay on top when not Pro.
         self._stack = QStackedLayout(self)
@@ -68,6 +71,10 @@ class MappingEditor(QWidget):
         )
         v.addWidget(self._touchpad_table)
 
+        v.addWidget(self._section_label("SHIFT LAYER (Pro)"))
+        self._shift_group = self._make_shift_group()
+        v.addWidget(self._shift_group)
+
         self._stack.addWidget(content)
 
         self._lock = ProLockOverlay(
@@ -88,12 +95,64 @@ class MappingEditor(QWidget):
     def set_mapping(self, mapping: Mapping) -> None:
         self._mapping = mapping
         self._refresh_tables()
+        self._refresh_shift_group()
+        # Re-emit selection if a row was previously selected so the inspector refreshes.
+        if self._last_selected_table is not None and self._last_selected_kind is not None:
+            self._emit_selection(self._last_selected_table, self._last_selected_kind)
 
     def refresh_lock(self) -> None:
         # Show overlay (index 1) if not Pro, editor (index 0) if Pro.
         self._stack.setCurrentIndex(0 if is_pro() else 1)
 
     # ------------------------------------------------------------------ helpers
+
+    def _make_shift_group(self) -> QGroupBox:
+        """Build the Shift Layer inline form group."""
+        box = QGroupBox()
+        box.setFlat(True)
+        form = QFormLayout(box)
+        form.setContentsMargins(0, 4, 0, 4)
+        form.setSpacing(6)
+
+        sl = self._mapping.shift_layer
+
+        self._shift_enabled_cb = QCheckBox()
+        self._shift_enabled_cb.setChecked(sl.enabled)
+        self._shift_enabled_cb.toggled.connect(self._on_shift_enabled_changed)
+        form.addRow("Enabled", self._shift_enabled_cb)
+
+        self._shift_button_spin = QSpinBox()
+        self._shift_button_spin.setRange(-1, 31)
+        self._shift_button_spin.setSpecialValueText("(unset)")
+        self._shift_button_spin.setValue(sl.shift_button)
+        self._shift_button_spin.valueChanged.connect(self._on_shift_button_changed)
+        form.addRow("Shift Button", self._shift_button_spin)
+
+        hint = QLabel("Held button swaps the mapping; otherwise base mapping plays")
+        hint.setStyleSheet("color: #8a9099; font-size: 11px;")
+        hint.setWordWrap(True)
+        form.addRow(hint)
+
+        return box
+
+    def _refresh_shift_group(self) -> None:
+        """Sync the shift layer widgets to the current mapping (called on set_mapping)."""
+        sl = self._mapping.shift_layer
+        # Block signals so programmatic updates don't trigger on_change callbacks.
+        self._shift_enabled_cb.blockSignals(True)
+        self._shift_button_spin.blockSignals(True)
+        self._shift_enabled_cb.setChecked(sl.enabled)
+        self._shift_button_spin.setValue(sl.shift_button)
+        self._shift_enabled_cb.blockSignals(False)
+        self._shift_button_spin.blockSignals(False)
+
+    def _on_shift_enabled_changed(self, checked: bool) -> None:
+        self._mapping.shift_layer.enabled = checked
+        self.mapping_changed.emit()
+
+    def _on_shift_button_changed(self, value: int) -> None:
+        self._mapping.shift_layer.shift_button = value
+        self.mapping_changed.emit()
 
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
@@ -144,6 +203,9 @@ class MappingEditor(QWidget):
         row = table.currentRow()
         if row < 0 or row >= table.rowCount():
             return
+        # Track this selection for re-emission on set_mapping.
+        self._last_selected_table = table
+        self._last_selected_kind = kind
         idx_item = table.item(row, 0)
         midi_item = table.item(row, 1)
         if idx_item is None or midi_item is None:
@@ -192,6 +254,8 @@ class MappingEditor(QWidget):
         }
         if config is not None:
             payload["config"] = config
+        # Wire callback so renderers emit mapping_changed when they mutate.
+        payload["on_change"] = self.mapping_changed.emit
 
         self.selection_changed.emit(payload)
 
@@ -200,9 +264,13 @@ class MappingEditor(QWidget):
         row = self._touchpad_table.currentRow()
         if row < 0:
             return
+        # Track this selection for re-emission on set_mapping.
+        self._last_selected_table = self._touchpad_table
+        self._last_selected_kind = "touchpad"
         payload: dict = {
             "kind": "touchpad",
             "label": "DualSense Touchpad",
             "config": self._mapping.touchpad,
+            "on_change": self.mapping_changed.emit,
         }
         self.selection_changed.emit(payload)
