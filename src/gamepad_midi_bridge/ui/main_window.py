@@ -12,9 +12,10 @@ from PySide6.QtWidgets import (
     QPushButton, QSplitter, QStackedLayout, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from .. import APP_NAME, __version__, telemetry, autobackup
+from ..controller_history import seen_controllers, mark_seen
 
 _log = logging.getLogger(__name__)
 from ..controller import available_count
@@ -24,6 +25,7 @@ from ..multi import MultiBridgeController, desired_slot_count
 from ..portable import export_pack, import_pack
 from ..updater import UpdateChecker, UpdateInfo
 from .calibration_dialog import CalibrationDialog
+from .test_wizard import ControllerTestWizard
 from .bluetooth_tab import BluetoothTab
 from .connectors_tab import ConnectorsTab
 from .controller_meter import ControllerMeter
@@ -51,6 +53,7 @@ from .preset_manager import PresetManager
 from .reconnect_overlay import ReconnectOverlay
 from .settings_panel import SettingsPanel
 from .template_builder_tab import TemplateBuilderTab
+from .command_palette import Command, CommandPalette
 from .tray import TrayController, is_available as tray_available
 from .visualise_tab import VisualiseTab
 
@@ -141,6 +144,7 @@ class MainWindow(QMainWindow):
         self._multi = MultiBridgeController(self)
         self._bridge = self._multi.primary()
         self._calibration_dialog = None
+        self._test_wizard = None
         self._activity_timer = QTimer(self)
         self._activity_timer.setSingleShot(True)
         self._activity_timer.timeout.connect(self._fade_activity)
@@ -313,6 +317,11 @@ class MainWindow(QMainWindow):
         toggle = QShortcut(QKeySequence("Ctrl+Return"), self)
         toggle.setContext(Qt.ApplicationShortcut)
         toggle.activated.connect(self._toggle_bridge)
+
+        # Cmd-K / Ctrl-K — command palette.
+        palette_sc = QShortcut(QKeySequence("Ctrl+K"), self)
+        palette_sc.setContext(Qt.ApplicationShortcut)
+        palette_sc.activated.connect(self._open_command_palette)
 
         # Tray icon — optional, depends on platform support.
         self._tray: Optional[TrayController] = None
@@ -767,6 +776,7 @@ class MainWindow(QMainWindow):
         self._presets.upgrade_clicked.connect(self._open_upgrade)
         self._presets.activate_clicked.connect(self._enter_license_key)
         self._presets.preset_loaded.connect(self._on_preset_loaded)
+        self._presets.mapping_changed.connect(self._on_preset_mapping_changed)
         self._presets.selection_changed.connect(
             lambda p: self.push_inspector_selection("presets", p)
         )
@@ -996,6 +1006,8 @@ class MainWindow(QMainWindow):
         # Feature #15: Program Change → preset hot-swap (primary bridge only).
         if primary:
             w.preset_change_requested.connect(self._on_pc_preset_requested)
+            # Setlist mode: step-through signal (primary bridge only).
+            w.setlist_step.connect(self._on_setlist_step)
 
     # ============================================================== slots
 
@@ -1128,6 +1140,11 @@ class MainWindow(QMainWindow):
             if self._reconnect_overlay.isVisible():
                 self._reconnect_retry_timer.stop()
                 self._reconnect_overlay.notify_success()
+            
+            # Test wizard on first-time controller connect
+            if (not self._mapping.config.get("controller_test_wizard_disabled", False)
+                    and info.name not in seen_controllers()):
+                QTimer.singleShot(800, lambda: self._run_test_wizard(info.name))
 
     def _on_calibration_progress(self, fraction: float) -> None:
         if self._calibration_dialog is not None:
@@ -1140,6 +1157,25 @@ class MainWindow(QMainWindow):
             if not self._calibration_dialog.isVisible():
                 self._calibration_dialog.show()
             self._calibration_dialog.on_done(offsets, severe, significant)
+
+    def _run_test_wizard(self, controller_name: str) -> None:
+        """Launch the test wizard for a new controller."""
+        if self._bridge.worker is None or self._bridge.worker.controller_info is None:
+            return
+        
+        info = self._bridge.worker.controller_info
+        self._test_wizard = ControllerTestWizard(info, self)
+        self._test_wizard.wizard_complete.connect(
+            lambda missing: self._on_wizard_complete(controller_name, missing)
+        )
+        self._test_wizard.show()
+
+    def _on_wizard_complete(self, controller_name: str, missing: list) -> None:
+        """Record controller as seen after wizard completion."""
+        mark_seen(controller_name)
+        if self._test_wizard:
+            self._test_wizard.deleteLater()
+            self._test_wizard = None
 
     def _on_status(self, text: str) -> None:
         # Mirror engine status into the subtitle line.
@@ -1180,6 +1216,17 @@ class MainWindow(QMainWindow):
         _save_last_mapping(mapping)
         QMessageBox.information(self, "Preset loaded", f"Loaded '{mapping.name}'.")
 
+    def _on_preset_mapping_changed(self, mapping: Mapping) -> None:
+        """Setlist (and future dialogs) on the Presets tab saved edits to the mapping.
+
+        Apply the updated mapping to the bridge and persist it. No dialog —
+        the user already confirmed in the originating dialog.
+        """
+        self._mapping = mapping
+        self._multi.apply_mapping(mapping)
+        self._mapping_editor.set_mapping(mapping)
+        _save_last_mapping(mapping)
+
     def _on_pc_preset_requested(self, slug: str) -> None:
         """Feature #15: DAW sent a Program Change — load the matching preset.
 
@@ -1197,6 +1244,26 @@ class MainWindow(QMainWindow):
         self._mapping_editor.set_mapping(mapping)
         _save_last_mapping(mapping)
         self._on_status(f"PC hot-swap: loaded '{mapping.name}'")
+
+    def _on_setlist_step(self, slug: str, index: int, total: int) -> None:
+        """Setlist mode: Next/Prev button pressed — load the indicated preset.
+
+        Runs on the GUI thread (queued connection from the bridge worker).
+        Silent if the slug doesn't resolve so a mis-configured setlist doesn't
+        interrupt a live performance with a dialog.
+        """
+        from .. import presets as _presets
+        mapping = _presets.load_preset_by_slug(slug)
+        if mapping is None:
+            self._on_status(f"Setlist: preset '{slug}' not found ({index + 1}/{total})")
+            return
+        self._mapping = mapping
+        self._multi.apply_mapping(mapping)
+        self._mapping_editor.set_mapping(mapping)
+        _save_last_mapping(mapping)
+        self._on_status(
+            f"Setlist: {index + 1}/{total} — loaded '{mapping.name}'"
+        )
 
     def _on_corner_triggered(self, side: str, kind: str, sector: int) -> None:
         # Flash the activity dot and surface the event in the status subtitle.
@@ -1495,6 +1562,146 @@ class MainWindow(QMainWindow):
         else:
             self._status_title.setText("Idle")
         self._status_sub.setText("Plug in a controller and click Start.")
+
+
+    # ============================================================== command palette
+
+    def _register_palette_commands(self) -> List[Command]:
+        """Build the full command list. Called fresh each time the palette opens
+        so dynamic entries (e.g. preset names) are always current."""
+        cmds: List[Command] = []
+
+        # ---- Bridge control ----
+        cmds.append(Command("Start bridge", "Start MIDI bridging", self._on_start))
+        cmds.append(Command("Stop bridge", "Stop MIDI bridging", self._on_stop))
+        cmds.append(Command("Toggle bridge", "Start or stop the bridge", self._toggle_bridge))
+
+        # ---- Layout toggles ----
+        cmds.append(Command(
+            "Toggle Split view", "Show/hide the side controller meter",
+            lambda: (self._split_btn.setChecked(not self._split_btn.isChecked()),
+                     self._toggle_split_view()),
+        ))
+        cmds.append(Command(
+            "Toggle Console", "Show/hide the log console",
+            lambda: (self._console_btn.setChecked(not self._console_btn.isChecked()),
+                     self._toggle_console()),
+        ))
+        cmds.append(Command(
+            "Toggle Inspector", "Show/hide the right-hand inspector panel",
+            lambda: (self._inspect_btn.setChecked(not self._inspect_btn.isChecked()),
+                     self._toggle_inspector()),
+        ))
+        cmds.append(Command(
+            "Toggle 3D background", "Show/hide the rotating 3D controller",
+            lambda: (self._3d_btn.setChecked(not self._3d_btn.isChecked()),
+                     self._toggle_3d()),
+        ))
+
+        # ---- Tab navigation ----
+        tab_names = [
+            "Live", "Visualise", "Mapping", "Templates", "Presets",
+            "Marketplace", "Connectors", "Bluetooth", "Settings", "Help", "About",
+        ]
+        tabs = getattr(self, "_tabs_ref", None)
+        if tabs is not None:
+            for name in tab_names:
+                def _switch(n=name, t=tabs):
+                    for i in range(t.count()):
+                        if t.tabText(i) == n:
+                            t.setCurrentIndex(i)
+                            break
+                cmds.append(Command(f"Switch to {name}", f"Open the {name} tab", _switch))
+
+        # ---- Presets ----
+        from .. import presets as preset_io
+        for slug in preset_io.list_presets():
+            def _load(s=slug):
+                mapping = preset_io.load_preset_by_slug(s)
+                if mapping is not None:
+                    self._on_preset_loaded(mapping)
+            cmds.append(Command(f"Load preset: {slug}", "Load this saved preset", _load))
+
+        cmds.append(Command(
+            "Save preset as snapshot",
+            "Save the current mapping as a timestamped snapshot",
+            lambda: (autobackup.save_snapshot(self._mapping),
+                     self._on_status("Snapshot saved")),
+        ))
+
+        # ---- Licensing ----
+        cmds.append(Command("Recover license", "Open the license recovery page",
+                            lambda: webbrowser.open(RECOVERY_URL)))
+        cmds.append(Command("Enter license key", "Activate a Pro license",
+                            self._enter_license_key))
+        cmds.append(Command("Upgrade to Pro", "Open the store page",
+                            self._open_upgrade))
+
+        # ---- Settings and tools ----
+        cmds.append(Command("Open Settings", "Jump to the Settings tab",
+                            self._focus_settings_tab))
+        cmds.append(Command("Recalibrate sticks",
+                            "Run stick dead-zone calibration against the live controller",
+                            self._on_recalibrate))
+        cmds.append(Command("Export crash bundle",
+                            "Export a zip of crash logs for bug reports",
+                            self._on_export_crash_bundle))
+        cmds.append(Command("Export cheat sheet",
+                            "Export the current mapping as a PDF cheat sheet",
+                            self._on_export_cheatsheet_cmd))
+        cmds.append(Command("Run marketplace seed",
+                            "Re-seed bundled starter presets (admin)",
+                            self._on_marketplace_seed))
+
+        return cmds
+
+    def _open_command_palette(self) -> None:
+        """Instantiate and show the command palette (modal)."""
+        commands = self._register_palette_commands()
+        palette = CommandPalette(commands, parent=self)
+        palette.exec()
+
+    # ---- palette action helpers ----
+
+    def _on_export_crash_bundle(self) -> None:
+        from ..crash_reporter import export_bundle
+        try:
+            path = export_bundle()
+            QMessageBox.information(
+                self, "Crash bundle exported",
+                f"Bundle saved to:\n{path}\n\nAttach this file to a bug report.",
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Export failed", str(e))
+
+    def _on_export_cheatsheet_cmd(self) -> None:
+        from pathlib import Path
+        from PySide6.QtWidgets import QFileDialog
+        from .. import cheatsheet as cheatsheet_mod
+
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_"
+                            for c in self._mapping.name) or "mapping"
+        default = str(Path.home() / "Desktop" / f"{safe_name}_cheatsheet.pdf")
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "Export cheat sheet", default, "PDF (*.pdf)",
+        )
+        if dest:
+            try:
+                cheatsheet_mod.render_cheatsheet(self._mapping, Path(dest))
+                self._on_status(f"Cheat sheet saved: {dest}")
+            except Exception as e:
+                QMessageBox.warning(self, "Export failed", str(e))
+
+    def _on_marketplace_seed(self) -> None:
+        from ..presets import seed_user_presets_once
+        from ..paths import presets_dir
+        marker = presets_dir() / ".seeded"
+        if marker.exists():
+            marker.unlink()
+        n = seed_user_presets_once()
+        self._on_status(f"Marketplace seed: {n} preset(s) restored")
+
+    # ============================================================== close
 
     def closeEvent(self, event: QCloseEvent) -> None:
         _save_last_mapping(self._mapping)

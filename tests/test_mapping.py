@@ -11,11 +11,13 @@ from gamepad_midi_bridge.mapping import (
     OscConfig,
     ProgramChangeConfig,
     SCHEMA_VERSION,
+    SetlistConfig,
     ShiftLayerConfig,
     StickConfig,
     TouchpadConfig,
     TriggerConfig,
     _program_change_from_dict,
+    _setlist_config_from_dict,
     _shift_layer_from_dict,
 )
 
@@ -1015,9 +1017,81 @@ def test_touchpad_gesture_independent_of_zone_mode():
         zone_grid=2,
         zone_notes=[36, 38, 40, 42],
     )
-    
+
     restored = Mapping.from_dict(m.to_dict())
     assert restored.touchpad.gesture_enabled is True
     assert restored.touchpad.zone_mode is True
     assert restored.touchpad.swipe_up_note == 60
     assert restored.touchpad.zone_grid == 2
+
+
+# ------------------------------------------------------------------ setlist (feature: Setlist mode)
+
+
+def test_setlist_config_defaults():
+    """SetlistConfig defaults to disabled with empty preset list."""
+    sl = SetlistConfig()
+    assert sl.enabled is False
+    assert sl.name == "Setlist"
+    assert sl.presets == []
+    assert sl.next_button == -1
+    assert sl.prev_button == -1
+    assert sl.wrap is True
+
+
+def test_setlist_config_round_trip():
+    """SetlistConfig serialises and deserialises end-to-end via Mapping."""
+    m = Mapping(name="SetlistTest")
+    m.setlist = SetlistConfig(
+        enabled=True,
+        name="Show Night 1",
+        presets=["intro", "verse", "drop", "outro"],
+        next_button=5,
+        prev_button=4,
+        wrap=False,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    sl = restored.setlist
+    assert sl.enabled is True
+    assert sl.name == "Show Night 1"
+    assert sl.presets == ["intro", "verse", "drop", "outro"]
+    assert sl.next_button == 5
+    assert sl.prev_button == 4
+    assert sl.wrap is False
+
+
+def test_setlist_config_from_dict_handles_missing_fields():
+    """_setlist_config_from_dict fills in defaults for absent keys."""
+    sl = _setlist_config_from_dict({"enabled": True, "presets": ["verse"]})
+    assert sl.enabled is True
+    assert sl.name == "Setlist"
+    assert sl.presets == ["verse"]
+    assert sl.next_button == -1
+    assert sl.prev_button == -1
+    assert sl.wrap is True
+
+
+def test_setlist_config_from_dict_none_returns_disabled():
+    """_setlist_config_from_dict(None) returns a disabled default."""
+    sl = _setlist_config_from_dict(None)
+    assert sl.enabled is False
+    assert sl.presets == []
+
+
+def test_mapping_without_setlist_loads_with_default():
+    """Old preset (no setlist key) loads cleanly; setlist stays disabled."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "buttons": {"0": 60},
+        # Missing: setlist
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.setlist.enabled is False
+    assert m.setlist.presets == []
+    assert m.setlist.next_button == -1
+
+
+def test_schema_version_unchanged_after_setlist():
+    """SCHEMA_VERSION stays at 4 — setlist is additive."""
+    assert SCHEMA_VERSION == 4

@@ -273,6 +273,30 @@ class HapticInputBinding:
 
 
 @dataclass
+class SetlistConfig:
+    """Ordered list of preset slugs for live performance step-through.
+
+    Two designated buttons advance (next_button) or retreat (prev_button)
+    through the list. On each step the bridge emits `setlist_step` so the
+    main window can load the preset and apply it immediately.
+
+    Fields:
+      - `enabled`      : master switch (default False).
+      - `name`         : human-readable label for this setlist.
+      - `presets`      : ordered list of preset slugs.
+      - `next_button`  : button index that steps forward. -1 = unset.
+      - `prev_button`  : button index that steps backward. -1 = unset.
+      - `wrap`         : if True, wrap around at both ends.
+    """
+    enabled: bool = False
+    name: str = "Setlist"
+    presets: List[str] = field(default_factory=list)
+    next_button: int = -1
+    prev_button: int = -1
+    wrap: bool = True
+
+
+@dataclass
 class MacroEvent:
     """One recorded MIDI message with a relative timestamp."""
     delay_ms: int           # ms since macro start (0 on first event)
@@ -513,6 +537,11 @@ class Mapping:
     macros: List[Macro] = field(default_factory=list)
     macro_bindings: Dict[int, str] = field(default_factory=dict)
 
+    # Setlist — ordered preset step-through for live performance. Disabled by
+    # default so existing presets are completely unaffected. Schema v5 compatible
+    # (additive-only; old loaders ignore the key).
+    setlist: SetlistConfig = field(default_factory=SetlistConfig)
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -570,6 +599,7 @@ class Mapping:
             theme=str(data.get("theme", "system")),
             macros=_macros_from_dict(data.get("macros")),
             macro_bindings={int(k): str(v) for k, v in data.get("macro_bindings", {}).items()},
+            setlist=_setlist_config_from_dict(data.get("setlist")),
         )
 
 
@@ -905,3 +935,26 @@ def _macros_from_dict(raw: object) -> List[Macro]:
         except (TypeError, ValueError):
             continue
     return result
+
+
+def _setlist_config_from_dict(d: Optional[dict]) -> SetlistConfig:
+    """Hydrate a SetlistConfig from raw dict, defaulting to disabled.
+
+    Missing fields fall back to defaults so old presets without a `setlist`
+    key load cleanly (setlist stays disabled, schema version unchanged).
+    """
+    if not d:
+        return SetlistConfig()
+    raw_presets = d.get("presets") or []
+    presets: List[str] = []
+    for entry in raw_presets:
+        if isinstance(entry, str) and entry.strip():
+            presets.append(entry.strip())
+    return SetlistConfig(
+        enabled=bool(d.get("enabled", False)),
+        name=str(d.get("name", "Setlist")),
+        presets=presets,
+        next_button=int(d.get("next_button", -1)),
+        prev_button=int(d.get("prev_button", -1)),
+        wrap=bool(d.get("wrap", True)),
+    )

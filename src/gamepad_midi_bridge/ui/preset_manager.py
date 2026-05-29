@@ -17,6 +17,7 @@ from ..license import is_pro
 from ..mapping import Mapping
 from .diff_dialog import DiffDialog
 from .pro_lock import ProLockOverlay
+from .setlist_dialog import SetlistDialog
 from .snapshot_dialog import SnapshotDialog
 
 
@@ -25,6 +26,7 @@ class PresetManager(QWidget):
     activate_clicked = Signal()
     preset_loaded = Signal(Mapping)
     selection_changed = Signal(dict)
+    mapping_changed = Signal(Mapping)
 
     def __init__(self, current_mapping_provider, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -49,18 +51,21 @@ class PresetManager(QWidget):
         self._compare_btn = QPushButton("Compare presets…")
         self._export_btn = QPushButton("Export cheat sheet")
         self._snapshots_btn = QPushButton("Snapshots…")
+        self._setlist_btn = QPushButton("Setlist…")
         self._load_btn.clicked.connect(self._on_load)
         self._save_btn.clicked.connect(self._on_save)
         self._delete_btn.clicked.connect(self._on_delete)
         self._compare_btn.clicked.connect(self._on_compare)
         self._export_btn.clicked.connect(self._on_export_cheatsheet)
         self._snapshots_btn.clicked.connect(self._on_snapshots)
+        self._setlist_btn.clicked.connect(self._on_setlist)
         row.addWidget(self._load_btn)
         row.addWidget(self._save_btn)
         row.addWidget(self._delete_btn)
         row.addWidget(self._compare_btn)
         row.addWidget(self._export_btn)
         row.addWidget(self._snapshots_btn)
+        row.addWidget(self._setlist_btn)
         row.addStretch(1)
         v.addLayout(row)
 
@@ -202,6 +207,13 @@ class PresetManager(QWidget):
         """Open the SnapshotDialog. Restore applies the mapping via preset_loaded."""
         dlg = SnapshotDialog(self._get_current, self)
         dlg.restore_requested.connect(self._on_snapshot_restore)
+        dlg.exec()
+
+    def _on_setlist(self) -> None:
+        """Open SetlistDialog. OK saves to mapping.setlist and emits mapping_changed."""
+        mapping = self._get_current()
+        dlg = SetlistDialog(mapping, self)
+        dlg.mapping_changed.connect(self.mapping_changed.emit)
         dlg.exec()
 
     def _on_snapshot_restore(self, slug: str) -> None:

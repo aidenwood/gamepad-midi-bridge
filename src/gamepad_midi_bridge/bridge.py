@@ -106,6 +106,11 @@ class BridgeWorker(QObject):
     # which runs on the GUI thread via a queued connection.
     preset_change_requested = Signal(str)  # preset slug
 
+    # --- Setlist mode: emitted on each Next/Prev step so the main window can
+    # load the preset without the bridge knowing about the file system.
+    # slug: preset slug to load, index: new 0-based position, total: list len.
+    setlist_step = Signal(str, int, int)
+
     def __init__(self, slot_index: int = 0,
                  midi_port_name: Optional[str] = None,
                  demo: bool = False,
@@ -193,6 +198,8 @@ class BridgeWorker(QObject):
         self._recording: bool = False
         self._recording_start_ms: float = 0.0
         self._recording_events: List[MacroEvent] = []
+        # Setlist mode — current position in the ordered preset list.
+        self._setlist_index: int = 0
 
     # ---------------------------------------------------------------- public API
 
@@ -904,11 +911,46 @@ class BridgeWorker(QObject):
             return buttons, axes, hats
         return mapping.buttons, mapping.axes, mapping.hats
 
+    def _poll_setlist_buttons(self, reader, mapping, n_buttons) -> None:
+        """Detect press edges on the setlist next/prev buttons and emit setlist_step.
+
+        Only runs when setlist is enabled and has at least one preset. Uses
+        the same was/now edge detection as every other button path so rapid
+        taps don't fire multiple steps per press.
+        """
+        sl = mapping.setlist
+        if not sl.enabled or not sl.presets:
+            return
+        total = len(sl.presets)
+
+        for delta, btn_idx in ((+1, sl.next_button), (-1, sl.prev_button)):
+            if btn_idx < 0 or btn_idx >= n_buttons:
+                continue
+            pressed = bool(reader.get_button(btn_idx))
+            was = self._prev_buttons.get(btn_idx, False)
+            if pressed and not was:
+                # Rising edge — advance the index
+                new_index = self._setlist_index + delta
+                if sl.wrap:
+                    new_index = new_index % total
+                else:
+                    new_index = max(0, min(total - 1, new_index))
+                self._setlist_index = new_index
+                slug = sl.presets[new_index]
+                self.setlist_step.emit(slug, new_index, total)
+            # Always track state so we can detect the next edge.
+            if pressed != was:
+                self._prev_buttons[btn_idx] = pressed
+                self.button_state.emit(btn_idx, pressed)
+
     def _poll_buttons(self, reader, mapping, midi, note_on, note_off, n_buttons) -> None:
         # --- MIDI clock button handling (tap-tempo, start, stop) ---
         clk = mapping.midi_clock
         if clk.enabled:
             self._poll_clock_buttons(reader, midi, clk, n_buttons)
+
+        # --- Setlist step-through ---
+        self._poll_setlist_buttons(reader, mapping, n_buttons)
 
         buttons, _axes, _hats = self._active_mappings_view(mapping)
         osc_only = self._osc_only()
