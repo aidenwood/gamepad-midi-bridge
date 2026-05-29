@@ -134,11 +134,19 @@ class ButtonConfig:
       - `poly_aftertouch`    : optional PolyAftertouchConfig for expressive
                                pressure control on held notes. Disabled by
                                default.
+      - `velocity_jitter`    : optional ±N jitter on velocity (0..20). Adds
+                               random ±N to the velocity before clamping to
+                               0..127. Makes drum patterns feel less mechanical.
+      - `timing_jitter_ms`   : optional delay jitter in milliseconds (0..15).
+                               Defers the note-on by a random amount 0..N ms
+                               using QTimer.singleShot. Humanizes timing.
     """
     gate_button: Optional[int] = None
     gate_release_value: int = 0
     velocity: int = 100
     poly_aftertouch: PolyAftertouchConfig = field(default_factory=PolyAftertouchConfig)
+    velocity_jitter: int = 0       # 0..20
+    timing_jitter_ms: int = 0      # 0..15
 
 
 @dataclass
@@ -209,6 +217,10 @@ class StickConfig:
     random_mod_smoothing_ms: int = 200
     # LFO modulator — free-running waveform added to / replacing user input.
     lfo: StickLfoConfig = field(default_factory=StickLfoConfig)
+    # Pitch bend — 14-bit MIDI pitch bend from stick axis
+    pitch_bend_enabled: bool = False
+    pitch_bend_axis: str = "x"       # "x" or "y"
+    pitch_bend_range_semis: int = 2  # informational; full 14-bit range always used
 
 
 @dataclass
@@ -977,6 +989,8 @@ def _button_config_from_dict(d: Optional[dict]) -> ButtonConfig:
         gate_release_value=max(0, min(127, int(d.get("gate_release_value", 0)))),
         velocity=max(0, min(127, int(d.get("velocity", 100)))),
         poly_aftertouch=_poly_aftertouch_from_dict(d.get("poly_aftertouch")),
+        velocity_jitter=max(0, min(20, int(d.get("velocity_jitter", 0)))),
+        timing_jitter_ms=max(0, min(15, int(d.get("timing_jitter_ms", 0)))),
     )
 
 
@@ -1179,6 +1193,9 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
         random_mod_rate_hz=max(0.01, float(d.get("random_mod_rate_hz", 2.0))),
         random_mod_smoothing_ms=max(0, int(d.get("random_mod_smoothing_ms", 200))),
         lfo=_stick_lfo_from_dict(d.get("lfo")),
+        pitch_bend_enabled=bool(d.get("pitch_bend_enabled", False)),
+        pitch_bend_axis=str(d.get("pitch_bend_axis", "x")) if str(d.get("pitch_bend_axis", "x")) in {"x", "y"} else "x",
+        pitch_bend_range_semis=max(1, min(24, int(d.get("pitch_bend_range_semis", 2)))),
     )
 
 

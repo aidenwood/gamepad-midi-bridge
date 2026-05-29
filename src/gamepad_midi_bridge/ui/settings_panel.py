@@ -36,7 +36,7 @@ from ..license import is_pro, state as license_state, deactivate as license_deac
 from ..mapping import Mapping
 from ..midi_input import INPUT_PORT_NAME
 from ..paths import config_path, user_data_dir
-from ..updater import set_opt_in as set_update_opt_in
+from ..updater import set_opt_in as set_update_opt_in, set_channel as set_update_channel, _get_channel as get_update_channel
 from .. import telemetry
 from ..crash_reporter import export_bundle
 from .haptic_input_dialog import HapticInputDialog
@@ -116,6 +116,12 @@ class SettingsPanel(QWidget):
         ("Small",  10),
         ("Medium", 12),
         ("Large",  14),
+    ]
+
+    _UPDATE_CHANNELS = [
+        ("Stable", "stable"),
+        ("Beta", "beta"),
+        ("Dev", "dev"),
     ]
 
     def __init__(self, mapping: Mapping, parent: Optional[QWidget] = None) -> None:
@@ -401,12 +407,23 @@ class SettingsPanel(QWidget):
         self._check_updates = QCheckBox("Check for updates on startup")
         self._check_updates.setChecked(_read_update_opt_in())
         self._check_updates.toggled.connect(self._on_update_opt_changed)
+
+        self._update_channel = QComboBox()
+        for label, _ in self._UPDATE_CHANNELS:
+            self._update_channel.addItem(label)
+        current_channel = get_update_channel()
+        for i, (label, ch) in enumerate(self._UPDATE_CHANNELS):
+            if ch == current_channel:
+                self._update_channel.setCurrentIndex(i)
+                break
+        self._update_channel.currentIndexChanged.connect(self._on_update_channel_changed)
+        privacy_form.addRow("Update channel", self._update_channel)
         privacy_form.addRow(self._check_updates)
 
         privacy_form.addRow(_note(
             "Usage stats are off by default and never include preset content or "
             "controller serial numbers. Update checks fire once per launch — no "
-            "personal data leaves the machine."
+            "personal data leaves the machine. Stable = releases only, Beta = beta/rc builds, Dev = all pre-releases."
         ))
 
         ls = license_state()
@@ -643,6 +660,15 @@ class SettingsPanel(QWidget):
         if self._building:
             return
         set_update_opt_in(checked)
+
+    def _on_update_channel_changed(self, index: int) -> None:
+        if self._building:
+            return
+        _, channel = self._UPDATE_CHANNELS[index]
+        try:
+            set_update_channel(channel)
+        except ValueError:
+            pass
 
     def _on_telemetry_opt_changed(self, checked: bool) -> None:
         if self._building:

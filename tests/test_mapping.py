@@ -1658,3 +1658,175 @@ def test_poly_aftertouch_pressure_sources_validation():
     for invalid in ["left_stick", "trigger", "invalid_source"]:
         cfg = _poly_aftertouch_from_dict({"enabled": True, "pressure_source": invalid})
         assert cfg.pressure_source == "left_stick_mag"
+
+
+# ------------------------------------------------------------------ ButtonConfig jitter fields
+
+
+def test_button_config_jitter_defaults():
+    """ButtonConfig jitter fields default to 0 (disabled)."""
+    cfg = ButtonConfig()
+    assert cfg.velocity_jitter == 0
+    assert cfg.timing_jitter_ms == 0
+
+
+def test_button_config_velocity_jitter_round_trip():
+    """ButtonConfig velocity_jitter survives to_dict / from_dict round-trip."""
+    cfg = ButtonConfig(velocity=100, velocity_jitter=10)
+    d = {"velocity": 100, "velocity_jitter": 10}
+    restored = _button_config_from_dict(d)
+    assert restored.velocity == 100
+    assert restored.velocity_jitter == 10
+
+
+def test_button_config_timing_jitter_round_trip():
+    """ButtonConfig timing_jitter_ms survives to_dict / from_dict round-trip."""
+    cfg = ButtonConfig(velocity=100, timing_jitter_ms=8)
+    d = {"velocity": 100, "timing_jitter_ms": 8}
+    restored = _button_config_from_dict(d)
+    assert restored.velocity == 100
+    assert restored.timing_jitter_ms == 8
+
+
+def test_button_config_both_jitters_round_trip():
+    """ButtonConfig with both jitter fields survives full Mapping round-trip."""
+    m = Mapping(name="JitterTest")
+    m.button_configs = {
+        0: ButtonConfig(velocity=100, velocity_jitter=15, timing_jitter_ms=10),
+        2: ButtonConfig(velocity=80, velocity_jitter=5, timing_jitter_ms=3),
+    }
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.button_configs[0].velocity == 100
+    assert restored.button_configs[0].velocity_jitter == 15
+    assert restored.button_configs[0].timing_jitter_ms == 10
+    assert restored.button_configs[2].velocity == 80
+    assert restored.button_configs[2].velocity_jitter == 5
+    assert restored.button_configs[2].timing_jitter_ms == 3
+
+
+def test_button_config_velocity_jitter_clamps_to_0_20():
+    """ButtonConfig.velocity_jitter clamps to 0..20."""
+    # Below min: -5 → 0
+    cfg = _button_config_from_dict({"velocity_jitter": -5})
+    assert cfg.velocity_jitter == 0
+
+    # At min: 0 → 0
+    cfg = _button_config_from_dict({"velocity_jitter": 0})
+    assert cfg.velocity_jitter == 0
+
+    # In range: 10 → 10
+    cfg = _button_config_from_dict({"velocity_jitter": 10})
+    assert cfg.velocity_jitter == 10
+
+    # At max: 20 → 20
+    cfg = _button_config_from_dict({"velocity_jitter": 20})
+    assert cfg.velocity_jitter == 20
+
+    # Above max: 50 → 20
+    cfg = _button_config_from_dict({"velocity_jitter": 50})
+    assert cfg.velocity_jitter == 20
+
+
+def test_button_config_timing_jitter_clamps_to_0_15():
+    """ButtonConfig.timing_jitter_ms clamps to 0..15."""
+    # Below min: -1 → 0
+    cfg = _button_config_from_dict({"timing_jitter_ms": -1})
+    assert cfg.timing_jitter_ms == 0
+
+    # At min: 0 → 0
+    cfg = _button_config_from_dict({"timing_jitter_ms": 0})
+    assert cfg.timing_jitter_ms == 0
+
+    # In range: 8 → 8
+    cfg = _button_config_from_dict({"timing_jitter_ms": 8})
+    assert cfg.timing_jitter_ms == 8
+
+    # At max: 15 → 15
+    cfg = _button_config_from_dict({"timing_jitter_ms": 15})
+    assert cfg.timing_jitter_ms == 15
+
+    # Above max: 100 → 15
+    cfg = _button_config_from_dict({"timing_jitter_ms": 100})
+    assert cfg.timing_jitter_ms == 15
+
+
+def test_button_config_old_preset_without_jitter_loads_with_defaults():
+    """Old preset (no jitter keys in button_configs) loads with jitter=0."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "button_configs": {
+            "0": {"velocity": 100, "gate_button": None},
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.button_configs[0].velocity_jitter == 0
+    assert m.button_configs[0].timing_jitter_ms == 0
+
+
+def test_stick_config_pitch_bend_defaults():
+    """StickConfig pitch bend fields default to disabled."""
+    cfg = StickConfig()
+    assert cfg.pitch_bend_enabled is False
+    assert cfg.pitch_bend_axis == "x"
+    assert cfg.pitch_bend_range_semis == 2
+
+
+def test_stick_config_pitch_bend_round_trip():
+    """StickConfig pitch bend fields preserve through serialisation."""
+    m = Mapping(name="PitchBendTest")
+    m.left_stick = StickConfig(
+        pitch_bend_enabled=True,
+        pitch_bend_axis="y",
+        pitch_bend_range_semis=5,
+    )
+    m.right_stick = StickConfig(
+        pitch_bend_enabled=False,
+        pitch_bend_axis="x",
+        pitch_bend_range_semis=2,
+    )
+
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.left_stick.pitch_bend_enabled is True
+    assert restored.left_stick.pitch_bend_axis == "y"
+    assert restored.left_stick.pitch_bend_range_semis == 5
+    assert restored.right_stick.pitch_bend_enabled is False
+    assert restored.right_stick.pitch_bend_axis == "x"
+    assert restored.right_stick.pitch_bend_range_semis == 2
+
+
+def test_stick_config_pitch_bend_axis_validation():
+    """Invalid pitch_bend_axis values default to 'x'."""
+    cfg = _stick_from_dict({"pitch_bend_enabled": True, "pitch_bend_axis": "z"})
+    assert cfg.pitch_bend_axis == "x"
+
+    cfg = _stick_from_dict({"pitch_bend_enabled": True, "pitch_bend_axis": "y"})
+    assert cfg.pitch_bend_axis == "y"
+
+
+def test_stick_config_pitch_bend_range_clamped():
+    """pitch_bend_range_semis is clamped to 1..24."""
+    # Below min
+    cfg = _stick_from_dict({"pitch_bend_range_semis": 0})
+    assert cfg.pitch_bend_range_semis == 1
+
+    # Within range
+    cfg = _stick_from_dict({"pitch_bend_range_semis": 12})
+    assert cfg.pitch_bend_range_semis == 12
+
+    # Above max
+    cfg = _stick_from_dict({"pitch_bend_range_semis": 30})
+    assert cfg.pitch_bend_range_semis == 24
+
+
+def test_stick_config_pitch_bend_missing_fields_load_defaults():
+    """Old presets without pitch bend fields load with sensible defaults."""
+    m_dict = {
+        "name": "OldStick",
+        "inner_deadzone": 0.05,
+        "curve": "linear",
+    }
+    cfg = _stick_from_dict(m_dict)
+    assert cfg.pitch_bend_enabled is False
+    assert cfg.pitch_bend_axis == "x"
+    assert cfg.pitch_bend_range_semis == 2

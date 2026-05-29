@@ -9,6 +9,7 @@ edge-quantized stick corners on top of the SDL2-driven pygame input.
 """
 from __future__ import annotations
 
+import random
 import sys
 import threading
 import time
@@ -202,6 +203,8 @@ class BridgeWorker(QObject):
         # A/B compare state — B preset loaded once per set_mapping call.
         self._b_mapping: Optional[Mapping] = None
         self._ab_b_active: bool = False
+        # Pitch bend state — per-stick: last sent 14-bit value (0..16383)
+        self._prev_pitch_bend: Dict[int, int] = {}  # axis_idx -> 14-bit value
         # Feedback-loop guard: track recent outbound CC messages to detect echoes
         # Deque of (channel, cc_number, value, timestamp) tuples, max 50 entries
         self._recent_outbound_cc: deque = deque(maxlen=50)
@@ -534,6 +537,14 @@ class BridgeWorker(QObject):
     def _send_note_off(self, midi, status_1: int, note: int, velocity: int) -> None:
         """Send a Note Off (always MIDI 1.0 — UMP note-off is an optional upgrade)."""
         midi.port.send_message([status_1, note, velocity])
+
+    def _send_jittered_note(self, midi, btn_note_on: int, note: int, velocity: int) -> None:
+        """Send a note-on with associated telemetry after timing jitter delay."""
+        self._send_note_on(midi, btn_note_on, note, velocity)
+        self._rtp_send(btn_note_on, note, velocity)
+        self._record_midi_send(btn_note_on, note, velocity)
+        self.midi_sent.emit()
+        self._emit_midi_message("sent", btn_note_on, note, velocity, f"NOTE-ON #{note}")
 
     def _send_cc(self, midi, status_1: int, cc_num: int, value: int) -> None:
         """Send a CC using MIDI 2.0 UMP or MIDI 1.0 depending on config."""
@@ -1451,12 +1462,31 @@ class BridgeWorker(QObject):
                             self._play_macro(macro, midi)
                 # Use velocity from button config if available, else default to 100
                 velocity = btn_cfg.velocity if btn_cfg else 100
+
+                # Apply velocity jitter if configured
+                if btn_cfg and btn_cfg.velocity_jitter > 0:
+                    jitter = random.randint(-btn_cfg.velocity_jitter, btn_cfg.velocity_jitter)
+                    velocity = max(0, min(127, velocity + jitter))
+
                 if not osc_only:
                     # Latency self-test: capture MIDI-send timestamp (output side).
                     if self._latency_test_active:
                         _latency_test.tracker().record_output(time.perf_counter())
                     qcfg = mapping.quantize
-                    if qcfg.enabled and qcfg.quantize_buttons:
+
+                    # Apply timing jitter if configured
+                    if btn_cfg and btn_cfg.timing_jitter_ms > 0:
+                        delay_ms = random.randint(0, btn_cfg.timing_jitter_ms)
+                        if qcfg.enabled and qcfg.quantize_buttons:
+                            q_delay = self._quantize_delay_ms(qcfg)
+                            # Combine quantize delay and timing jitter
+                            total_delay = q_delay + delay_ms
+                            self._schedule_quantized_note(btn_note_on, note, velocity, total_delay)
+                        else:
+                            # Schedule the note-on with timing jitter via QTimer
+                            # Use default args to capture current values (not by reference)
+                            QTimer.singleShot(delay_ms, lambda m=midi, s=btn_note_on, n=note, v=velocity: self._send_jittered_note(m, s, n, v))
+                    elif qcfg.enabled and qcfg.quantize_buttons:
                         delay = self._quantize_delay_ms(qcfg)
                         self._schedule_quantized_note(btn_note_on, note, velocity, delay)
                     else:
@@ -1580,6 +1610,51 @@ class BridgeWorker(QObject):
                 # LFO modulator — blend free-running waveform with user input
                 if stick_cfg.lfo.enabled:
                     raw = self._apply_lfo(axis_idx, raw, stick_cfg.lfo, mapping)
+                # Pitch bend — 14-bit MIDI from configured axis
+                if stick_cfg.pitch_bend_enabled:
+                    # Read raw axis value; if pitch_bend_axis is "y" and we're on x-axis,
+                    # we'll read the companion y-axis value from the reader instead.
+                    if stick_cfg.pitch_bend_axis == "x" and axis_idx < 2:
+                        # Left stick X or right stick X — already have raw
+                        pb_raw = raw
+                    elif stick_cfg.pitch_bend_axis == "y" and axis_idx < 2:
+                        # Want Y axis, but currently processing X
+                        pb_raw = reader.get_axis(axis_idx + 1)
+                        # Apply same shaping to the Y axis
+                        pb_raw = shaping.apply_stick_shape(
+                            pb_raw,
+                            inner_deadzone=stick_cfg.inner_deadzone,
+                            outer_clamp=stick_cfg.outer_clamp,
+                            curve=stick_cfg.curve,
+                            curve_amount=stick_cfg.curve_amount,
+                        )
+                    else:
+                        # Right stick Y (axis 3) wants X (axis 2), or other edge case
+                        pb_axis_for_read = axis_idx - 1 if stick_cfg.pitch_bend_axis == "x" else axis_idx
+                        pb_raw = reader.get_axis(pb_axis_for_read)
+                        pb_raw = shaping.apply_stick_shape(
+                            pb_raw,
+                            inner_deadzone=stick_cfg.inner_deadzone,
+                            outer_clamp=stick_cfg.outer_clamp,
+                            curve=stick_cfg.curve,
+                            curve_amount=stick_cfg.curve_amount,
+                        )
+                    # Convert -1..+1 to 14-bit 0..16383, centre at 8192
+                    pb_14bit = int(round((pb_raw + 1.0) * 8191.5))
+                    pb_14bit = max(0, min(16383, pb_14bit))
+                    # Only send if changed (dedupe)
+                    if self._prev_pitch_bend.get(axis_idx) != pb_14bit:
+                        axis_channel = self._channel_for_axis(mapping, axis_idx)
+                        # Send pitch bend: 0xE0 | channel, lsb, msb
+                        lsb = pb_14bit & 0x7F
+                        msb = (pb_14bit >> 7) & 0x7F
+                        if not self._osc_only():
+                            midi.port.send_message([0xE0 | axis_channel, lsb, msb])
+                            self.midi_sent.emit()
+                        self._rtp_send(0xE0 | axis_channel, lsb, msb)
+                        self._record_midi_send(0xE0 | axis_channel, lsb, msb)
+                        self._emit_midi_message("sent", 0xE0 | axis_channel, lsb, msb, f"PITCH_BEND:{pb_14bit}")
+                        self._prev_pitch_bend[axis_idx] = pb_14bit
                 # Convert to 0..127 range
                 val = int(round((raw + 1.0) * 63.5))
                 val = max(0, min(127, val))
