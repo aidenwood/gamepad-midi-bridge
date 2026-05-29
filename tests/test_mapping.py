@@ -1957,3 +1957,90 @@ def test_old_preset_without_bow_mode_loads_with_defaults():
     assert m.l2_trigger.bow_cc == 11
     assert m.l2_trigger.bow_velocity_scale == 1.0
     assert m.l2_trigger.bow_min_velocity == 0.5
+
+
+def test_stick_config_chord_defaults():
+    """Stick chord fields default to disabled."""
+    cfg = StickConfig()
+    assert cfg.chord_enabled is False
+    assert cfg.chord_threshold == 0.5
+    assert cfg.chord_north == []
+    assert cfg.chord_east == []
+    assert cfg.chord_south == []
+    assert cfg.chord_west == []
+    assert cfg.chord_velocity == 100
+    assert cfg.chord_channel is None
+
+
+def test_stick_chord_round_trip():
+    """Stick chord config round-trips through to_dict/from_dict."""
+    m = Mapping(name="ChordTest")
+    m.left_stick = StickConfig(
+        chord_enabled=True,
+        chord_threshold=0.6,
+        chord_north=[60, 64, 67],  # C major triad
+        chord_east=[62, 66, 71],
+        chord_south=[65, 69, 73],
+        chord_west=[57, 61, 65],
+        chord_velocity=110,
+        chord_channel=3,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.left_stick.chord_enabled is True
+    assert restored.left_stick.chord_threshold == 0.6
+    assert restored.left_stick.chord_north == [60, 64, 67]
+    assert restored.left_stick.chord_east == [62, 66, 71]
+    assert restored.left_stick.chord_south == [65, 69, 73]
+    assert restored.left_stick.chord_west == [57, 61, 65]
+    assert restored.left_stick.chord_velocity == 110
+    assert restored.left_stick.chord_channel == 3
+
+
+def test_stick_chord_clamping():
+    """Chord note numbers and velocity are clamped to valid ranges."""
+    raw_dict = {
+        "chord_enabled": True,
+        "chord_threshold": 1.5,  # clamps to 1.0
+        "chord_north": [60, 200, -5, 127],  # 200 -> 127, -5 -> 0
+        "chord_velocity": 200,  # clamps to 127
+        "chord_channel": 20,  # invalid, defaults to None
+    }
+    cfg = _stick_from_dict(raw_dict)
+    assert cfg.chord_threshold == 1.0
+    assert cfg.chord_north == [60, 127, 0, 127]
+    assert cfg.chord_velocity == 127
+    assert cfg.chord_channel is None  # rejected as out-of-range
+
+
+def test_stick_chord_channel_valid_range():
+    """Valid chord_channel values (0-15) are preserved."""
+    raw_dict = {
+        "chord_enabled": True,
+        "chord_channel": 7,
+    }
+    cfg = _stick_from_dict(raw_dict)
+    assert cfg.chord_channel == 7
+
+
+def test_stick_chord_channel_none_when_invalid():
+    """Invalid chord_channel values default to None."""
+    raw_dict = {
+        "chord_enabled": True,
+        "chord_channel": "invalid",
+    }
+    cfg = _stick_from_dict(raw_dict)
+    assert cfg.chord_channel is None
+
+
+def test_stick_chord_backward_compat():
+    """Old presets without chord fields load with disabled chords."""
+    # Simulate an old preset with no chord fields
+    old_preset = {
+        "inner_deadzone": 0.05,
+        "curve": "linear",
+        # No chord_* fields
+    }
+    cfg = _stick_from_dict(old_preset)
+    assert cfg.chord_enabled is False
+    assert cfg.chord_north == []
+    assert cfg.chord_threshold == 0.5

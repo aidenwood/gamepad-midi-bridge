@@ -224,6 +224,11 @@ class BridgeWorker(QObject):
         self._setlist_index: int = 0
         # Stick-flick state — per axis: (prev_shaped_val, prev_timestamp)
         self._flick_state: Dict[int, tuple] = {}  # axis_idx -> (prev_val, prev_ts)
+        # Stick-chord state — per stick index (0=left, 1=right): direction last fired
+        # Tracks which direction chord is currently held to avoid re-triggering.
+        self._stick_chord_state: Dict[int, Optional[str]] = {}  # stick_idx -> direction | None
+        # Stick chord values — per-tick tracking of shaped X, Y for each stick pair
+        self._stick_chord_values: Dict[int, Tuple[float, float]] = {}  # stick_idx -> (x, y)
         # Trigger aftertouch state — was AT active last tick?
         self._at_active: Dict[int, bool] = {L2_AXIS: False, R2_AXIS: False}
         # Polyphonic aftertouch state — per-(button, note): last sent pressure (0..127).
@@ -1846,6 +1851,25 @@ class BridgeWorker(QObject):
                 self._prev_cc[axis_idx] = send_val
                 self._emit_axis(axis_idx, raw)
 
+            # Track stick chord values — collect X,Y pairs then poll
+            if axis_idx in STICK_AXES:
+                stick_idx = axis_idx // 2  # 0,1 -> stick 0; 2,3 -> stick 1
+                is_x = (axis_idx % 2 == 0)
+                # raw here is the shaped stick value from earlier in the loop
+                if stick_idx not in self._stick_chord_values:
+                    self._stick_chord_values[stick_idx] = (0.0, 0.0)
+                x, y = self._stick_chord_values[stick_idx]
+                if is_x:
+                    x = raw
+                else:
+                    y = raw
+                self._stick_chord_values[stick_idx] = (x, y)
+
+                # When we've just processed the Y axis (axis 1 or 3), call chord polling
+                if not is_x:
+                    stick_cfg = mapping.left_stick if stick_idx == 0 else mapping.right_stick
+                    self._poll_stick_chords(stick_idx, x, y, stick_cfg, mapping, midi)
+
 
     def _check_stick_flick(self, axis_idx: int, shaped_val: float,
                            flick_cfg, mapping: Mapping, midi) -> None:
@@ -1908,6 +1932,96 @@ class BridgeWorker(QObject):
             midi.port.send_message([note_off, note, 0])
             self.midi_sent.emit()
             self._emit_midi_message("sent", note_on, note, midi_vel, f"FLICK NOTE-ON #{note}")
+
+    def _poll_stick_chords(self, stick_index: int, x: float, y: float,
+                           chord_cfg, mapping: Mapping, midi) -> None:
+        """Detect stick direction and fire/release chord notes based on threshold.
+
+        stick_index: 0 = left stick, 1 = right stick
+        x, y: shaped stick values (-1..+1)
+        chord_cfg: StickConfig with chord settings
+        mapping: current mapping (for channel resolution)
+        midi: MIDI port writer
+
+        When magnitude exceeds threshold, the dominant axis + sign pick a
+        direction (north/east/south/west), and the corresponding chord notes
+        fire (note-on). When magnitude drops below threshold or direction
+        changes, previous chord notes send note-off and the new direction's
+        notes fire.
+        """
+        if not chord_cfg.chord_enabled:
+            return
+
+        # Compute magnitude and clamp to 0..1
+        magnitude = (x ** 2 + y ** 2) ** 0.5
+        magnitude = min(1.0, magnitude)
+
+        # Determine direction based on dominant axis
+        # Defaults to None if below threshold
+        direction: Optional[str] = None
+        if magnitude > chord_cfg.chord_threshold:
+            # Pick direction from dominant axis (X or Y) and sign
+            abs_x = abs(x)
+            abs_y = abs(y)
+            if abs_x > abs_y:
+                direction = "east" if x > 0 else "west"
+            else:
+                direction = "north" if y > 0 else "south"
+
+        # Get previous direction and current notes
+        prev_direction = self._stick_chord_state.get(stick_index)
+        current_notes = self._stick_chord_state.get(f"{stick_index}_notes", [])
+
+        # Direction changed or dropped below threshold
+        if prev_direction != direction:
+            # Send note-off for previously held notes
+            if current_notes and not self._osc_only():
+                channel = (
+                    chord_cfg.chord_channel
+                    if chord_cfg.chord_channel is not None
+                    else mapping.midi_channel
+                ) & 0x0F
+                note_off = 0x80 | channel
+                for note in current_notes:
+                    try:
+                        midi.port.send_message([note_off, note, 0])
+                        self.midi_sent.emit()
+                        self._emit_midi_message("sent", note_off, note, 0,
+                                              f"CHORD NOTE-OFF #{note}")
+                    except Exception:
+                        pass
+
+            # Fire note-on for new direction (if any)
+            new_notes: List[int] = []
+            if direction is not None:
+                chord_map = {
+                    "north": chord_cfg.chord_north,
+                    "east": chord_cfg.chord_east,
+                    "south": chord_cfg.chord_south,
+                    "west": chord_cfg.chord_west,
+                }
+                new_notes = chord_map.get(direction, [])
+
+                if new_notes and not self._osc_only():
+                    channel = (
+                        chord_cfg.chord_channel
+                        if chord_cfg.chord_channel is not None
+                        else mapping.midi_channel
+                    ) & 0x0F
+                    note_on = 0x90 | channel
+                    for note in new_notes:
+                        try:
+                            midi.port.send_message([note_on, note, chord_cfg.chord_velocity])
+                            self.midi_sent.emit()
+                            self._emit_midi_message("sent", note_on, note,
+                                                  chord_cfg.chord_velocity,
+                                                  f"CHORD NOTE-ON #{note}")
+                        except Exception:
+                            pass
+
+            # Update state
+            self._stick_chord_state[stick_index] = direction
+            self._stick_chord_state[f"{stick_index}_notes"] = new_notes
 
     # ---------------------------------------------------------- arp playback
 

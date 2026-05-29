@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
 
+from .midi_learn import MidiLearnConfig
+
 
 SCHEMA_VERSION = 4
 
@@ -217,6 +219,14 @@ class StickConfig:
                             otherwise CC changes interpolate over N ms instead
                             of jumping in steps. Useful for sticks producing
                             stepped 7-bit MIDI for filter sweeps.
+      - `chord_enabled`   : master switch for stick-chord mode (default False).
+      - `chord_threshold` : stick magnitude (0..1) required to fire chord (default 0.5).
+      - `chord_north`     : list of MIDI notes to fire on northward push.
+      - `chord_east`      : list of MIDI notes to fire on eastward push.
+      - `chord_south`     : list of MIDI notes to fire on southward push.
+      - `chord_west`      : list of MIDI notes to fire on westward push.
+      - `chord_velocity`  : velocity for all chord notes (1..127, default 100).
+      - `chord_channel`   : optional MIDI channel override; None = use mapping channel.
     """
     inner_deadzone: float = 0.05
     outer_clamp: float = 0.0
@@ -240,6 +250,15 @@ class StickConfig:
     pitch_bend_enabled: bool = False
     pitch_bend_axis: str = "x"       # "x" or "y"
     pitch_bend_range_semis: int = 2  # informational; full 14-bit range always used
+    # Stick-chord mode — when magnitude crosses threshold, direction selects chord
+    chord_enabled: bool = False
+    chord_threshold: float = 0.5
+    chord_north: List[int] = field(default_factory=list)
+    chord_east: List[int] = field(default_factory=list)
+    chord_south: List[int] = field(default_factory=list)
+    chord_west: List[int] = field(default_factory=list)
+    chord_velocity: int = 100
+    chord_channel: Optional[int] = None
 
 
 @dataclass
@@ -852,6 +871,10 @@ class Mapping:
     # so existing presets are completely unaffected. Additive-only schema field.
     pattern_recorder: PatternRecorderConfig = field(default_factory=PatternRecorderConfig)
 
+    # MIDI Learn — bind incoming MIDI CCs to live parameter control. Disabled by
+    # default so existing presets are unaffected. Additive-only schema field.
+    midi_learn: MidiLearnConfig = field(default_factory=MidiLearnConfig)
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -868,6 +891,8 @@ class Mapping:
         # Ensure port_name_override is included
         if self.port_name_override:
             d["port_name_override"] = self.port_name_override
+        # Serialize midi_learn config
+        d["midi_learn"] = self.midi_learn.to_dict()
         return d
 
     @classmethod
@@ -921,6 +946,7 @@ class Mapping:
             favourite=bool(data.get("favourite", False)),
             midi2=_midi2_from_dict(data.get("midi2")),
             pattern_recorder=_pattern_recorder_from_dict(data.get("pattern_recorder")),
+            midi_learn=MidiLearnConfig.from_dict(data.get("midi_learn")),
         )
 
 
@@ -1204,6 +1230,31 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
     curve = str(d.get("curve", "linear"))
     if curve not in allowed_curves:
         curve = "linear"
+
+    # Parse chord note lists with safe int conversion
+    def _parse_chord_notes(raw: object) -> List[int]:
+        """Parse a list of MIDI note numbers, clamping to 0..127."""
+        if not isinstance(raw, list):
+            return []
+        result: List[int] = []
+        for note in raw:
+            try:
+                result.append(max(0, min(127, int(note))))
+            except (TypeError, ValueError):
+                pass
+        return result
+
+    # Parse optional channel override
+    raw_chord_ch = d.get("chord_channel")
+    chord_channel: Optional[int] = None
+    if raw_chord_ch is not None:
+        try:
+            ch = int(raw_chord_ch)
+            if 0 <= ch <= 15:
+                chord_channel = ch
+        except (TypeError, ValueError):
+            pass
+
     return StickConfig(
         inner_deadzone=max(0.0, min(0.99, float(d.get("inner_deadzone", 0.05)))),
         outer_clamp=max(0.0, min(0.99, float(d.get("outer_clamp", 0.0)))),
@@ -1222,6 +1273,14 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
         pitch_bend_enabled=bool(d.get("pitch_bend_enabled", False)),
         pitch_bend_axis=str(d.get("pitch_bend_axis", "x")) if str(d.get("pitch_bend_axis", "x")) in {"x", "y"} else "x",
         pitch_bend_range_semis=max(1, min(24, int(d.get("pitch_bend_range_semis", 2)))),
+        chord_enabled=bool(d.get("chord_enabled", False)),
+        chord_threshold=max(0.0, min(1.0, float(d.get("chord_threshold", 0.5)))),
+        chord_north=_parse_chord_notes(d.get("chord_north")),
+        chord_east=_parse_chord_notes(d.get("chord_east")),
+        chord_south=_parse_chord_notes(d.get("chord_south")),
+        chord_west=_parse_chord_notes(d.get("chord_west")),
+        chord_velocity=max(1, min(127, int(d.get("chord_velocity", 100)))),
+        chord_channel=chord_channel,
     )
 
 
