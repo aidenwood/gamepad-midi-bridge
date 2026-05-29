@@ -33,8 +33,8 @@ from .controller_meter import ControllerMeter
 from .help_tab import HelpTab
 from .axis_scope import AxisScope
 from .inspector import (
-    INSPECTOR_WIDTH, Inspector, render_mapping_selection, render_live_selection,
-    render_connector_selection, render_preset_file_selection,
+    INSPECTOR_WIDTH, Inspector, render_mapping_selection, render_marketplace_selection,
+    render_live_selection, render_connector_selection, render_preset_file_selection,
 )
 from .inspector_renderers import (
     render_trigger_editor,
