@@ -286,3 +286,48 @@ class TestFontSizePersistence:
         panel = SettingsPanel(Mapping())
         panel._font_size.setCurrentIndex(0)  # Small = 10pt
         assert int(panel._qs.value("appearance/font_pt")) == 10
+
+
+# ─── search filtering ─────────────────────────────────────────────────────────
+
+@_skip_no_qt
+class TestSearchFiltering:
+    """Settings search bar filters and highlights matching controls."""
+
+    def test_search_input_exists(self, tmp_user_data) -> None:
+        _qapp()
+        from gamepad_midi_bridge.ui.settings_panel import SettingsPanel
+        panel = SettingsPanel(Mapping())
+        assert hasattr(panel, "_search_input")
+        assert panel._search_input is not None
+
+    def test_search_creates_without_crash(self, tmp_user_data) -> None:
+        _qapp()
+        from gamepad_midi_bridge.ui.settings_panel import SettingsPanel
+        panel = SettingsPanel(Mapping())
+        assert panel._search_input is not None
+        assert panel._groups_in_order
+        assert panel._control_label_cache
+
+    def test_search_theme_highlights_appearance_group(self, tmp_user_data) -> None:
+        _qapp()
+        from gamepad_midi_bridge.ui.settings_panel import SettingsPanel
+        panel = SettingsPanel(Mapping())
+        panel._search_input.setText("theme")
+        # Appearance group should match (contains "Theme" label)
+        # Find appearance group
+        appearance_group = panel._groups_in_order[0]
+        assert appearance_group.title() == "Appearance"
+        # Check that stylesheet indicates highlight
+        ss = appearance_group.styleSheet()
+        assert "1abc9c" in ss or "#1abc9c" in ss
+
+    def test_empty_search_restores_normal_styling(self, tmp_user_data) -> None:
+        _qapp()
+        from gamepad_midi_bridge.ui.settings_panel import SettingsPanel
+        panel = SettingsPanel(Mapping())
+        panel._search_input.setText("theme")
+        panel._search_input.setText("")
+        # All groups should have empty stylesheet (normal)
+        for group in panel._groups_in_order:
+            assert group.styleSheet() == ""

@@ -598,6 +598,26 @@ class TouchpadConfig:
 
 
 @dataclass
+class Midi2Config:
+    """MIDI 2.0 / Universal MIDI Packet (UMP) emission config.
+
+    When ``enabled=True`` the bridge attempts to emit 32-bit UMP-formatted
+    packets instead of MIDI 1.0 3-byte messages.  rtmidi does not natively
+    understand UMP framing; the bridge probes the port on startup and falls
+    back to MIDI 1.0 transparently if the port rejects UMP (logged once).
+
+    Fields:
+      - ``enabled``          : master switch (default False — pure MIDI 1.0).
+      - ``group``            : UMP group number 0..15 (default 0).
+      - ``fallback_to_midi1``: if True (default), silently revert to MIDI 1.0
+                               when the port does not accept UMP packets.
+    """
+    enabled: bool = False
+    group: int = 0          # 0..15 UMP group
+    fallback_to_midi1: bool = True
+
+
+@dataclass
 class Mapping:
     """A complete set of controller -> MIDI assignments."""
 
@@ -737,6 +757,10 @@ class Mapping:
     # Favourite flag for quick access in setlist / preset manager
     favourite: bool = False
 
+    # MIDI 2.0 / UMP emission — disabled by default so all existing presets
+    # continue to emit standard MIDI 1.0 without any change.
+    midi2: Midi2Config = field(default_factory=Midi2Config)
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -804,6 +828,7 @@ class Mapping:
             quantize=_quantize_from_dict(data.get("quantize")),
             color_tag=color_tag,
             favourite=bool(data.get("favourite", False)),
+            midi2=_midi2_from_dict(data.get("midi2")),
         )
 
 
@@ -1270,4 +1295,19 @@ def _rtp_midi_from_dict(d: Optional[dict]) -> RtpMidiConfig:
         peer_host=str(d.get("peer_host", "127.0.0.1")),
         peer_port=port,
         session_name=str(d.get("session_name", "UCM Bridge")),
+    )
+
+
+def _midi2_from_dict(d: Optional[dict]) -> Midi2Config:
+    """Hydrate a Midi2Config from raw dict, defaulting to disabled.
+
+    Missing/None returns a default disabled config so old presets load
+    cleanly with no UMP traffic.
+    """
+    if not d:
+        return Midi2Config()
+    return Midi2Config(
+        enabled=bool(d.get("enabled", False)),
+        group=max(0, min(15, int(d.get("group", 0)))),
+        fallback_to_midi1=bool(d.get("fallback_to_midi1", True)),
     )

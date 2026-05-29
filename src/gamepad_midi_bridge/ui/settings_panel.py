@@ -123,10 +123,24 @@ class SettingsPanel(QWidget):
         self._mapping = mapping
         self._building = True
         self._qs = QSettings(_QSETTINGS_ORG, _QSETTINGS_APP)
+        self._control_label_cache: dict[QGroupBox, list[str]] = {}
+        self._groups_in_order: list[QGroupBox] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+
+        # ── search bar ─────────────────────────────────────────────────────
+        search_container = QWidget()
+        search_layout = QVBoxLayout(search_container)
+        search_layout.setContentsMargins(20, 12, 20, 8)
+        search_layout.setSpacing(0)
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Search settings…")
+        self._search_input.textChanged.connect(self._on_search_changed)
+        search_layout.addWidget(self._search_input)
+        root.addWidget(search_container)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -440,20 +454,94 @@ class SettingsPanel(QWidget):
         danger_form.addRow(sign_out_btn)
 
         # ── layout ─────────────────────────────────────────────────────────
-        outer.addWidget(app_group)
-        outer.addWidget(midi_group)
-        outer.addWidget(multi_group)
-        outer.addWidget(osc_group)
-        outer.addWidget(ctrl_group)
-        outer.addWidget(corners_group)
-        outer.addWidget(touchpad_group)
-        outer.addWidget(haptics_group)
-        outer.addWidget(calib_group)
-        outer.addWidget(privacy_group)
-        outer.addWidget(danger_group)
+        groups = [
+            app_group, midi_group, multi_group, osc_group, ctrl_group,
+            corners_group, touchpad_group, haptics_group, calib_group,
+            privacy_group, danger_group
+        ]
+        for g in groups:
+            outer.addWidget(g)
+            self._groups_in_order.append(g)
         outer.addStretch(1)
 
+        # ── populate label cache ──────────────────────────────────────────
+        self._cache_control_labels()
+
         self._building = False
+
+    # ── search filtering ─────────────────────────────────────────────────────
+
+    def _cache_control_labels(self) -> None:
+        """Extract all form labels from each group for search matching."""
+        for group in self._groups_in_order:
+            layout = group.layout()
+            if not isinstance(layout, QFormLayout):
+                # For non-form layouts (e.g., calib_group), collect checkbox/button text
+                labels: list[str] = [group.title()]
+                self._traverse_widgets(layout, labels)
+                self._control_label_cache[group] = labels
+            else:
+                labels = [group.title()]
+                # Extract form row labels
+                for i in range(layout.rowCount()):
+                    label_item = layout.itemAt(i, QFormLayout.ItemRole.LabelRole)
+                    if label_item:
+                        widget = label_item.widget()
+                        if isinstance(widget, QLabel):
+                            text = widget.text()
+                            if text and not text.startswith("color:"):
+                                labels.append(text)
+                        elif isinstance(widget, QCheckBox):
+                            labels.append(widget.text())
+                    field_item = layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
+                    if field_item:
+                        widget = field_item.widget()
+                        if isinstance(widget, QCheckBox):
+                            labels.append(widget.text())
+                self._control_label_cache[group] = labels
+
+    def _traverse_widgets(self, layout, labels: list[str]) -> None:
+        """Recursively extract text from widgets in a layout."""
+        if layout is None:
+            return
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item:
+                widget = item.widget()
+                if isinstance(widget, QCheckBox):
+                    labels.append(widget.text())
+                elif isinstance(widget, QPushButton):
+                    labels.append(widget.text())
+                elif isinstance(widget, QLabel):
+                    text = widget.text()
+                    if text and len(text) > 3:
+                        labels.append(text)
+                nested = item.layout()
+                if nested:
+                    self._traverse_widgets(nested, labels)
+
+    def _on_search_changed(self, query: str) -> None:
+        """Filter groups by matching label text."""
+        query_lower = query.lower().strip()
+        for group in self._groups_in_order:
+            labels = self._control_label_cache.get(group, [])
+            is_match = any(query_lower in label.lower() for label in labels)
+            if query_lower == "":
+                # Empty search: show everything normally
+                group.setStyleSheet("")
+                group.setGraphicsEffect(None)
+            elif is_match:
+                # Highlight matching group
+                group.setStyleSheet(
+                    "QGroupBox { border: 2px solid #1abc9c; border-radius: 4px; }"
+                    "QGroupBox::title { font-weight: bold; color: #1abc9c; }"
+                )
+            else:
+                # Dim non-matching group
+                group.setStyleSheet(
+                    "QGroupBox { border: 1px solid #bdc3c7; border-radius: 4px; opacity: 0.3; }"
+                    "QGroupBox::title { color: #7f8c8d; }"
+                )
 
     # ── combo builders ────────────────────────────────────────────────────────
 

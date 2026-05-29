@@ -14,6 +14,8 @@ from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from .accessibility import prefers_reduced_motion
+
 
 # Palette — match controller_meter.py + visualise_tab.py
 STICK_BG = QColor("#16181d")
@@ -116,16 +118,20 @@ class StickTrail(QWidget):
         p.drawLine(QPointF(cx - 12, cy), QPointF(cx + 12, cy))
         p.drawLine(QPointF(cx, cy - 12), QPointF(cx, cy + 12))
 
-        # Draw trail polyline with fading alpha
+        # Draw trail polyline with fading alpha (skip fade if reduce_motion)
         if len(self._buffer) >= 2:
             now = time.perf_counter()
             max_age = (BUFFER_CAPACITY / REPAINT_THROTTLE_HZ)  # ~5 seconds
+            reduce_motion = prefers_reduced_motion()
 
             for i, (ts, x, y) in enumerate(self._buffer):
                 age = now - ts
-                # Fade from 0% (oldest) to 100% (newest)
-                alpha = int(255 * (age / max_age)) if age < max_age else 0
-                alpha = max(0, min(255, 255 - alpha))  # Invert: newest is bright
+                # Fade from 0% (oldest) to 100% (newest), or full opacity if reduce_motion
+                if reduce_motion:
+                    alpha = 255
+                else:
+                    alpha = int(255 * (age / max_age)) if age < max_age else 0
+                    alpha = max(0, min(255, 255 - alpha))  # Invert: newest is bright
 
                 color = QColor(STICK_DOT)
                 color.setAlpha(alpha)

@@ -26,6 +26,7 @@ from PySide6.QtCore import (
     Signal,
     Qt,
 )
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
@@ -34,6 +35,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from .accessibility import prefers_reduced_motion
 
 _log = logging.getLogger(__name__)
 
@@ -201,9 +204,14 @@ class ReconnectOverlay(QWidget):
 
     def _begin_fade(self) -> None:
         self._fade_anim.stop()
-        self._fade_anim.setStartValue(float(self._opacity_effect.opacity()))
-        self._fade_anim.setEndValue(0.0)
-        self._fade_anim.start()
+        if prefers_reduced_motion():
+            # Skip animation; go straight to hidden
+            self._opacity_effect.setOpacity(0.0)
+            self._on_fade_finished()
+        else:
+            self._fade_anim.setStartValue(float(self._opacity_effect.opacity()))
+            self._fade_anim.setEndValue(0.0)
+            self._fade_anim.start()
 
     def _on_fade_finished(self) -> None:
         if self._opacity_effect.opacity() <= 0.01:
@@ -256,3 +264,11 @@ class ReconnectOverlay(QWidget):
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         self._resize_to_parent()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # type: ignore[override]
+        """Close overlay on Esc key."""
+        if event.key() == Qt.Key_Escape:
+            self._on_cancel()
+            event.accept()
+        else:
+            super().keyPressEvent(event)

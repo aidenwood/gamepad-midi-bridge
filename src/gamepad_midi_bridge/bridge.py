@@ -26,7 +26,8 @@ from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, MidiClockConfig, PassthroughConfig, QuantizeConfig, R2_AXIS, STICK_AXES, StickFlickConfig, TriggerAftertouchConfig
+from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, Midi2Config, MidiClockConfig, PassthroughConfig, QuantizeConfig, R2_AXIS, STICK_AXES, StickFlickConfig, TriggerAftertouchConfig
+from . import midi2 as _midi2
 from .rtp_midi import RtpMidiSender
 from . import shaping
 from .midi_backend import DEFAULT_PORT_NAME, MidiPortError, OpenedPort, close_port, open_port
@@ -234,6 +235,10 @@ class BridgeWorker(QObject):
         # can compute the current beat phase without separate bookkeeping.
         self._clock_beat_epoch: float = 0.0   # perf_counter timestamp of last beat start
         self._clock_bpm_live: float = 120.0   # BPM currently running in the clock thread
+        # MIDI 2.0 / UMP state — probed once per port open.
+        # True = port accepted the UMP probe; False = fell back to MIDI 1.0.
+        self._midi2_supported: bool = False
+        self._midi2_warned: bool = False  # suppress repeated "no UMP" log spam
 
     # ---------------------------------------------------------------- public API
 
@@ -289,6 +294,7 @@ class BridgeWorker(QObject):
             self.error.emit(str(e))
             return
 
+        self._probe_midi2_support()
         self._maybe_open_dualsense(info)
         self._sync_corner_detectors()
         self._apply_haptics()
@@ -462,6 +468,68 @@ class BridgeWorker(QObject):
             timer.start(event.delay_ms)
 
     # ---------------------------------------------------------------- internals
+
+    # ---------------------------------------------------------- MIDI 2.0 / UMP
+
+    def _probe_midi2_support(self) -> None:
+        """Probe the current MIDI port for UMP support and cache the result.
+
+        Called once after a port is successfully opened.  If the mapping has
+        midi2.enabled=False the probe is skipped (no silent test notes sent).
+        """
+        if self._midi is None:
+            return
+        m2 = self._state.mapping.midi2
+        if not m2.enabled:
+            self._midi2_supported = False
+            return
+        _midi2.clear_probe_cache()
+        self._midi2_supported = _midi2.is_supported(self._midi.port)
+        if not self._midi2_supported and not self._midi2_warned:
+            self._midi2_warned = True
+            self.status.emit(
+                "MIDI 2.0 UMP not accepted by this port — using MIDI 1.0 fallback"
+            )
+
+    def _use_midi2(self) -> bool:
+        """Return True when UMP emission is active for the current mapping."""
+        m2 = self._state.mapping.midi2
+        if not m2.enabled:
+            return False
+        if self._midi2_supported:
+            return True
+        # Port doesn't support UMP — fall back if configured, else skip send entirely.
+        return False
+
+    def _send_note_on(self, midi, status_1: int, note: int, velocity: int) -> None:
+        """Send a Note On using MIDI 2.0 UMP or MIDI 1.0 depending on config.
+
+        ``status_1`` is the MIDI 1.0 status byte (0x90 | channel) used for the
+        MIDI 1.0 path and to extract channel for the UMP path.
+        """
+        if self._use_midi2():
+            m2 = self._state.mapping.midi2
+            channel = status_1 & 0x0F
+            vel_16 = _midi2.scale_7bit_to_16bit(velocity)
+            ump = _midi2.pack_midi2_note_on(m2.group, channel, note, vel_16)
+            midi.port.send_message(list(ump))
+        else:
+            midi.port.send_message([status_1, note, velocity])
+
+    def _send_note_off(self, midi, status_1: int, note: int, velocity: int) -> None:
+        """Send a Note Off (always MIDI 1.0 — UMP note-off is an optional upgrade)."""
+        midi.port.send_message([status_1, note, velocity])
+
+    def _send_cc(self, midi, status_1: int, cc_num: int, value: int) -> None:
+        """Send a CC using MIDI 2.0 UMP or MIDI 1.0 depending on config."""
+        if self._use_midi2():
+            m2 = self._state.mapping.midi2
+            channel = status_1 & 0x0F
+            val_32 = _midi2.scale_7bit_to_32bit(value)
+            ump = _midi2.pack_midi2_cc(m2.group, channel, cc_num, val_32)
+            midi.port.send_message(list(ump))
+        else:
+            midi.port.send_message([status_1, cc_num, value])
 
     def _maybe_open_dualsense(self, info: ControllerInfo) -> None:
         """Open a parallel HID handle if the controller looks like a DualSense.
@@ -1292,7 +1360,7 @@ class BridgeWorker(QObject):
                         delay = self._quantize_delay_ms(qcfg)
                         self._schedule_quantized_note(btn_note_on, note, velocity, delay)
                     else:
-                        midi.port.send_message([btn_note_on, note, velocity])
+                        self._send_note_on(midi, btn_note_on, note, velocity)
                         self._rtp_send(btn_note_on, note, velocity)
                         self._record_midi_send(btn_note_on, note, velocity)
                         self.midi_sent.emit()
@@ -1305,7 +1373,7 @@ class BridgeWorker(QObject):
                     self._stop_arp(btn_idx, mapping, midi)
                 else:
                     if not osc_only:
-                        midi.port.send_message([btn_note_off, note, 0])
+                        self._send_note_off(midi, btn_note_off, note, 0)
                         self._record_midi_send(btn_note_off, note, 0)
                         self.midi_sent.emit()
                         self._emit_midi_message("sent", btn_note_off, note, 0, f"NOTE-OFF #{note}")
@@ -1538,7 +1606,7 @@ class BridgeWorker(QObject):
                 if not osc_only:
                     axis_channel = self._channel_for_axis(mapping, axis_idx)
                     axis_cc = 0xB0 | axis_channel
-                    midi.port.send_message([axis_cc, cc_num, send_val])
+                    self._send_cc(midi, axis_cc, cc_num, send_val)
                     self._rtp_send(axis_cc, cc_num, send_val)
                     self._record_outbound_cc(axis_channel, cc_num, send_val)
                     self._record_midi_send(axis_cc, cc_num, send_val)
