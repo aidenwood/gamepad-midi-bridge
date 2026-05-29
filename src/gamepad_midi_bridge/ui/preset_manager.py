@@ -308,7 +308,11 @@ class PresetManager(QWidget):
         # Move to folder action
         move_action = menu.addAction("Move to folder…")
         move_action.triggered.connect(lambda: self._move_preset_to_folder(preset_name))
-        
+
+        # Export as docs action
+        docs_action = menu.addAction("Export as docs…")
+        docs_action.triggered.connect(lambda: self._on_export_docs(preset_name))
+
         menu.exec(self._list.mapToGlobal(position))
 
     def _move_preset_to_folder(self, preset_name: str) -> None:
@@ -329,7 +333,7 @@ class PresetManager(QWidget):
         
         if not ok:
             return
-        
+
         target_folder = "" if folder == "(Top-level)" else folder
         try:
             preset_io.move_preset(preset_name, target_folder)
@@ -340,3 +344,35 @@ class PresetManager(QWidget):
                 "Move failed",
                 f"Could not move preset:\n{exc}",
             )
+
+    def _on_export_docs(self, preset_name: str) -> None:
+        """Export *preset_name* as a Markdown documentation file."""
+        from pathlib import Path
+        from .. import mapping_docs as docs_mod
+
+        try:
+            mapping = preset_io.load_preset(preset_name)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Export failed", f"Could not load preset:\n{exc}")
+            return
+
+        safe_name = preset_name.replace("/", "-").replace(" ", "_") or "mapping"
+        default_path = str(Path.home() / "Desktop" / f"{safe_name}.md")
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export mapping as docs",
+            default_path,
+            "Markdown Files (*.md)",
+        )
+        if not dest:
+            return
+        try:
+            md = docs_mod.render_mapping_docs(mapping)
+            Path(dest).write_text(md, encoding="utf-8")
+            QMessageBox.information(
+                self,
+                "Docs exported",
+                f"Saved to:\n{dest}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Export failed", f"Could not write file:\n{exc}")

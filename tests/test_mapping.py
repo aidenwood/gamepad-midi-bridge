@@ -1429,6 +1429,55 @@ def test_trigger_aftertouch_config_defaults():
     assert cfg.channel_override == -1
 
 
+# ------------------------------------------------------------------ ButtonConfig repeat/strum mode
+
+
+def test_button_config_repeat_defaults():
+    """ButtonConfig repeat fields default to disabled."""
+    cfg = ButtonConfig()
+    assert cfg.repeat_enabled is False
+    assert cfg.repeat_rate_hz == 8.0
+    assert cfg.repeat_velocity_decay == 0.0
+
+
+def test_button_config_repeat_round_trip():
+    """ButtonConfig repeat fields preserve through serialisation."""
+    m = Mapping(name="RepeatTest")
+    m.button_configs = {
+        0: ButtonConfig(repeat_enabled=True, repeat_rate_hz=12.0, repeat_velocity_decay=0.3),
+        1: ButtonConfig(repeat_enabled=False),
+    }
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.button_configs[0].repeat_enabled is True
+    assert restored.button_configs[0].repeat_rate_hz == 12.0
+    assert restored.button_configs[0].repeat_velocity_decay == pytest.approx(0.3, abs=1e-6)
+    assert restored.button_configs[1].repeat_enabled is False
+
+
+def test_button_config_repeat_rate_clamped_1_32():
+    """repeat_rate_hz clamps to 1..32."""
+    cfg = _button_config_from_dict({"repeat_rate_hz": 0.5})
+    assert cfg.repeat_rate_hz == 1.0
+
+    cfg = _button_config_from_dict({"repeat_rate_hz": 50.0})
+    assert cfg.repeat_rate_hz == 32.0
+
+    cfg = _button_config_from_dict({"repeat_rate_hz": 16.0})
+    assert cfg.repeat_rate_hz == 16.0
+
+
+def test_button_config_repeat_decay_clamped_0_1():
+    """repeat_velocity_decay clamps to 0..1."""
+    cfg = _button_config_from_dict({"repeat_velocity_decay": -0.5})
+    assert cfg.repeat_velocity_decay == 0.0
+
+    cfg = _button_config_from_dict({"repeat_velocity_decay": 1.5})
+    assert cfg.repeat_velocity_decay == 1.0
+
+    cfg = _button_config_from_dict({"repeat_velocity_decay": 0.5})
+    assert cfg.repeat_velocity_decay == pytest.approx(0.5, abs=1e-6)
+
+
 def test_trigger_aftertouch_config_round_trip():
     """TriggerAftertouchConfig preserves all fields through Mapping serialisation."""
     from gamepad_midi_bridge.mapping import TriggerAftertouchConfig
@@ -1830,3 +1879,81 @@ def test_stick_config_pitch_bend_missing_fields_load_defaults():
     assert cfg.pitch_bend_enabled is False
     assert cfg.pitch_bend_axis == "x"
     assert cfg.pitch_bend_range_semis == 2
+
+
+# ------------------------------------------------------------------ TriggerConfig bow mode
+
+def test_trigger_config_bow_mode_defaults():
+    """TriggerConfig bow mode fields default to disabled."""
+    cfg = TriggerConfig()
+    assert cfg.bow_mode is False
+    assert cfg.bow_cc == 11
+    assert cfg.bow_velocity_scale == 1.0
+    assert cfg.bow_min_velocity == 0.5
+
+
+def test_trigger_config_bow_mode_round_trip():
+    """TriggerConfig bow mode fields preserve through Mapping serialisation."""
+    m = Mapping(name="BowModeTest")
+    m.l2_trigger = TriggerConfig(
+        mode="linear",
+        bow_mode=True,
+        bow_cc=11,
+        bow_velocity_scale=0.8,
+        bow_min_velocity=0.3,
+    )
+    restored = Mapping.from_dict(m.to_dict())
+    assert restored.l2_trigger.bow_mode is True
+    assert restored.l2_trigger.bow_cc == 11
+    assert restored.l2_trigger.bow_velocity_scale == pytest.approx(0.8, abs=1e-6)
+    assert restored.l2_trigger.bow_min_velocity == pytest.approx(0.3, abs=1e-6)
+
+
+def test_trigger_config_bow_cc_clamped_0_127():
+    """TriggerConfig.bow_cc clamps to 0..127."""
+    cfg = TriggerConfig(bow_cc=-5)
+    assert cfg.bow_cc == -5  # Clamping happens in _trigger_from_dict
+    # Test via dict loader
+    from gamepad_midi_bridge.mapping import _trigger_from_dict
+    cfg = _trigger_from_dict({"bow_cc": -5})
+    assert cfg.bow_cc == 0
+    cfg = _trigger_from_dict({"bow_cc": 200})
+    assert cfg.bow_cc == 127
+    cfg = _trigger_from_dict({"bow_cc": 11})
+    assert cfg.bow_cc == 11
+
+
+def test_trigger_config_bow_velocity_scale_nonnegative():
+    """TriggerConfig.bow_velocity_scale clamps to >= 0.0."""
+    from gamepad_midi_bridge.mapping import _trigger_from_dict
+    cfg = _trigger_from_dict({"bow_velocity_scale": -1.0})
+    assert cfg.bow_velocity_scale == 0.0
+    cfg = _trigger_from_dict({"bow_velocity_scale": 2.5})
+    assert cfg.bow_velocity_scale == 2.5
+
+
+def test_trigger_config_bow_min_velocity_nonnegative():
+    """TriggerConfig.bow_min_velocity clamps to >= 0.0."""
+    from gamepad_midi_bridge.mapping import _trigger_from_dict
+    cfg = _trigger_from_dict({"bow_min_velocity": -0.5})
+    assert cfg.bow_min_velocity == 0.0
+    cfg = _trigger_from_dict({"bow_min_velocity": 1.5})
+    assert cfg.bow_min_velocity == 1.5
+
+
+def test_old_preset_without_bow_mode_loads_with_defaults():
+    """Old preset (no bow_mode fields) loads cleanly with defaults."""
+    v_dict = {
+        "name": "OldPreset",
+        "schema_version": 4,
+        "l2_trigger": {
+            "mode": "linear",
+            "ceiling": 127,
+            # Missing: bow_mode, bow_cc, bow_velocity_scale, bow_min_velocity
+        }
+    }
+    m = Mapping.from_dict(v_dict)
+    assert m.l2_trigger.bow_mode is False
+    assert m.l2_trigger.bow_cc == 11
+    assert m.l2_trigger.bow_velocity_scale == 1.0
+    assert m.l2_trigger.bow_min_velocity == 0.5

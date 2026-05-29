@@ -86,6 +86,13 @@ class TriggerConfig:
                                on the same trigger when latch mode crosses
                                the threshold (toggle point). Gives tactile
                                confirmation of when the latch flips.
+      - `bow_mode`           : if True, trigger movement velocity drives
+                               expression CC. Default False.
+      - `bow_cc`             : CC number for expression (default 11).
+      - `bow_velocity_scale` : multiplier on pressure-change rate (0..1+).
+                               Default 1.0.
+      - `bow_min_velocity`   : threshold (axis units/sec) below which
+                               expression goes silent. Default 0.5.
     """
     mode: str = "linear"
     ceiling: int = 127
@@ -94,6 +101,10 @@ class TriggerConfig:
     gate_release_value: int = 0
     tactile_click: bool = True
     aftertouch: TriggerAftertouchConfig = field(default_factory=TriggerAftertouchConfig)
+    bow_mode: bool = False
+    bow_cc: int = 11
+    bow_velocity_scale: float = 1.0
+    bow_min_velocity: float = 0.5
 
 
 @dataclass
@@ -140,6 +151,11 @@ class ButtonConfig:
       - `timing_jitter_ms`   : optional delay jitter in milliseconds (0..15).
                                Defers the note-on by a random amount 0..N ms
                                using QTimer.singleShot. Humanizes timing.
+      - `repeat_enabled`     : if True, held button re-fires the note at
+                               `repeat_rate_hz` intervals. Default False.
+      - `repeat_rate_hz`     : note re-fire rate in Hz (1..32). Default 8.0.
+      - `repeat_velocity_decay`: velocity decay per repeat (0..1). Each repeat
+                               velocity = prev * (1 - decay). Default 0.0.
     """
     gate_button: Optional[int] = None
     gate_release_value: int = 0
@@ -147,6 +163,9 @@ class ButtonConfig:
     poly_aftertouch: PolyAftertouchConfig = field(default_factory=PolyAftertouchConfig)
     velocity_jitter: int = 0       # 0..20
     timing_jitter_ms: int = 0      # 0..15
+    repeat_enabled: bool = False
+    repeat_rate_hz: float = 8.0    # 1..32
+    repeat_velocity_decay: float = 0.0  # 0..1
 
 
 @dataclass
@@ -953,6 +972,10 @@ def _trigger_from_dict(d: Optional[dict]) -> TriggerConfig:
         gate_release_value=max(0, min(127, int(d.get("gate_release_value", 0)))),
         tactile_click=bool(d.get("tactile_click", True)),
         aftertouch=_trigger_aftertouch_from_dict(d.get("aftertouch")),
+        bow_mode=bool(d.get("bow_mode", False)),
+        bow_cc=max(0, min(127, int(d.get("bow_cc", 11)))),
+        bow_velocity_scale=max(0.0, float(d.get("bow_velocity_scale", 1.0))),
+        bow_min_velocity=max(0.0, float(d.get("bow_min_velocity", 0.5))),
     )
 
 
@@ -991,6 +1014,9 @@ def _button_config_from_dict(d: Optional[dict]) -> ButtonConfig:
         poly_aftertouch=_poly_aftertouch_from_dict(d.get("poly_aftertouch")),
         velocity_jitter=max(0, min(20, int(d.get("velocity_jitter", 0)))),
         timing_jitter_ms=max(0, min(15, int(d.get("timing_jitter_ms", 0)))),
+        repeat_enabled=bool(d.get("repeat_enabled", False)),
+        repeat_rate_hz=max(1.0, min(32.0, float(d.get("repeat_rate_hz", 8.0)))),
+        repeat_velocity_decay=max(0.0, min(1.0, float(d.get("repeat_velocity_decay", 0.0)))),
     )
 
 

@@ -179,6 +179,8 @@ class BridgeWorker(QObject):
         # Per-trigger latch state for tactile feedback — track previous latch state
         # to detect threshold crossings and fire haptic clicks.
         self._prev_latch_state: Dict[int, bool] = {L2_AXIS: False, R2_AXIS: False}
+        # Per-trigger bow mode state: (prev_pressure, prev_timestamp)
+        self._bow_state: Dict[int, tuple] = {}  # axis_idx -> (prev_pressure, prev_ts)
         self._prev_hat = {"up": False, "down": False, "left": False, "right": False}
         self._prev_corner_notes: Dict[str, Optional[int]] = {"L": None, "R": None}
         self._prev_touch_cc: Dict[str, int] = {}
@@ -244,6 +246,10 @@ class BridgeWorker(QObject):
         # Arp playback state — keyed by button_idx.
         # Values: (QTimer, event_index, macro_name) or None when idle.
         self._arp_state: Dict[int, Optional[object]] = {}
+        # Button repeat/strum state — keyed by button_idx.
+        # Values: (QTimer, current_velocity) or None when idle.
+        # Tracks the repeat timer and decaying velocity per button.
+        self._repeat_state: Dict[int, Optional[tuple]] = {}
         # Quantize: epoch (perf_counter) when the clock loop started its current beat.
         # Updated by _run_midi_clock_loop each quarter-note so the quantize helper
         # can compute the current beat phase without separate bookkeeping.
@@ -1495,12 +1501,18 @@ class BridgeWorker(QObject):
                         self._record_midi_send(btn_note_on, note, velocity)
                         self.midi_sent.emit()
                         self._emit_midi_message("sent", btn_note_on, note, velocity, f"NOTE-ON #{note}")
+                        # Start repeat if enabled for this button
+                        if btn_cfg and btn_cfg.repeat_enabled:
+                            self._start_repeat(btn_idx, midi, btn_note_on, note, velocity, btn_cfg)
                 self._send_osc_button(btn_idx, True)
                 _usage_stats.tracker().record("button", btn_idx)
             elif not pressed and was:
                 # Stop arp playback if active on this button
                 if btn_idx in self._arp_state:
                     self._stop_arp(btn_idx, mapping, midi)
+                # Stop repeat if active on this button
+                if btn_idx in self._repeat_state:
+                    self._stop_repeat(btn_idx, midi, btn_note_off, note)
                 else:
                     if not osc_only:
                         self._send_note_off(midi, btn_note_off, note, 0)
@@ -1736,6 +1748,41 @@ class BridgeWorker(QObject):
                             midi.port.send_message([0xD0 | at_ch, 0])
                             self.midi_sent.emit()
                         self._at_active[axis_idx] = False
+
+                # Bow mode: velocity-driven expression CC (trigger movement)
+                if cfg.bow_mode:
+                    now_ts = time.perf_counter()
+                    prev_pressure, prev_ts = self._bow_state.get(axis_idx, (pressure, now_ts))
+
+                    # Compute pressure change rate (units/sec)
+                    dt = now_ts - prev_ts
+                    velocity = (pressure - prev_pressure) / dt if dt > 1e-6 else 0.0
+
+                    # Clamp velocity to 0..1+ range for scaling
+                    velocity = abs(velocity)
+
+                    # Below minimum velocity = silence; otherwise scale by config
+                    if velocity > cfg.bow_min_velocity:
+                        bow_value = velocity * cfg.bow_velocity_scale
+                        # Clamp final CC value to 0..127
+                        bow_cc_val = int(round(max(0.0, min(1.0, bow_value)) * 127.0))
+                    else:
+                        bow_cc_val = 0
+
+                    # Send the expression CC alongside the main trigger value
+                    axis_channel = self._channel_for_axis(mapping, axis_idx)
+                    bow_cc_status = 0xB0 | axis_channel
+                    if not self._osc_only():
+                        midi.port.send_message([bow_cc_status, cfg.bow_cc, bow_cc_val])
+                        self._rtp_send(bow_cc_status, cfg.bow_cc, bow_cc_val)
+                        self._record_outbound_cc(axis_channel, cfg.bow_cc, bow_cc_val)
+                        self._record_midi_send(bow_cc_status, cfg.bow_cc, bow_cc_val)
+                        self.midi_sent.emit()
+                        self._emit_midi_message("sent", bow_cc_status, cfg.bow_cc, bow_cc_val,
+                                              f"BOW-CC#{cfg.bow_cc}={bow_cc_val}")
+
+                    # Update state for next tick
+                    self._bow_state[axis_idx] = (pressure, now_ts)
             else:
                 # Other axes (HID hats, generic analogs) use the legacy
                 # -1..1 → 0..127 remap so unknown controllers keep working.
@@ -1930,6 +1977,71 @@ class BridgeWorker(QObject):
                             self.midi_sent.emit()
                 except Exception:
                     pass
+
+    def _start_repeat(self, btn_idx: int, midi, btn_note_on: int, note: int,
+                      initial_velocity: int, btn_cfg) -> None:
+        """Start the repeat timer for a held button with repeat enabled.
+
+        Schedules note-on repeats at repeat_rate_hz with optional velocity decay.
+        State is stored in _repeat_state[btn_idx] as (timer, current_velocity).
+        """
+        if btn_idx in self._repeat_state:
+            # Already repeating — ignore
+            return
+
+        interval_ms = int(1000.0 / max(1.0, btn_cfg.repeat_rate_hz))
+
+        def schedule_repeat():
+            # Calculate next velocity with decay
+            current_vel = self._repeat_state.get(btn_idx, (None, initial_velocity))[1]
+            next_vel = int(current_vel * (1.0 - btn_cfg.repeat_velocity_decay))
+            next_vel = max(1, min(127, next_vel))  # Clamp to 1..127
+
+            # Send the repeat note
+            try:
+                self._send_note_on(midi, btn_note_on, note, next_vel)
+                self._rtp_send(btn_note_on, note, next_vel)
+                self._record_midi_send(btn_note_on, note, next_vel)
+                self.midi_sent.emit()
+                self._emit_midi_message("sent", btn_note_on, note, next_vel, f"REPEAT #{note}")
+            except Exception:
+                pass
+
+            # Update state with new velocity
+            timer = self._repeat_state.get(btn_idx, (None, 0))[0]
+            self._repeat_state[btn_idx] = (timer, next_vel)
+
+            # Schedule the next repeat
+            if timer is not None and btn_idx in self._repeat_state:
+                timer.start(interval_ms)
+
+        # Create the repeating timer
+        timer = QTimer()
+        timer.setSingleShot(False)
+        timer.timeout.connect(schedule_repeat)
+        timer.start(interval_ms)
+
+        # Store state
+        self._repeat_state[btn_idx] = (timer, initial_velocity)
+
+    def _stop_repeat(self, btn_idx: int, midi, btn_note_off: int, note: int) -> None:
+        """Stop the repeat timer for btn_idx and send note-off."""
+        state = self._repeat_state.pop(btn_idx, None)
+        if state is None:
+            return
+
+        timer, _velocity = state
+        if timer is not None:
+            timer.stop()
+
+        # Send note-off
+        try:
+            midi.port.send_message([btn_note_off, note, 0])
+            self._record_midi_send(btn_note_off, note, 0)
+            self.midi_sent.emit()
+            self._emit_midi_message("sent", btn_note_off, note, 0, f"NOTE-OFF #{note}")
+        except Exception:
+            pass
 
     def _tick_random_mod(self, axis_idx: int, stick_cfg, mapping: Mapping, midi) -> None:
         """Sample a random CC value at random_mod_rate_hz and send to random_mod_cc.
