@@ -3,6 +3,9 @@
 One row per (connector, detected host installation). Empty state shown when
 nothing is detected so users know the connector exists but couldn't find a
 matching app.
+
+At the top of the tab a "DETECTED ON YOUR SYSTEM" section shows any DAW / VJ
+apps found by daw_detector, each with a "Suggest connector" CTA.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from .. import telemetry
 from ..connectors import Connector, HostInstallation, all_connectors
+from ..daw_detector import DetectedApp, detect_installed_apps
 
 
 class ConnectorsTab(QWidget):
@@ -53,21 +57,106 @@ class ConnectorsTab(QWidget):
         action_row.addWidget(refresh)
         outer.addLayout(action_row)
 
+        # ---- DETECTED ON YOUR SYSTEM section ----
+        self._detected_container = QWidget()
+        self._detected_layout = QVBoxLayout(self._detected_container)
+        self._detected_layout.setContentsMargins(0, 0, 0, 0)
+        self._detected_layout.setSpacing(6)
+        outer.addWidget(self._detected_container)
+
         # Scrollable list of detected installations
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
         outer.addWidget(self._scroll, 1)
 
+        self._rebuild_detected()
         self._rebuild_list()
 
     # ---------------------------------------------------------------- public
 
     def refresh(self) -> None:
+        self._rebuild_detected(force=True)
         self._rebuild_list()
         self.status_message.emit("Re-scanned host applications.")
 
     # ---------------------------------------------------------------- helpers
+
+    def _rebuild_detected(self, force: bool = False) -> None:
+        """Refresh the 'DETECTED ON YOUR SYSTEM' section."""
+        # Clear previous widgets
+        while self._detected_layout.count():
+            item = self._detected_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        try:
+            apps = detect_installed_apps(force=force)
+        except Exception:
+            apps = []
+
+        if not apps:
+            return  # section stays hidden when nothing is found
+
+        section_title = QLabel("DETECTED ON YOUR SYSTEM")
+        section_title.setStyleSheet(
+            "font-size: 11px; font-weight: 700; letter-spacing: 1px; "
+            "color: #5a606b; padding-bottom: 2px;"
+        )
+        self._detected_layout.addWidget(section_title)
+
+        for app in apps:
+            self._detected_layout.addWidget(self._detected_row(app))
+
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setStyleSheet("color: #24262d; margin: 6px 0;")
+        self._detected_layout.addWidget(separator)
+
+    def _detected_row(self, app: DetectedApp) -> QFrame:
+        card = QFrame()
+        card.setStyleSheet(
+            "QFrame { background-color: #0f1117; border: 1px solid #1e2029; "
+            "border-radius: 6px; }"
+        )
+        h = QHBoxLayout(card)
+        h.setContentsMargins(14, 10, 14, 10)
+        h.setSpacing(12)
+
+        left = QVBoxLayout()
+        left.setSpacing(2)
+        name_lbl = QLabel(app.name)
+        name_lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #f5f7fa;")
+        path_lbl = QLabel(str(app.path))
+        path_lbl.setStyleSheet("color: #5a606b; font-size: 11px;")
+        path_lbl.setWordWrap(True)
+        left.addWidget(name_lbl)
+        left.addWidget(path_lbl)
+        h.addLayout(left, 1)
+
+        suggest_btn = QPushButton("Suggest connector")
+        suggest_btn.setObjectName("PrimaryButton")
+        suggest_btn.setToolTip(
+            f"Show the '{app.connector_target}' connector for {app.name}"
+        )
+        suggest_btn.clicked.connect(
+            lambda checked=False, a=app: self._on_suggest(a)
+        )
+        h.addWidget(suggest_btn)
+        return card
+
+    def _on_suggest(self, app: DetectedApp) -> None:
+        """Emit a selection event pointing at the matching connector slug."""
+        self.selection_changed.emit({
+            "kind": "daw_suggestion",
+            "name": app.name,
+            "path": str(app.path),
+            "connector_target": app.connector_target,
+        })
+        self.status_message.emit(
+            f"Showing connector for {app.name} — "
+            "scroll down to Install it."
+        )
 
     def _rebuild_list(self) -> None:
         host_pairs = self._enumerate_hosts()

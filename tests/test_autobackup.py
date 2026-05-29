@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from gamepad_midi_bridge.autobackup import autosaves_dir, save_snapshot, prune_old_snapshots
+from gamepad_midi_bridge.autobackup import (
+    autosaves_dir, save_snapshot, prune_old_snapshots, mark_clean_shutdown,
+    was_clean_shutdown, mark_unclean_startup, latest_autosave, load_latest_autosave,
+)
 from gamepad_midi_bridge.mapping import Mapping
 
 
@@ -110,3 +113,99 @@ def test_prune_on_nonexistent_dir():
     deleted = prune_old_snapshots(keep=30)
     assert isinstance(deleted, int)
     assert deleted >= 0
+
+
+@pytest.fixture
+def tmp_config_dir(tmp_path, monkeypatch):
+    """Mock user_data_dir for shutdown flag tests."""
+    import gamepad_midi_bridge.autobackup as ab
+
+    def mock_user_data_dir():
+        return tmp_path
+
+    monkeypatch.setattr(ab, "user_data_dir", mock_user_data_dir)
+    return tmp_path
+
+
+def test_mark_clean_shutdown_creates_flag(tmp_config_dir):
+    """mark_clean_shutdown creates the flag file."""
+    mark_clean_shutdown()
+    flag = tmp_config_dir / "session_clean.flag"
+    assert flag.exists()
+
+
+def test_was_clean_shutdown_true_after_mark(tmp_config_dir):
+    """was_clean_shutdown returns True after mark_clean_shutdown."""
+    mark_clean_shutdown()
+    assert was_clean_shutdown() is True
+
+
+def test_was_clean_shutdown_false_missing_flag(tmp_config_dir):
+    """was_clean_shutdown returns False when flag is missing."""
+    assert was_clean_shutdown() is False
+
+
+def test_mark_unclean_startup_deletes_flag(tmp_config_dir):
+    """mark_unclean_startup deletes the flag file."""
+    mark_clean_shutdown()
+    flag = tmp_config_dir / "session_clean.flag"
+    assert flag.exists()
+
+    mark_unclean_startup()
+    assert not flag.exists()
+
+
+def test_latest_autosave_returns_newest(tmp_autosaves_dir):
+    """latest_autosave returns the most recently modified file."""
+    import time
+
+    # Create 3 files with different mtimes
+    paths = []
+    for i in range(3):
+        path = tmp_autosaves_dir / f"2025-01-0{i+1}-0000.json"
+        path.write_text(json.dumps({"index": i}), encoding="utf-8")
+        paths.append(path)
+        # Small delay to ensure distinct mtimes
+        time.sleep(0.01)
+
+    newest = latest_autosave()
+    assert newest == paths[2]
+
+
+def test_latest_autosave_returns_none_empty_dir(tmp_path, monkeypatch):
+    """latest_autosave returns None when no files exist."""
+    import gamepad_midi_bridge.autobackup as ab
+
+    empty_dir = tmp_path / "empty_autosaves"
+    empty_dir.mkdir()
+
+    def mock_autosaves_dir():
+        return empty_dir
+
+    monkeypatch.setattr(ab, "autosaves_dir", mock_autosaves_dir)
+    assert latest_autosave() is None
+
+
+def test_load_latest_autosave_roundtrip(tmp_autosaves_dir):
+    """load_latest_autosave reads and deserializes a mapping correctly."""
+    mapping = Mapping(name="TestRoundtrip", midi_channel=3)
+    save_snapshot(mapping)
+
+    loaded = load_latest_autosave()
+    assert loaded is not None
+    assert loaded.name == "TestRoundtrip"
+    assert loaded.midi_channel == 3
+
+
+def test_load_latest_autosave_returns_none_no_files(tmp_path, monkeypatch):
+    """load_latest_autosave returns None when no autosaves exist."""
+    import gamepad_midi_bridge.autobackup as ab
+
+    empty_dir = tmp_path / "empty_autosaves"
+    empty_dir.mkdir()
+
+    def mock_autosaves_dir():
+        return empty_dir
+
+    monkeypatch.setattr(ab, "autosaves_dir", mock_autosaves_dir)
+    assert load_latest_autosave() is None

@@ -138,7 +138,28 @@ class MainWindow(QMainWindow):
         self.resize(820, 640)
         self.setMinimumSize(380, 280)
 
-        self._mapping = _load_last_mapping()
+        # Crash recovery: check if app exited cleanly last time
+        autobackup.mark_unclean_startup()
+        if not autobackup.was_clean_shutdown() and autobackup.latest_autosave() is not None:
+            # Show recovery dialog
+            reply = QMessageBox.question(
+                self,
+                "Recover unsaved work?",
+                "Looks like the app didn't close cleanly last time. "
+                "Restore your last mapping?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                recovered = autobackup.load_latest_autosave()
+                if recovered is not None:
+                    self._mapping = recovered
+                else:
+                    self._mapping = _load_last_mapping()
+            else:
+                self._mapping = _load_last_mapping()
+        else:
+            self._mapping = _load_last_mapping()
         # MultiBridgeController behaves identically to the old single
         # BridgeController when only one slot is active — see multi.py.
         self._multi = MultiBridgeController(self)
@@ -1706,4 +1727,5 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         _save_last_mapping(self._mapping)
         self._multi.shutdown()
+        autobackup.mark_clean_shutdown()
         event.accept()

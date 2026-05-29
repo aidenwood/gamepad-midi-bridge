@@ -35,6 +35,7 @@ from .midi_input import (
     close_input_port, open_input_port, set_callback as set_input_callback,
 )
 from .osc_backend import OscReceiver, OscSender
+from . import usage_stats as _usage_stats
 
 
 # Adaptive-trigger effects whose output report carries a meaningful amplitude/
@@ -1004,6 +1005,7 @@ class BridgeWorker(QObject):
                     self.midi_sent.emit()
                     self._emit_midi_message("sent", btn_note_on, note, 127, f"NOTE-ON #{note}")
                 self._send_osc_button(btn_idx, True)
+                _usage_stats.tracker().record("button", btn_idx)
             elif not pressed and was:
                 if not osc_only:
                     midi.port.send_message([btn_note_off, note, 0])
@@ -1093,6 +1095,7 @@ class BridgeWorker(QObject):
                     self._record_midi_send(axis_cc, cc_num, val)
                     self.midi_sent.emit()
                     self._emit_midi_message("sent", axis_cc, cc_num, val, f"CC#{cc_num}")
+                _usage_stats.tracker().record("axis", axis_idx)
                 # OSC sends a 0..1 float, MIDI a 0..127 int — keep both
                 # streams in lock-step but de-dup against last-sent 0..127.
                 if self._osc is not None and self._prev_osc_axes.get(axis_idx) != val:
@@ -1170,6 +1173,7 @@ class BridgeWorker(QObject):
                     self.corner_triggered.emit(side, "on", event.sector)
                     # Fire corner haptic feedback on the matching trigger
                     self._fire_corner_haptic(side, mapping)
+                    _usage_stats.tracker().record("corner", side)
             elif event.kind == "off":
                 note = self._prev_corner_notes[side]
                 if note is not None:
@@ -1220,6 +1224,7 @@ class BridgeWorker(QObject):
             if now and not was:
                 midi.port.send_message([hat_note_on, note, 127])
                 self.midi_sent.emit()
+                _usage_stats.tracker().record("hat", direction)
             elif not now and was:
                 midi.port.send_message([hat_note_off, note, 0])
                 self.midi_sent.emit()

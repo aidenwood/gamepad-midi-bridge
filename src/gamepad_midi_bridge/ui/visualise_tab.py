@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from .axis_scope import AxisScope
+from .usage_heatmap import UsageHeatmap
 
 
 # Match controller_meter.py palette so the two views feel like one app.
@@ -419,6 +420,14 @@ class VisualiseTab(QWidget):
         self._heatmap = _Heatmap()
         heat_v.addWidget(self._heatmap, 1)
         root.addWidget(heat_frame, 2)
+
+        # Usage heatmap — session-accumulated press counts on the silhouette.
+        usage_frame = self._panel_frame()
+        usage_v = QVBoxLayout(usage_frame)
+        usage_v.setContentsMargins(10, 8, 10, 10); usage_v.setSpacing(4)
+        self._usage_heatmap = UsageHeatmap()
+        usage_v.addWidget(self._usage_heatmap)
+        root.addWidget(usage_frame, 3)
 
     @staticmethod
     def _panel_frame() -> QFrame:
