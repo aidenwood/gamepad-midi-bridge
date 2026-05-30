@@ -19,19 +19,17 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QSlider,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from ..shaping import TRIGGER_MODES
 from .curve_sparkline import CurveSparkline
+from .primitives import UIDoubleSpinBox, UIInput, UILabel, UISpinBox
 
 # Curves shared by StickConfig and TouchpadConfig
 _CURVES = ("linear", "exponential", "logarithmic", "s-curve")
@@ -39,19 +37,12 @@ _CURVES = ("linear", "exponential", "logarithmic", "s-curve")
 
 # ──────────────────────────────────────────────────────────────────── helpers
 
-def _section(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet(
-        "color: #8a9099; font-size: 10px; font-weight: 700; "
-        "letter-spacing: 1.2px; margin-top: 10px;"
-    )
-    return lbl
+def _section(text: str) -> UILabel:
+    return UILabel(text, variant="caption")
 
 
-def _title(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet("color: #f5f7fa; font-size: 15px; font-weight: 600;")
-    return lbl
+def _title(text: str) -> UILabel:
+    return UILabel(text, variant="subheading")
 
 
 def _chip(text: str, color: str = "#5eead4", bg: str = "rgba(45,212,191,0.12)",
@@ -67,12 +58,11 @@ def _chip(text: str, color: str = "#5eead4", bg: str = "rgba(45,212,191,0.12)",
     return lbl
 
 
-def _row_label(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet("color: #8a9099; font-size: 11px;")
+def _row_label(text: str) -> UILabel:
+    lbl = UILabel(text, variant="caption")
     lbl.setMinimumWidth(118)
     lbl.setMaximumWidth(180)  # column stays narrow but can absorb 1-2 word wraps
-    lbl.setWordWrap(True)
+    # UILabel(caption) already enables word-wrap; re-set alignment here
     lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     return lbl
 
@@ -120,11 +110,10 @@ def _make_float_slider(lo_cents: int, hi_cents: int, value_cents: int,
 
 
 def _make_int_spinbox(lo: int, hi: int, value: int,
-                      on_change: Callable[[int], None]) -> QSpinBox:
-    sb = QSpinBox()
+                      on_change: Callable[[int], None]) -> UISpinBox:
+    sb = UISpinBox()
     sb.setRange(lo, hi)
     sb.setValue(value)
-    sb.setStyleSheet("background: #0e0f12; color: #c2c6cc; border: 1px solid #24262d;")
     sb.valueChanged.connect(on_change)
     return sb
 
@@ -137,10 +126,7 @@ def _slider_row(label: str, widget: QWidget, value_lbl_text: str = "") -> tuple:
     h.setSpacing(6)
     h.addWidget(_row_label(label))
     h.addWidget(widget, 1)
-    val_lbl = QLabel(value_lbl_text)
-    val_lbl.setStyleSheet(
-        "color: #c2c6cc; font-size: 11px; font-family: ui-monospace, Menlo, monospace;"
-    )
+    val_lbl = UILabel(value_lbl_text, variant="caption")
     val_lbl.setMinimumWidth(34)
     val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
     h.addWidget(val_lbl)
@@ -218,7 +204,7 @@ def render_trigger_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
 
     if cfg is None:
-        v.addWidget(QLabel("No config attached."))
+        v.addWidget(UILabel("No config attached.", variant="body"))
         v.addStretch(1)
         return wrap
 
@@ -352,7 +338,7 @@ def render_stick_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
 
     if cfg is None:
-        v.addWidget(QLabel("No config attached."))
+        v.addWidget(UILabel("No config attached.", variant="body"))
         v.addStretch(1)
         return wrap
 
@@ -489,7 +475,7 @@ def render_touchpad_editor(payload: dict) -> QWidget:
     v.addWidget(_divider())
 
     if cfg is None:
-        v.addWidget(QLabel("No config attached."))
+        v.addWidget(UILabel("No config attached.", variant="body"))
         v.addStretch(1)
         return wrap
 
@@ -818,19 +804,17 @@ def render_mapping_globals(payload: dict) -> QWidget:
     v.setSpacing(4)
 
     # ── header ──────────────────────────────────────────────────────────────
-    title_lbl = QLabel("Mapping settings")
-    title_lbl.setStyleSheet("color: #f5f7fa; font-size: 15px; font-weight: 600;")
+    title_lbl = UILabel("Mapping settings", variant="subheading")
     v.addWidget(title_lbl)
 
     if mapping is not None:
-        preset_sub = QLabel(mapping.name)
-        preset_sub.setStyleSheet("color: #8a9099; font-size: 11px; margin-bottom: 2px;")
+        preset_sub = UILabel(mapping.name, variant="caption")
         v.addWidget(preset_sub)
 
     v.addWidget(_divider())
 
     if mapping is None:
-        v.addWidget(QLabel("No mapping attached."))
+        v.addWidget(UILabel("No mapping attached.", variant="body"))
         v.addStretch(1)
         return wrap
 
@@ -842,12 +826,8 @@ def render_mapping_globals(payload: dict) -> QWidget:
     v.addWidget(_section("CORE"))
 
     # name
-    name_edit = QLineEdit(mapping.name)
-    name_edit.setPlaceholderText("Preset name")
-    name_edit.setStyleSheet(
-        "background: #0e0f12; color: #c2c6cc; border: 1px solid #24262d; "
-        "padding: 3px 6px;"
-    )
+    name_edit = UIInput("Preset name")
+    name_edit.setText(mapping.name)
     def _on_name(text: str) -> None:
         mapping.name = text
         _fire()
@@ -864,14 +844,11 @@ def render_mapping_globals(payload: dict) -> QWidget:
     v.addWidget(_spinbox_row("MIDI channel", ch_sb))
 
     # deadzone  0.00..0.50
-    dz_dsb = QDoubleSpinBox()
+    dz_dsb = UIDoubleSpinBox()
     dz_dsb.setRange(0.0, 0.5)
     dz_dsb.setSingleStep(0.01)
     dz_dsb.setDecimals(2)
     dz_dsb.setValue(mapping.deadzone)
-    dz_dsb.setStyleSheet(
-        "background: #0e0f12; color: #c2c6cc; border: 1px solid #24262d;"
-    )
     dz_dsb.setToolTip("Post-calibration stick deadzone (0.00–0.50). 0.05 is a safe default.")
     def _on_dz(val: float) -> None:
         mapping.deadzone = val
@@ -892,12 +869,8 @@ def render_mapping_globals(payload: dict) -> QWidget:
     v.addWidget(_divider())
     v.addWidget(_section("PORT"))
 
-    port_edit = QLineEdit(mapping.port_name_override or "")
-    port_edit.setPlaceholderText("default")
-    port_edit.setStyleSheet(
-        "background: #0e0f12; color: #c2c6cc; border: 1px solid #24262d; "
-        "padding: 3px 6px;"
-    )
+    port_edit = UIInput("default")
+    port_edit.setText(mapping.port_name_override or "")
     port_edit.setToolTip(
         "Leave empty to use the default MIDI port. "
         "Set to a specific port name to override per-preset."
@@ -1061,9 +1034,6 @@ def render_mapping_globals(payload: dict) -> QWidget:
 
     # B preset slug combo — populated from the preset library
     ab_combo = QComboBox()
-    ab_combo.setStyleSheet(
-        "background: #0e0f12; color: #c2c6cc; border: 1px solid #24262d;"
-    )
     ab_combo.addItem("(none)", None)
     for slug in _presets.list_presets():
         ab_combo.addItem(slug, slug)
@@ -1107,11 +1077,10 @@ def render_mapping_globals(payload: dict) -> QWidget:
     v.addWidget(_spinbox_row("Listen channel", pc_ch_sb))
 
     v.addSpacing(8)
-    hint = QLabel(
-        "Per-PC bindings (PC# → preset slug) are managed in the Mapping editor table."
+    hint = UILabel(
+        "Per-PC bindings (PC# → preset slug) are managed in the Mapping editor table.",
+        variant="caption",
     )
-    hint.setWordWrap(True)
-    hint.setStyleSheet("color: #5a606b; font-size: 10px; font-style: italic;")
     v.addWidget(hint)
 
     v.addStretch(1)

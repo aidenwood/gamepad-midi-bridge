@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from .axis_scope import AxisScope
+from .primitives import UIButton, UILabel
 
 
 INSPECTOR_WIDTH = 320  # Figma's default — used as the minimum width now.
@@ -163,17 +164,14 @@ class Inspector(QWidget):
 
     def _render_placeholder(self) -> None:
         self._clear_body()
-        hint = QLabel("Select an item to inspect.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: #5a606b; font-size: 12px; font-style: italic;")
+        hint = UILabel("Select an item to inspect.", variant="body")
         # Insert before the trailing stretch.
         self._body_layout.insertWidget(0, hint)
-        sub = QLabel(
+        sub = UILabel(
             "Tabs that support inspection: Mapping, Marketplace, Live. "
-            "Click a row or card to see its properties here."
+            "Click a row or card to see its properties here.",
+            variant="caption",
         )
-        sub.setWordWrap(True)
-        sub.setStyleSheet("color: #5a606b; font-size: 11px; margin-top: 8px;")
         self._body_layout.insertWidget(1, sub)
 
     def _render_current(self) -> None:
@@ -207,10 +205,7 @@ def render_mapping_selection(payload: dict) -> QWidget:
 
     kind = str(payload.get("kind", "control"))
     label = str(payload.get("label", kind.title()))
-    title = QLabel(label)
-    title.setStyleSheet(
-        "color: #f5f7fa; font-size: 16px; font-weight: 600;"
-    )
+    title = UILabel(label, variant="subheading")
     v.addWidget(title)
 
     kind_chip = QLabel(kind.upper())
@@ -228,12 +223,9 @@ def render_mapping_selection(payload: dict) -> QWidget:
     grid_keys = [k for k in payload.keys() if k not in ("kind", "label")]
     for key in grid_keys:
         row = QHBoxLayout()
-        k = QLabel(str(key).replace("_", " ").title())
-        k.setStyleSheet("color: #8a9099; font-size: 11px; font-weight: 500;")
+        k = UILabel(str(key).replace("_", " ").title(), variant="caption")
         k.setMinimumWidth(110)
-        val = QLabel(str(payload[key]))
-        val.setStyleSheet("color: #c2c6cc; font-size: 12px; font-family: ui-monospace, Menlo, monospace;")
-        val.setWordWrap(True)
+        val = UILabel(str(payload[key]), variant="body")
         row.addWidget(k)
         row.addWidget(val, 1)
         v.addLayout(row)
@@ -256,8 +248,7 @@ def render_marketplace_selection(payload: dict) -> QWidget:
     v.setContentsMargins(0, 0, 0, 0)
     v.setSpacing(8)
 
-    title = QLabel(str(payload.get("label", "Preset")))
-    title.setStyleSheet("color: #f5f7fa; font-size: 16px; font-weight: 600;")
+    title = UILabel(str(payload.get("label", "Preset")), variant="subheading")
     v.addWidget(title)
 
     author = QLabel(str(payload.get("author", "Anonymous")))
@@ -272,11 +263,9 @@ def render_marketplace_selection(payload: dict) -> QWidget:
 
     # Downloads + rating row
     stats_row = QHBoxLayout()
-    downloads = QLabel(f"📥 {payload.get('downloads', 0)} downloads")
-    downloads.setStyleSheet("color: #8a9099; font-size: 11px;")
+    downloads = UILabel(f"📥 {payload.get('downloads', 0)} downloads", variant="caption")
     stats_row.addWidget(downloads)
-    rating = QLabel(f"⭐ {payload.get('rating', 0):.1f}")
-    rating.setStyleSheet("color: #8a9099; font-size: 11px;")
+    rating = UILabel(f"⭐ {payload.get('rating', 0):.1f}", variant="caption")
     stats_row.addWidget(rating)
     stats_row.addStretch(1)
     v.addLayout(stats_row)
@@ -284,9 +273,7 @@ def render_marketplace_selection(payload: dict) -> QWidget:
     # Description
     description = str(payload.get("description", ""))
     if description:
-        desc_label = QLabel(description)
-        desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #c2c6cc; font-size: 11px; margin-top: 8px;")
+        desc_label = UILabel(description, variant="body")
         v.addWidget(desc_label)
 
     # Controller preview diagram
@@ -295,10 +282,7 @@ def render_marketplace_selection(payload: dict) -> QWidget:
     divider.setStyleSheet("color: #24262d;")
     v.addWidget(divider)
 
-    preview_label = QLabel("MAPPING PREVIEW")
-    preview_label.setStyleSheet(
-        "color: #5a606b; font-size: 9px; font-weight: 700; letter-spacing: 1.2px;"
-    )
+    preview_label = UILabel("MAPPING PREVIEW", variant="caption")
     v.addWidget(preview_label)
 
     preview = ControllerPreview()
@@ -307,8 +291,7 @@ def render_marketplace_selection(payload: dict) -> QWidget:
     v.addWidget(preview, 0, Qt.AlignLeft)
 
     # Install button (stub)
-    install_btn = QPushButton("Install Preset")
-    install_btn.setObjectName("PrimaryButton")
+    install_btn = UIButton("Install Preset", variant="primary")
     install_btn.clicked.connect(lambda: print(f"[stub] Install preset: {payload.get('label')}"))
     v.addWidget(install_btn)
 
@@ -331,8 +314,7 @@ def render_live_selection(payload: dict) -> QWidget:
     v.setSpacing(8)
 
     label = str(payload.get("label", "Control"))
-    title = QLabel(label)
-    title.setStyleSheet("color: #f5f7fa; font-size: 16px; font-weight: 600;")
+    title = UILabel(label, variant="subheading")
     v.addWidget(title)
 
     kind = str(payload.get("kind", "")).upper()
@@ -355,16 +337,14 @@ def render_live_selection(payload: dict) -> QWidget:
             pct = int((value + 1.0) / 2.0 * 100) if value >= -1.0 else int(value * 100)
         else:
             pct = int(value * 100)
-        value_label = QLabel(f"Value: {value:.2f} ({pct}%)")
+        value_label = UILabel(f"Value: {value:.2f} ({pct}%)", variant="body")
     else:
-        value_label = QLabel(f"Value: {value}")
-    value_label.setStyleSheet("color: #c2c6cc; font-size: 12px; font-family: ui-monospace, Menlo, monospace;")
+        value_label = UILabel(f"Value: {value}", variant="body")
     v.addWidget(value_label)
 
     # Index
     idx = payload.get("index", "—")
-    idx_label = QLabel(f"Index: {idx}")
-    idx_label.setStyleSheet("color: #8a9099; font-size: 11px;")
+    idx_label = UILabel(f"Index: {idx}", variant="caption")
     v.addWidget(idx_label)
 
     # Oscilloscope for axes/sticks/triggers only (not buttons/dpad/touchpad).
@@ -394,8 +374,7 @@ def render_connector_selection(payload: dict) -> QWidget:
     v.setSpacing(8)
 
     name = str(payload.get("name", "Connector"))
-    title = QLabel(name)
-    title.setStyleSheet("color: #f5f7fa; font-size: 16px; font-weight: 600;")
+    title = UILabel(name, variant="subheading")
     v.addWidget(title)
 
     installed = payload.get("installed", False)
@@ -417,28 +396,23 @@ def render_connector_selection(payload: dict) -> QWidget:
     # Description
     description = str(payload.get("description", ""))
     if description:
-        desc_label = QLabel(description)
-        desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #c2c6cc; font-size: 11px; margin-top: 8px;")
+        desc_label = UILabel(description, variant="body")
         v.addWidget(desc_label)
 
     # Target path (mono)
     target = str(payload.get("target", ""))
     if target:
-        path_label = QLabel(target)
-        path_label.setWordWrap(True)
-        path_label.setStyleSheet("color: #5a606b; font-size: 10px; font-family: ui-monospace, Menlo, monospace;")
+        path_label = UILabel(target, variant="caption")
         v.addWidget(path_label)
 
     # Action buttons
     v.addSpacing(4)
-    action_btn = QPushButton("Install" if not installed else "Reinstall")
-    action_btn.setObjectName("PrimaryButton")
+    action_btn = UIButton("Install" if not installed else "Reinstall", variant="primary")
     action_btn.clicked.connect(lambda: print(f"[stub] Install {payload.get('name')}"))
     v.addWidget(action_btn)
 
     if installed:
-        uninstall_btn = QPushButton("Uninstall")
+        uninstall_btn = UIButton("Uninstall", variant="secondary")
         uninstall_btn.clicked.connect(lambda: print(f"[stub] Uninstall {payload.get('name')}"))
         v.addWidget(uninstall_btn)
 
@@ -459,43 +433,38 @@ def render_preset_file_selection(payload: dict) -> QWidget:
     v.setSpacing(8)
 
     name = str(payload.get("name", "Preset"))
-    title = QLabel(name)
-    title.setStyleSheet("color: #f5f7fa; font-size: 16px; font-weight: 600;")
+    title = UILabel(name, variant="subheading")
     v.addWidget(title)
 
     slug = str(payload.get("slug", ""))
-    slug_label = QLabel(slug)
-    slug_label.setStyleSheet("color: #8a9099; font-size: 10px; font-family: ui-monospace, Menlo, monospace;")
+    slug_label = UILabel(slug, variant="caption")
     v.addWidget(slug_label)
 
     # Metadata row
     meta_row = QHBoxLayout()
     mtime_str = str(payload.get("mtime", ""))
     if mtime_str:
-        mtime_label = QLabel(f"Modified: {mtime_str}")
-        mtime_label.setStyleSheet("color: #8a9099; font-size: 10px;")
+        mtime_label = UILabel(f"Modified: {mtime_str}", variant="caption")
         meta_row.addWidget(mtime_label)
     meta_row.addStretch(1)
     v.addLayout(meta_row)
 
     size_str = str(payload.get("size", ""))
     if size_str:
-        size_label = QLabel(f"Size: {size_str}")
-        size_label.setStyleSheet("color: #8a9099; font-size: 10px;")
+        size_label = UILabel(f"Size: {size_str}", variant="caption")
         v.addWidget(size_label)
 
     # Action buttons
     v.addSpacing(4)
-    load_btn = QPushButton("Load")
-    load_btn.setObjectName("PrimaryButton")
+    load_btn = UIButton("Load", variant="primary")
     load_btn.clicked.connect(lambda: print(f"[stub] Load preset: {payload.get('name')}"))
     v.addWidget(load_btn)
 
-    delete_btn = QPushButton("Delete")
+    delete_btn = UIButton("Delete", variant="secondary")
     delete_btn.clicked.connect(lambda: print(f"[stub] Delete preset: {payload.get('name')}"))
     v.addWidget(delete_btn)
 
-    export_btn = QPushButton("Export cheat sheet")
+    export_btn = UIButton("Export cheat sheet", variant="ghost")
     export_btn.clicked.connect(lambda: print(f"[stub] Export cheat sheet: {payload.get('name')}"))
     v.addWidget(export_btn)
 
