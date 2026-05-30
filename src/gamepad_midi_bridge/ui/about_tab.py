@@ -206,6 +206,7 @@ class AboutTab(QWidget):
                 row.addWidget(upgrade)
             if self.on_enter_license:
                 activate = QPushButton("Enter license key")
+                activate.setStyleSheet("color: #e6e8eb;")
                 activate.clicked.connect(self.on_enter_license)
                 row.addWidget(activate)
             row.addStretch(1)
@@ -245,10 +246,12 @@ class AboutTab(QWidget):
             portable_row = QHBoxLayout()
             if self.on_export_pack:
                 export_btn = QPushButton("Export config…")
+                export_btn.setStyleSheet("color: #e6e8eb;")
                 export_btn.clicked.connect(self.on_export_pack)
                 portable_row.addWidget(export_btn)
             if self.on_import_pack:
                 import_btn = QPushButton("Import config…")
+                import_btn.setStyleSheet("color: #e6e8eb;")
                 import_btn.clicked.connect(self.on_import_pack)
                 portable_row.addWidget(import_btn)
             portable_row.addStretch(1)

@@ -454,6 +454,7 @@ class HelpTab(QWidget):
 
     def _link_button(self, text: str, handler: Callable[[], None]) -> QPushButton:
         btn = QPushButton(text)
+        btn.setStyleSheet("color: #e6e8eb;")
         btn.clicked.connect(handler)
         return btn
 
