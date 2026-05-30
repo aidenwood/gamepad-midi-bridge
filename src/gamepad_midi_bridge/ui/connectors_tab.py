@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from .primitives import UIButton, UILabel
+
 from .. import telemetry
 from ..connectors import Connector, HostInstallation, all_connectors
 from ..daw_detector import DetectedApp, detect_installed_apps
@@ -73,23 +75,21 @@ class ConnectorsTab(QWidget):
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(14)
 
-        header = QLabel("Auto-map your gamepad into the apps you use.")
-        header.setStyleSheet("font-size: 14px; font-weight: 600; color: #f5f7fa;")
+        header = UILabel("Auto-map your gamepad into the apps you use.", variant="subheading")
         outer.addWidget(header)
 
-        sub = QLabel(
+        sub = UILabel(
             "Each connector writes a ready-made MIDI map into the host's "
             "config folder. No restart required for Resolume; Ableton needs "
-            "a Control Surface re-pick."
+            "a Control Surface re-pick.",
+            variant="body",
         )
-        sub.setStyleSheet("color: #8a9099;")
-        sub.setWordWrap(True)
         outer.addWidget(sub)
 
         # Refresh button (cheap — just calls each connector's detect())
         action_row = QHBoxLayout()
         action_row.addStretch(1)
-        refresh = QPushButton("Re-scan for hosts")
+        refresh = UIButton("Re-scan for hosts", variant="secondary")
         refresh.clicked.connect(self.refresh)
         action_row.addWidget(refresh)
         outer.addLayout(action_row)
@@ -162,16 +162,13 @@ class ConnectorsTab(QWidget):
 
         left = QVBoxLayout()
         left.setSpacing(2)
-        name_lbl = QLabel(app.name)
-        name_lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #f5f7fa;")
-        path_lbl = QLabel(str(app.path))
-        path_lbl.setStyleSheet("color: #5a606b; font-size: 11px;")
-        path_lbl.setWordWrap(True)
+        name_lbl = UILabel(app.name, variant="subheading")
+        path_lbl = UILabel(str(app.path), variant="caption")
         left.addWidget(name_lbl)
         left.addWidget(path_lbl)
         h.addLayout(left, 1)
 
-        suggest_btn = QPushButton("Suggest connector")
+        suggest_btn = UIButton("Suggest connector", variant="primary")
         suggest_btn.setObjectName("PrimaryButton")
         suggest_btn.setToolTip(
             f"Show the '{app.connector_target}' connector for {app.name}"
@@ -203,15 +200,14 @@ class ConnectorsTab(QWidget):
         layout.setSpacing(8)
 
         if not host_pairs:
-            empty = QLabel(
+            empty = UILabel(
                 "No supported host applications detected.\n\n"
                 "Currently supported: Resolume Arena 7-9.\n"
                 "Open the app you want to connect once so it creates its "
-                "Documents folder, then come back here and click Re-scan."
+                "Documents folder, then come back here and click Re-scan.",
+                variant="body",
             )
-            empty.setStyleSheet("color: #8a9099; padding: 40px;")
             empty.setAlignment(Qt.AlignCenter)
-            empty.setWordWrap(True)
             layout.addWidget(empty)
         else:
             for connector, host in host_pairs:
@@ -261,14 +257,9 @@ class ConnectorsTab(QWidget):
         # Left column — name + description
         left = QVBoxLayout()
         left.setSpacing(2)
-        title = QLabel(f"{host.name}")
-        title.setStyleSheet("font-size: 14px; font-weight: 600; color: #f5f7fa;")
-        sub = QLabel(connector.description)
-        sub.setStyleSheet("color: #8a9099; font-size: 12px;")
-        sub.setWordWrap(True)
-        path = QLabel(str(host.config_dir))
-        path.setStyleSheet("color: #5a606b; font-size: 11px;")
-        path.setWordWrap(True)
+        title = UILabel(f"{host.name}", variant="subheading")
+        sub = UILabel(connector.description, variant="body")
+        path = UILabel(str(host.config_dir), variant="caption")
         left.addWidget(title)
         left.addWidget(sub)
         left.addWidget(path)
@@ -277,7 +268,8 @@ class ConnectorsTab(QWidget):
         # Right column — status + actions
         right = QVBoxLayout()
         right.setSpacing(6)
-        status = QLabel("Installed ✓" if installed else "Not installed")
+        status = UILabel("Installed ✓" if installed else "Not installed", variant="caption")
+        # Keep bespoke: installed state uses distinct accent vs muted color (more than just color)
         status.setStyleSheet(
             "color: #2dd4bf; font-weight: 600;" if installed
             else "color: #8a9099;"
@@ -289,11 +281,12 @@ class ConnectorsTab(QWidget):
         button_row.setSpacing(6)
 
         # Verify button + inline status chip
-        verify_btn = QPushButton("Verify")
+        verify_btn = UIButton("Verify", variant="secondary")
         verify_btn.setMinimumWidth(60)
         verify_btn.setToolTip("Run a quick install self-test for this connector")
-        verify_chip = QLabel()
+        verify_chip = UILabel("", variant="caption")
         verify_chip.setVisible(False)
+        # Keep bespoke: dynamic background-color + border-radius set by _done() callback
         verify_chip.setStyleSheet("border-radius: 4px; padding: 2px 6px; font-size: 11px;")
         verify_btn.clicked.connect(
             lambda: self._on_verify(connector, host, verify_btn, verify_chip)
@@ -301,17 +294,17 @@ class ConnectorsTab(QWidget):
         button_row.addWidget(verify_btn)
         button_row.addWidget(verify_chip)
 
-        test_btn = QPushButton("Test")
+        test_btn = UIButton("Test", variant="secondary")
         test_btn.setMinimumWidth(60)
         test_btn.setToolTip("Send a test MIDI note to verify DAW connectivity")
         test_btn.clicked.connect(lambda: self._on_test(connector, host))
         button_row.addWidget(test_btn)
-        install_btn = QPushButton("Reinstall" if installed else "Install")
+        install_btn = UIButton("Reinstall" if installed else "Install", variant="primary")
         install_btn.setObjectName("PrimaryButton")
         install_btn.clicked.connect(lambda: self._on_install(connector, host))
         button_row.addWidget(install_btn)
         if installed:
-            remove_btn = QPushButton("Remove")
+            remove_btn = UIButton("Remove", variant="secondary")
             remove_btn.clicked.connect(lambda: self._on_uninstall(connector, host))
             button_row.addWidget(remove_btn)
         right.addLayout(button_row)

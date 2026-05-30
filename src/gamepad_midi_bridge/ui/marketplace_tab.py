@@ -16,9 +16,11 @@ from typing import Any, Dict, List, Optional, Set
 from PySide6.QtCore import QByteArray, Qt, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
+
+from .primitives import UIButton, UILabel, UIInput
 
 from ..mapping import Mapping
 
@@ -67,16 +69,14 @@ class MarketplaceTab(QWidget):
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(14)
 
-        header = QLabel("Community presets — built by other players, ready to map.")
-        header.setStyleSheet("font-size: 14px; font-weight: 600; color: #f5f7fa;")
+        header = UILabel("Community presets — built by other players, ready to map.", variant="subheading")
         outer.addWidget(header)
 
-        sub = QLabel(
+        sub = UILabel(
             "Download a preset and it loads straight into your active mapping. "
-            "Browse the full library on the web for screenshots and reviews."
+            "Browse the full library on the web for screenshots and reviews.",
+            variant="body",
         )
-        sub.setStyleSheet(f"color: {MUTED};")
-        sub.setWordWrap(True)
         outer.addWidget(sub)
 
         # Search box and sort
@@ -94,8 +94,7 @@ class MarketplaceTab(QWidget):
         self._tag_chips_container.setVisible(False)
         outer.addWidget(self._tag_chips_container)
 
-        self._status_label = QLabel("")
-        self._status_label.setStyleSheet(f"color: {MUTED}; padding: 2px 0;")
+        self._status_label = UILabel("", variant="caption")
         outer.addWidget(self._status_label)
 
         self._scroll = QScrollArea()
@@ -104,7 +103,7 @@ class MarketplaceTab(QWidget):
         outer.addWidget(self._scroll, 1)
 
         action_row = QHBoxLayout()
-        browse = QPushButton("Browse online")
+        browse = UIButton("Browse online", variant="ghost")
         browse.clicked.connect(lambda: webbrowser.open(BROWSE_URL))
         action_row.addWidget(browse)
         action_row.addStretch(1)
@@ -114,12 +113,11 @@ class MarketplaceTab(QWidget):
         row = QHBoxLayout()
         row.setSpacing(8)
 
-        self._search = QLineEdit()
-        self._search.setPlaceholderText("Search title / description / author / tags…")
+        self._search = UIInput("Search title / description / author / tags…")
         self._search.textChanged.connect(self._refresh_visible)
         row.addWidget(self._search, 1)
 
-        row.addWidget(QLabel("Sort:"))
+        row.addWidget(UILabel("Sort:", variant="caption"))
         self._sort_combo = QComboBox()
         self._sort_combo.addItem("Newest", userData="newest")
         self._sort_combo.addItem("Most downloaded", userData="downloads")
@@ -130,7 +128,7 @@ class MarketplaceTab(QWidget):
         )
         row.addWidget(self._sort_combo)
 
-        refresh_btn = QPushButton("Refresh")
+        refresh_btn = UIButton("Refresh", variant="secondary")
         refresh_btn.clicked.connect(lambda: self.refresh(force=True))
         row.addWidget(refresh_btn)
 
@@ -150,7 +148,7 @@ class MarketplaceTab(QWidget):
         ):
             self._host_combo.addItem(label, userData=value)
         self._host_combo.currentIndexChanged.connect(self._refresh_visible)
-        row.addWidget(QLabel("Host:"))
+        row.addWidget(UILabel("Host:", variant="caption"))
         row.addWidget(self._host_combo)
 
         self._device_combo = QComboBox()
@@ -162,7 +160,7 @@ class MarketplaceTab(QWidget):
         ):
             self._device_combo.addItem(label, userData=value)
         self._device_combo.currentIndexChanged.connect(self._refresh_visible)
-        row.addWidget(QLabel("Device:"))
+        row.addWidget(UILabel("Device:", variant="caption"))
         row.addWidget(self._device_combo)
 
         return row
@@ -395,9 +393,8 @@ class MarketplaceTab(QWidget):
         container = QWidget()
         v = QVBoxLayout(container)
         v.setContentsMargins(0, 0, 0, 0)
-        spinner = QLabel("Loading…")
+        spinner = UILabel("Loading…", variant="body")
         spinner.setAlignment(Qt.AlignCenter)
-        spinner.setStyleSheet(f"color: {MUTED}; padding: 60px;")
         v.addWidget(spinner)
         v.addStretch(1)
         self._scroll.setWidget(container)
@@ -408,10 +405,8 @@ class MarketplaceTab(QWidget):
         container = QWidget()
         v = QVBoxLayout(container)
         v.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel(message)
+        lbl = UILabel(message, variant="body")
         lbl.setAlignment(Qt.AlignCenter)
-        lbl.setStyleSheet(f"color: {MUTED}; padding: 40px;")
-        lbl.setWordWrap(True)
         v.addWidget(lbl)
         v.addStretch(1)
         self._scroll.setWidget(container)
@@ -436,19 +431,19 @@ class MarketplaceTab(QWidget):
 
         if not self._visible_presets:
             if self._presets:
-                empty = QLabel(
+                empty = UILabel(
                     "No presets match your filters.\n\n"
-                    "Try adjusting your search or selecting different tags."
+                    "Try adjusting your search or selecting different tags.",
+                    variant="body",
                 )
             else:
-                empty = QLabel(
+                empty = UILabel(
                     "No presets available yet.\n\n"
                     "Want to be first? Build a mapping, then publish it from the "
-                    "marketplace site — your name goes on it forever."
+                    "marketplace site — your name goes on it forever.",
+                    variant="body",
                 )
             empty.setAlignment(Qt.AlignCenter)
-            empty.setWordWrap(True)
-            empty.setStyleSheet(f"color: {MUTED}; padding: 40px;")
             v.addWidget(empty)
         else:
             for preset in self._visible_presets:
@@ -473,8 +468,7 @@ class MarketplaceTab(QWidget):
         left = QVBoxLayout()
         left.setSpacing(4)
 
-        title = QLabel(preset.get("title") or "Untitled preset")
-        title.setStyleSheet("font-size: 14px; font-weight: 600; color: #f5f7fa;")
+        title = UILabel(preset.get("title") or "Untitled preset", variant="subheading")
         left.addWidget(title)
 
         author = preset.get("author") or {}
@@ -485,15 +479,12 @@ class MarketplaceTab(QWidget):
         )
         host = preset.get("host_target") or "generic"
         device = preset.get("device_target") or "generic"
-        meta = QLabel(f"by {author_name}  ·  {host} · {device}")
-        meta.setStyleSheet(f"color: {MUTED}; font-size: 12px;")
+        meta = UILabel(f"by {author_name}  ·  {host} · {device}", variant="caption")
         left.addWidget(meta)
 
         description = preset.get("description")
         if description:
-            desc = QLabel(str(description))
-            desc.setStyleSheet(f"color: {MUTED}; font-size: 12px;")
-            desc.setWordWrap(True)
+            desc = UILabel(str(description), variant="body")
             left.addWidget(desc)
 
         tags = preset.get("tags") or []
@@ -518,12 +509,11 @@ class MarketplaceTab(QWidget):
         right = QVBoxLayout()
         right.setSpacing(6)
         downloads = preset.get("downloads") or 0
-        dl_label = QLabel(f"{downloads} downloads")
+        dl_label = UILabel(f"{downloads} downloads", variant="caption")
         dl_label.setAlignment(Qt.AlignRight)
-        dl_label.setStyleSheet(f"color: {SUBTLE_TEXT}; font-size: 11px;")
         right.addWidget(dl_label)
 
-        install_btn = QPushButton("Install")
+        install_btn = UIButton("Install preset", variant="primary")
         install_btn.setObjectName("PrimaryButton")
         install_btn.clicked.connect(lambda _=False, p=preset: self._on_install(p))
         right.addWidget(install_btn)

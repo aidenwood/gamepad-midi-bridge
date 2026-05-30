@@ -18,19 +18,18 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QSlider,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
+
+from .primitives import UIButton, UILabel, UIInput, UISpinBox, UIDoubleSpinBox
 
 from ..license import is_pro, state as license_state, deactivate as license_deactivate
 from ..mapping import Mapping
@@ -83,11 +82,8 @@ def _write_multi_mode(mode: str) -> None:
         pass
 
 
-def _note(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet("color: #5a606b; font-size: 11px;")
-    lbl.setWordWrap(True)
-    return lbl
+def _note(text: str) -> UILabel:
+    return UILabel(text, variant="caption")
 
 
 class SettingsPanel(QWidget):
@@ -142,8 +138,7 @@ class SettingsPanel(QWidget):
         search_layout.setContentsMargins(20, 12, 20, 8)
         search_layout.setSpacing(0)
 
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Search settings…")
+        self._search_input = UIInput("Search settings…")
         self._search_input.textChanged.connect(self._on_search_changed)
         search_layout.addWidget(self._search_input)
         root.addWidget(search_container)
@@ -199,13 +194,13 @@ class SettingsPanel(QWidget):
         midi_group = QGroupBox("Audio + MIDI")
         midi_form = QFormLayout(midi_group)
 
-        self._channel = QSpinBox()
+        self._channel = UISpinBox()
         self._channel.setRange(1, 16)
         self._channel.setValue(mapping.midi_channel + 1)
         self._channel.valueChanged.connect(self._emit)
         midi_form.addRow("Default MIDI channel", self._channel)
 
-        self._poll = QSpinBox()
+        self._poll = UISpinBox()
         self._poll.setRange(30, 500)
         self._poll.setSingleStep(10)
         self._poll.setValue(mapping.poll_hz)
@@ -257,12 +252,12 @@ class SettingsPanel(QWidget):
         self._osc_mode.currentIndexChanged.connect(self._emit)
         osc_form.addRow("Mode", self._osc_mode)
 
-        self._osc_host = QLineEdit(mapping.osc.host)
-        self._osc_host.setPlaceholderText("127.0.0.1")
+        self._osc_host = UIInput("127.0.0.1")
+        self._osc_host.setText(mapping.osc.host)
         self._osc_host.editingFinished.connect(self._emit)
         osc_form.addRow("Host", self._osc_host)
 
-        self._osc_port = QSpinBox()
+        self._osc_port = UISpinBox()
         self._osc_port.setRange(1, 65535)
         self._osc_port.setValue(mapping.osc.port)
         self._osc_port.valueChanged.connect(self._emit)
@@ -272,7 +267,7 @@ class SettingsPanel(QWidget):
             "Address-per-control mapping lives in your preset JSON. "
             "Resolume listens on 7000 by default; TouchDesigner / MadMapper are user-configured."
         ))
-        ping_btn = QPushButton("Send /gmb/ping (test the route)")
+        ping_btn = UIButton("Send /gmb/ping (test the route)", variant="secondary")
         ping_btn.clicked.connect(self._on_osc_ping)
         osc_form.addRow(ping_btn)
         osc_group.setEnabled(pro)
@@ -297,7 +292,7 @@ class SettingsPanel(QWidget):
         self._deadzone_slider = QSlider(Qt.Orientation.Horizontal)
         self._deadzone_slider.setRange(0, 200)   # /1000 → 0..0.200
         self._deadzone_slider.setValue(int(mapping.deadzone * 1000))
-        self._deadzone_spin = QDoubleSpinBox()
+        self._deadzone_spin = UIDoubleSpinBox()
         self._deadzone_spin.setRange(0.0, 0.20)
         self._deadzone_spin.setSingleStep(0.005)
         self._deadzone_spin.setDecimals(3)
@@ -329,13 +324,13 @@ class SettingsPanel(QWidget):
         self._touchpad_enabled.toggled.connect(self._emit)
         touchpad_form.addRow(self._touchpad_enabled)
 
-        self._touchpad_x_cc = QSpinBox()
+        self._touchpad_x_cc = UISpinBox()
         self._touchpad_x_cc.setRange(0, 127)
         self._touchpad_x_cc.setValue(mapping.touchpad.x_cc)
         self._touchpad_x_cc.valueChanged.connect(self._emit)
         touchpad_form.addRow("X CC", self._touchpad_x_cc)
 
-        self._touchpad_y_cc = QSpinBox()
+        self._touchpad_y_cc = UISpinBox()
         self._touchpad_y_cc.setRange(0, 127)
         self._touchpad_y_cc.setValue(mapping.touchpad.y_cc)
         self._touchpad_y_cc.valueChanged.connect(self._emit)
@@ -366,16 +361,15 @@ class SettingsPanel(QWidget):
         self._haptic_in_enabled.toggled.connect(self._emit)
         haptics_form.addRow(self._haptic_in_enabled)
 
-        port_hint = QLabel(
-            "Listen port: <code>%s</code> — point your DAW's MIDI output here." % INPUT_PORT_NAME
+        port_hint = UILabel(
+            "Listen port: <code>%s</code> — point your DAW's MIDI output here." % INPUT_PORT_NAME,
+            variant="caption",
         )
         port_hint.setTextFormat(Qt.TextFormat.RichText)
-        port_hint.setStyleSheet("color: #5a606b; font-size: 11px;")
-        port_hint.setWordWrap(True)
         haptics_form.addRow(port_hint)
 
         bindings_row = QHBoxLayout()
-        manage_btn = QPushButton("Manage bindings…")
+        manage_btn = UIButton("Manage bindings…", variant="secondary")
         manage_btn.clicked.connect(self._open_haptic_bindings_dialog)
         bindings_row.addWidget(manage_btn)
         bindings_row.addStretch(1)
@@ -389,7 +383,7 @@ class SettingsPanel(QWidget):
             "or your sticks start drifting mid-set."
         ))
         recalib_row = QHBoxLayout()
-        recalib = QPushButton("Re-calibrate sticks")
+        recalib = UIButton("Re-calibrate sticks", variant="secondary")
         recalib.clicked.connect(self.recalibrate_clicked.emit)
         recalib_row.addWidget(recalib)
         recalib_row.addStretch(1)
@@ -433,12 +427,11 @@ class SettingsPanel(QWidget):
             lic_text = "License: Pro"
         else:
             lic_text = "License: Free tier"
-        lic_label = QLabel(lic_text)
-        lic_label.setStyleSheet("font-size: 11px;")
+        lic_label = UILabel(lic_text, variant="caption")
         privacy_form.addRow("", lic_label)
 
         export_row = QHBoxLayout()
-        export_btn = QPushButton("Export crash bundle…")
+        export_btn = UIButton("Export crash bundle…", variant="secondary")
         export_btn.clicked.connect(self._on_export_bundle)
         export_row.addWidget(export_btn)
         export_row.addStretch(1)
@@ -452,19 +445,19 @@ class SettingsPanel(QWidget):
             "QGroupBox::title { color: #c0392b; }"
         )
 
-        clear_snaps_btn = QPushButton("Clear all snapshots")
+        clear_snaps_btn = UIButton("Clear all snapshots", variant="danger")
         clear_snaps_btn.clicked.connect(self._on_clear_snapshots)
         danger_form.addRow(clear_snaps_btn)
 
-        clear_saves_btn = QPushButton("Clear autosaves")
+        clear_saves_btn = UIButton("Clear autosaves", variant="danger")
         clear_saves_btn.clicked.connect(self._on_clear_autosaves)
         danger_form.addRow(clear_saves_btn)
 
-        reset_btn = QPushButton("Reset to factory defaults")
+        reset_btn = UIButton("Reset to factory defaults", variant="danger")
         reset_btn.clicked.connect(self._on_reset_to_defaults)
         danger_form.addRow(reset_btn)
 
-        sign_out_btn = QPushButton("Sign out (deactivate license)")
+        sign_out_btn = UIButton("Sign out (deactivate license)", variant="danger")
         sign_out_btn.clicked.connect(self._on_sign_out)
         if not ls.is_pro:
             sign_out_btn.setEnabled(False)
