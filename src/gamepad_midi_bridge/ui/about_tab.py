@@ -137,7 +137,7 @@ class AboutTab(QWidget):
             btn.clicked.connect(lambda: webbrowser.open(url))
             return btn
 
-        links_layout.addWidget(link_button("Website", "https://store.aidxn.com"))
+        links_layout.addWidget(link_button("Website", "https://midi.aidxn.com"))
         links_layout.addSpacing(8)
         links_layout.addWidget(link_button("GitHub", "https://github.com/aidenwood/PS5-MIDI-Bridge"))
         links_layout.addSpacing(8)
@@ -213,13 +213,13 @@ class AboutTab(QWidget):
 
             recovery_row = QHBoxLayout()
             recover = QPushButton("Lost your license key?")
-            recover.clicked.connect(lambda: webbrowser.open("https://store.aidxn.com/recover"))
+            recover.clicked.connect(lambda: webbrowser.open("https://midi.aidxn.com/recover"))
             recover.setFlat(True)
             recover.setStyleSheet("color: #8a9099; text-align: left;")
             recovery_row.addWidget(recover)
 
             changelog = QPushButton("Release notes")
-            changelog.clicked.connect(lambda: webbrowser.open("https://store.aidxn.com/changelog"))
+            changelog.clicked.connect(lambda: webbrowser.open("https://midi.aidxn.com/changelog"))
             changelog.setFlat(True)
             changelog.setStyleSheet("color: #8a9099; text-align: left;")
             recovery_row.addWidget(changelog)

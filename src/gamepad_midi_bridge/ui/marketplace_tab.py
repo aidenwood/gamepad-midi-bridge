@@ -1,4 +1,4 @@
-"""Marketplace tab — browse + install community presets from store.aidxn.com.
+"""Marketplace tab — browse + install community presets from midi.aidxn.com.
 
 Free-tier visible. Browsing and downloading are public; only publishing will
 require Pro (not implemented here).
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from ..mapping import Mapping
 
 
-STORE_BASE = "https://store.aidxn.com"
+STORE_BASE = "https://midi.aidxn.com"
 LIST_URL = f"{STORE_BASE}/api/presets"
 BROWSE_URL = f"{STORE_BASE}/marketplace"
 CACHE_TTL_SECONDS = 5 * 60

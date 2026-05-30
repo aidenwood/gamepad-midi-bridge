@@ -41,16 +41,16 @@ except Exception:
     _LOGO_3D_AVAILABLE = False
 
 
-CHANGELOG_URL = "https://store.aidxn.com/changelog"
+CHANGELOG_URL = "https://midi.aidxn.com/changelog"
 ISSUES_URL = "https://github.com/aidenwood/gamepad-midi-bridge/issues"
 SUPPORT_EMAIL = "support@aidxn.com"
 
 DOCS_LINKS = {
-    "Getting started": "https://store.aidxn.com/docs/getting-started",
-    "Connect a controller": "https://store.aidxn.com/docs/connect-controller",
-    "Map your first preset": "https://store.aidxn.com/docs/map-preset",
-    "Stage performance tips": "https://store.aidxn.com/docs/stage-performance",
-    "Troubleshoot Bluetooth": "https://store.aidxn.com/docs/troubleshoot-bluetooth",
+    "Getting started": "https://midi.aidxn.com/docs/getting-started",
+    "Connect a controller": "https://midi.aidxn.com/docs/connect-controller",
+    "Map your first preset": "https://midi.aidxn.com/docs/map-preset",
+    "Stage performance tips": "https://midi.aidxn.com/docs/stage-performance",
+    "Troubleshoot Bluetooth": "https://midi.aidxn.com/docs/troubleshoot-bluetooth",
 }
 
 

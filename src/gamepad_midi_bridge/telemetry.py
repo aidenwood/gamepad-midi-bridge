@@ -29,7 +29,7 @@ from . import __version__
 from .paths import config_path
 
 
-TELEMETRY_URL = "https://store.aidxn.com/api/telemetry"
+TELEMETRY_URL = "https://midi.aidxn.com/api/telemetry"
 TIMEOUT_SEC = 4
 
 

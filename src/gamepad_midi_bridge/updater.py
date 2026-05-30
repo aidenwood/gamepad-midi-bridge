@@ -1,14 +1,14 @@
 """Background update check.
 
-On startup we hit `store.aidxn.com/api/version` on a worker thread and emit
+On startup we hit `midi.aidxn.com/api/version` on a worker thread and emit
 a signal back to the GUI if a newer version is available. The user can opt
 out via the config file — the check is a courtesy, not a phone-home.
 
 Endpoint shape (server-side, JSON):
     {
         "latest": "0.2.0",
-        "notes_url": "https://store.aidxn.com/changelog#v0-2-0",
-        "download_url": "https://store.aidxn.com/download",
+        "notes_url": "https://midi.aidxn.com/changelog#v0-2-0",
+        "download_url": "https://midi.aidxn.com/download",
         "minimum_supported": "0.1.0"
     }
 
@@ -36,7 +36,7 @@ from . import __version__
 from .paths import config_path
 
 
-UPDATE_URL = "https://store.aidxn.com/api/version"
+UPDATE_URL = "https://midi.aidxn.com/api/version"
 TIMEOUT_SEC = 6   # short — don't block startup if the API is slow
 
 
