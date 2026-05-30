@@ -9,7 +9,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QFrame, QGroupBox, QHeaderView,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QHBoxLayout, QLabel, QPushButton,
     QSpinBox, QStackedLayout, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget,
 )
@@ -19,6 +19,7 @@ from .. import presets as _presets
 from ..license import is_pro
 from ..mapping import L2_AXIS, R2_AXIS, STICK_AXES, Mapping
 from ..scales import SCALES
+from .primitives import UIButton, UIInput, UILabel, UISpinBox
 from .pro_lock import ProLockOverlay
 
 
@@ -96,18 +97,11 @@ class MappingEditor(QWidget):
         settings_row_layout = QHBoxLayout(settings_row)
         settings_row_layout.setContentsMargins(0, 0, 0, 4)
         settings_row_layout.setSpacing(6)
-        self._settings_btn = QPushButton("Settings")
+        self._settings_btn = UIButton("Settings", variant="secondary", size="s")
         self._settings_btn.setToolTip(
             "Open all top-level Mapping config variables in the inspector "
             "(name, MIDI channel, deadzone, poll Hz, port, battery alert, "
             "haptic input, shift layer, A/B compare, program change)."
-        )
-        self._settings_btn.setStyleSheet(
-            "QPushButton { background: #1c1e25; color: #c2c6cc; "
-            "border: 1px solid #2c313b; border-radius: 4px; "
-            "font-size: 11px; padding: 4px 12px; }"
-            "QPushButton:hover { background: #252830; color: #f5f7fa; }"
-            "QPushButton:pressed { background: #0e0f12; }"
         )
         self._settings_btn.clicked.connect(self._emit_mapping_globals)
         settings_row_layout.addWidget(self._settings_btn)
@@ -120,9 +114,8 @@ class MappingEditor(QWidget):
         port_layout = QHBoxLayout(port_row)
         port_layout.setContentsMargins(0, 0, 0, 0)
         port_layout.setSpacing(6)
-        port_layout.addWidget(QLabel("Override port name:"))
-        self._port_name_input = QLineEdit()
-        self._port_name_input.setPlaceholderText("Leave empty for default")
+        port_layout.addWidget(UILabel("Override port name:", variant="body"))
+        self._port_name_input = UIInput("Leave empty for default")
         if self._mapping.port_name_override:
             self._port_name_input.setText(self._mapping.port_name_override)
         def _on_port_name_changed(text: str) -> None:
@@ -240,16 +233,14 @@ class MappingEditor(QWidget):
         self._shift_enabled_cb.toggled.connect(self._on_shift_enabled_changed)
         form.addRow("Enabled", self._shift_enabled_cb)
 
-        self._shift_button_spin = QSpinBox()
+        self._shift_button_spin = UISpinBox()
         self._shift_button_spin.setRange(-1, 31)
         self._shift_button_spin.setSpecialValueText("(unset)")
         self._shift_button_spin.setValue(sl.shift_button)
         self._shift_button_spin.valueChanged.connect(self._on_shift_button_changed)
         form.addRow("Shift Button", self._shift_button_spin)
 
-        hint = QLabel("Held button swaps the mapping; otherwise base mapping plays")
-        hint.setStyleSheet("color: #8a9099; font-size: 11px;")
-        hint.setWordWrap(True)
+        hint = UILabel("Held button swaps the mapping; otherwise base mapping plays", variant="caption")
         form.addRow(hint)
 
         return box
@@ -290,7 +281,7 @@ class MappingEditor(QWidget):
         self._ab_enabled_cb.toggled.connect(self._on_ab_enabled_changed)
         form.addRow("Enabled", self._ab_enabled_cb)
 
-        self._ab_button_spin = QSpinBox()
+        self._ab_button_spin = UISpinBox()
         self._ab_button_spin.setRange(-1, 31)
         self._ab_button_spin.setSpecialValueText("(unset)")
         self._ab_button_spin.setValue(m.ab_compare_button)
@@ -307,9 +298,7 @@ class MappingEditor(QWidget):
         self._ab_preset_combo.currentIndexChanged.connect(self._on_ab_preset_changed)
         form.addRow("B Preset", self._ab_preset_combo)
 
-        hint = QLabel("Hold B button to swap to the B preset; release to return to A")
-        hint.setStyleSheet("color: #8a9099; font-size: 11px;")
-        hint.setWordWrap(True)
+        hint = UILabel("Hold B button to swap to the B preset; release to return to A", variant="caption")
         form.addRow(hint)
 
         return box
@@ -367,7 +356,7 @@ class MappingEditor(QWidget):
         enabled_cb.toggled.connect(lambda v, l=left: self._on_scale_enabled(v, l))
         form.addRow("Scale Quantize", enabled_cb)
 
-        root_spin = QSpinBox()
+        root_spin = UISpinBox()
         root_spin.setRange(0, 127)
         root_spin.setValue(cfg.scale_root)
         root_spin.setToolTip("Root note (0=C-1 … 60=C4 … 127=G9)")
@@ -382,9 +371,7 @@ class MappingEditor(QWidget):
         scale_combo.currentIndexChanged.connect(lambda _i, l=left, c=scale_combo: self._on_scale_name(c.currentData(), l))
         form.addRow("Scale", scale_combo)
 
-        hint = QLabel("Sectors play scale degrees in ascending pitch; wraps at octave boundary")
-        hint.setStyleSheet("color: #8a9099; font-size: 11px;")
-        hint.setWordWrap(True)
+        hint = UILabel("Sectors play scale degrees in ascending pitch; wraps at octave boundary", variant="caption")
         form.addRow(hint)
 
         # Stash widget refs so _refresh can update them.
@@ -445,7 +432,7 @@ class MappingEditor(QWidget):
         self._pc_enabled_cb.toggled.connect(self._on_pc_enabled_changed)
         form.addRow("Enabled", self._pc_enabled_cb)
 
-        self._pc_channel_spin = QSpinBox()
+        self._pc_channel_spin = UISpinBox()
         self._pc_channel_spin.setRange(-1, 15)
         self._pc_channel_spin.setSpecialValueText("any")
         self._pc_channel_spin.setValue(cfg.listen_channel)
@@ -467,10 +454,10 @@ class MappingEditor(QWidget):
         btn_layout = QHBoxLayout(btn_row)
         btn_layout.setContentsMargins(0, 0, 0, 0)
         btn_layout.setSpacing(6)
-        add_btn = QPushButton("Add")
+        add_btn = UIButton("Add", variant="secondary", size="s")
         add_btn.setFixedWidth(60)
         add_btn.clicked.connect(self._on_pc_add)
-        remove_btn = QPushButton("Remove")
+        remove_btn = UIButton("Remove", variant="secondary", size="s")
         remove_btn.setFixedWidth(70)
         remove_btn.clicked.connect(self._on_pc_remove)
         btn_layout.addWidget(add_btn)
@@ -478,9 +465,7 @@ class MappingEditor(QWidget):
         btn_layout.addStretch()
         form.addRow(btn_row)
 
-        hint = QLabel("DAW sends PC# -> app loads the mapped preset slug instantly")
-        hint.setStyleSheet("color: #8a9099; font-size: 11px;")
-        hint.setWordWrap(True)
+        hint = UILabel("DAW sends PC# -> app loads the mapped preset slug instantly", variant="caption")
         form.addRow(hint)
 
         self._fill_pc_table()
