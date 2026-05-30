@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from .primitives import UIButton, UILabel
+
 from .shortcuts_dialog import ShortcutsDialog
 
 from .. import APP_NAME, __version__
@@ -66,13 +68,9 @@ _CARD_STYLE = (
 )
 
 
-def _section_title(text: str) -> QLabel:
+def _section_title(text: str) -> UILabel:
     """Small uppercase label used as a section heading inside a card."""
-    label = QLabel(text)
-    label.setStyleSheet(
-        "color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
-    )
-    return label
+    return UILabel(text, variant="caption")
 
 
 def _make_card() -> Tuple[QFrame, QVBoxLayout]:
@@ -180,15 +178,13 @@ class HelpTab(QWidget):
 
         hero_text = QVBoxLayout()
         hero_text.setSpacing(8)
-        title = QLabel("Help")
-        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f5f7fa;")
+        title = UILabel("Help", variant="heading")
         hero_text.addWidget(title)
-        sub = QLabel(
+        sub = UILabel(
             "Answers to the questions we hear most. If something is missing, "
-            "email support — we read every message."
+            "email support — we read every message.",
+            variant="body",
         )
-        sub.setStyleSheet("color: #8a9099;")
-        sub.setWordWrap(True)
         hero_text.addWidget(sub)
         hero_text.addStretch(1)
         hero.addLayout(hero_text, stretch=1)
@@ -226,16 +222,8 @@ class HelpTab(QWidget):
         grid = QHBoxLayout()
         grid.setSpacing(10)
         for i, (label, url) in enumerate(DOCS_LINKS.items()):
-            btn = QPushButton(label)
+            btn = UIButton(label, variant="secondary", size="s")
             btn.clicked.connect(lambda checked=False, u=url: webbrowser.open(u))
-            btn.setStyleSheet(
-                "QPushButton { "
-                "  background-color: #11131a; border: 1px solid #1f232b; "
-                "  border-radius: 6px; padding: 8px 12px; color: #e6e8eb; "
-                "  font-size: 11px; "
-                "} "
-                "QPushButton:hover { background-color: #16181d; border-color: #2dd4bf; }"
-            )
             grid.addWidget(btn)
             if (i + 1) % 3 == 0:
                 layout.addLayout(grid)
@@ -452,9 +440,8 @@ class HelpTab(QWidget):
 
         return card
 
-    def _link_button(self, text: str, handler: Callable[[], None]) -> QPushButton:
-        btn = QPushButton(text)
-        btn.setStyleSheet("color: #e6e8eb;")
+    def _link_button(self, text: str, handler: Callable[[], None]) -> UIButton:
+        btn = UIButton(text, variant="secondary")
         btn.clicked.connect(handler)
         return btn
 

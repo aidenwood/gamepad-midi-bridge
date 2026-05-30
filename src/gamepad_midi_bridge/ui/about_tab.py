@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QFont
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel
 )
 import webbrowser
+
+from .primitives import UIButton, UILabel
 
 from .. import APP_NAME, __version__
 
@@ -97,30 +99,22 @@ class AboutTab(QWidget):
         v.addLayout(logo_container)
 
         # ======== Title + tagline (centred) ========
-        title = QLabel(APP_NAME)
-        title_font = QFont()
-        title_font.setPointSize(22)
-        title_font.setBold(True)
-        title.setFont(title_font)
+        title = UILabel(APP_NAME, variant="heading")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color: #f5f7fa;")
         v.addWidget(title)
 
-        tagline = QLabel("Turn any gamepad into a MIDI controller.")
-        tagline.setStyleSheet("color: #8a9099; font-size: 14px;")
+        tagline = UILabel("Turn any gamepad into a MIDI controller.", variant="body")
         tagline.setAlignment(Qt.AlignCenter)
         v.addWidget(tagline)
 
-        version_label = QLabel(f"v{__version__}")
-        version_label.setStyleSheet("color: #666; font-size: 12px;")
+        version_label = UILabel(f"v{__version__}", variant="caption")
         version_label.setAlignment(Qt.AlignCenter)
         v.addWidget(version_label)
 
         v.addSpacing(8)
 
         # ======== Created by ========
-        created_by = QLabel("Created by Aidxn Design — Brisbane, Australia")
-        created_by.setStyleSheet("color: #8a9099; font-size: 12px;")
+        created_by = UILabel("Created by Aidxn Design — Brisbane, Australia", variant="caption")
         created_by.setAlignment(Qt.AlignCenter)
         v.addWidget(created_by)
 
@@ -130,10 +124,8 @@ class AboutTab(QWidget):
         links_layout = QHBoxLayout()
         links_layout.addStretch(1)
 
-        def link_button(text: str, url: str) -> QPushButton:
-            btn = QPushButton(text)
-            btn.setFlat(True)
-            btn.setStyleSheet("color: #42a5f5; text-decoration: underline;")
+        def link_button(text: str, url: str) -> UIButton:
+            btn = UIButton(text, variant="ghost")
             btn.clicked.connect(lambda: webbrowser.open(url))
             return btn
 
@@ -151,9 +143,7 @@ class AboutTab(QWidget):
         v.addSpacing(20)
 
         # ======== Acknowledgements (collapsible via toggle) ========
-        ack_header = QPushButton("▶ Open source acknowledgements")
-        ack_header.setFlat(True)
-        ack_header.setStyleSheet("color: #f5f7fa; font-weight: 700; text-align: left;")
+        ack_header = UIButton("▶ Open source acknowledgements", variant="ghost")
         v.addWidget(ack_header)
 
         ack_container = QWidget()
@@ -171,13 +161,10 @@ class AboutTab(QWidget):
 
         for name, desc, url in deps:
             dep_layout = QHBoxLayout()
-            dep_name = QPushButton(name)
-            dep_name.setFlat(True)
-            dep_name.setStyleSheet("color: #42a5f5; text-decoration: underline; text-align: left;")
+            dep_name = UIButton(name, variant="ghost", size="s")
             dep_name.clicked.connect(lambda checked=False, u=url: webbrowser.open(u))
             dep_layout.addWidget(dep_name)
-            dep_desc = QLabel(desc)
-            dep_desc.setStyleSheet("color: #8a9099; font-size: 11px;")
+            dep_desc = UILabel(desc, variant="caption")
             dep_layout.addWidget(dep_desc)
             dep_layout.addStretch(1)
             ack_layout.addLayout(dep_layout)
@@ -200,29 +187,23 @@ class AboutTab(QWidget):
 
             row = QHBoxLayout()
             if self.on_upgrade:
-                upgrade = QPushButton("Upgrade to Pro")
-                upgrade.setObjectName("PrimaryButton")
+                upgrade = UIButton("Upgrade to Pro", variant="primary")
                 upgrade.clicked.connect(self.on_upgrade)
                 row.addWidget(upgrade)
             if self.on_enter_license:
-                activate = QPushButton("Enter license key")
-                activate.setStyleSheet("color: #e6e8eb;")
+                activate = UIButton("Enter license key", variant="primary")
                 activate.clicked.connect(self.on_enter_license)
                 row.addWidget(activate)
             row.addStretch(1)
             v.addLayout(row)
 
             recovery_row = QHBoxLayout()
-            recover = QPushButton("Lost your license key?")
+            recover = UIButton("Lost your license key?", variant="ghost")
             recover.clicked.connect(lambda: webbrowser.open("https://midi.aidxn.com/recover"))
-            recover.setFlat(True)
-            recover.setStyleSheet("color: #8a9099; text-align: left;")
             recovery_row.addWidget(recover)
 
-            changelog = QPushButton("Release notes")
+            changelog = UIButton("Release notes", variant="ghost")
             changelog.clicked.connect(lambda: webbrowser.open("https://midi.aidxn.com/changelog"))
-            changelog.setFlat(True)
-            changelog.setStyleSheet("color: #8a9099; text-align: left;")
             recovery_row.addWidget(changelog)
             recovery_row.addStretch(1)
             v.addLayout(recovery_row)
@@ -231,27 +212,21 @@ class AboutTab(QWidget):
 
         # ======== Config pack section (optional) ========
         if self.on_export_pack or self.on_import_pack:
-            portable_label = QLabel("CONFIG PACK")
-            portable_label.setStyleSheet(
-                "color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
-            )
+            portable_label = UILabel("CONFIG PACK", variant="caption")
             v.addWidget(portable_label)
-            portable_note = QLabel(
+            portable_note = UILabel(
                 "Bundle your mapping + presets + Pro license into a single "
-                ".gmbpack file. Useful for moving rigs between machines."
+                ".gmbpack file. Useful for moving rigs between machines.",
+                variant="caption",
             )
-            portable_note.setStyleSheet("color: #8a9099; font-size: 12px;")
-            portable_note.setWordWrap(True)
             v.addWidget(portable_note)
             portable_row = QHBoxLayout()
             if self.on_export_pack:
-                export_btn = QPushButton("Export config…")
-                export_btn.setStyleSheet("color: #e6e8eb;")
+                export_btn = UIButton("Export config…", variant="secondary")
                 export_btn.clicked.connect(self.on_export_pack)
                 portable_row.addWidget(export_btn)
             if self.on_import_pack:
-                import_btn = QPushButton("Import config…")
-                import_btn.setStyleSheet("color: #e6e8eb;")
+                import_btn = UIButton("Import config…", variant="secondary")
                 import_btn.clicked.connect(self.on_import_pack)
                 portable_row.addWidget(import_btn)
             portable_row.addStretch(1)
@@ -261,8 +236,7 @@ class AboutTab(QWidget):
 
         # ======== Build info ========
         build_info = get_build_info()
-        build_section = QLabel("BUILD INFO")
-        build_section.setStyleSheet("color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;")
+        build_section = UILabel("BUILD INFO", variant="caption")
         v.addWidget(build_section)
 
         build_items = [
@@ -275,10 +249,8 @@ class AboutTab(QWidget):
 
         for key, val in build_items:
             row = QHBoxLayout()
-            key_label = QLabel(f"{key}:")
-            key_label.setStyleSheet("color: #8a9099; font-size: 11px; font-weight: 700; width: 80px;")
-            val_label = QLabel(val)
-            val_label.setStyleSheet("color: #b8bcc4; font-size: 11px; font-family: monospace;")
+            key_label = UILabel(f"{key}:", variant="caption")
+            val_label = UILabel(val, variant="caption")
             row.addWidget(key_label)
             row.addWidget(val_label)
             row.addStretch(1)
@@ -338,7 +310,7 @@ class AboutTab(QWidget):
         console.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(console)
 
-        close_btn = QPushButton("Close (or press ESC)")
+        close_btn = UIButton("Close (or press ESC)", variant="secondary")
         close_btn.clicked.connect(egg.close)
         layout.addWidget(close_btn)
 
