@@ -23,10 +23,12 @@ from typing import Optional, Set
 
 from .paths import license_path
 
-# Replace with your real public key once you've generated one. Bytes below are a
-# placeholder; activation will always fail until you swap it in.
+# TEST public key (matches scripts/public_key.test.pem + private_key.test.pem).
+# Used for dev / local testing of the license-activate flow. Swap for the
+# production public key before tagging v2.0.0 — paste contents of
+# scripts/public_key.pem here.
 PUBLIC_KEY_PEM: bytes = b"""-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+MCowBQYDK2VwAyEANE5ihyMUoHerpfxmquOtXLwjrj5d/9V+7dzny4O5krY=
 -----END PUBLIC KEY-----
 """
 

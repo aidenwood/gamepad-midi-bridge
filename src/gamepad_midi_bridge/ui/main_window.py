@@ -63,9 +63,9 @@ from .responsive_tab_widget import ResponsiveTabWidget
 
 
 from .about_tab import AboutTab
-UPGRADE_URL = "https://store.aidxn.com/gamepad-midi-bridge"
-RECOVERY_URL = "https://store.aidxn.com/recover"
-CHANGELOG_URL = "https://store.aidxn.com/changelog"
+UPGRADE_URL = "https://midi.aidxn.com/"
+RECOVERY_URL = "https://midi.aidxn.com/recover"
+CHANGELOG_URL = "https://midi.aidxn.com/changelog"
 
 _BG3D_CONFIG_KEY = "bg_3d_on"
 
@@ -583,7 +583,7 @@ class MainWindow(QMainWindow):
 
     def _menu_open_user_guide(self) -> None:
         """Help > User guide"""
-        webbrowser.open("https://docs.aidxn.com/gamepad-midi-bridge")
+        webbrowser.open("https://midi.aidxn.com/docs")
 
     def _menu_show_keyboard_shortcuts(self) -> None:
         """Help > Keyboard shortcuts"""
