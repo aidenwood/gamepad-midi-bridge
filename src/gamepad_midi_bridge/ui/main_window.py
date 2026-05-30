@@ -209,8 +209,26 @@ class MainWindow(QMainWindow):
         stack.setContentsMargins(0, 0, 0, 0)
 
         # Layer 0 — 3D background (full window, beneath chrome).
-        self._bg_3d = BgLogo3DView(parent=central, opacity=0.3)
-        self._bg_3d.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        # GMB_NO_3D=1 skips it (QWebEngineView Chromium init can stall startup
+        # on macOS first-launches by 5-10+ seconds and has shown intermittent
+        # silent hangs in MainWindow.__init__ — keep the env-var escape hatch
+        # so the app can still start in dev / debug). Falls back to a plain
+        # transparent QWidget so the layout shape is unchanged.
+        import os as _os_3d
+        if _os_3d.environ.get("GMB_NO_3D") == "1":
+            self._bg_3d = QWidget(central)
+            self._bg_3d.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        else:
+            try:
+                self._bg_3d = BgLogo3DView(parent=central, opacity=0.3)
+                self._bg_3d.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            except Exception as _e_3d:
+                import logging as _log_3d
+                _log_3d.getLogger("ui").warning(
+                    "BgLogo3DView failed (%s); using plain background", _e_3d
+                )
+                self._bg_3d = QWidget(central)
+                self._bg_3d.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         stack.addWidget(self._bg_3d)
 
         # Layer 1 — chrome (status bar + body). Transparent so 3D shows through.
