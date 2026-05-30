@@ -97,4 +97,18 @@ def run(argv: Optional[List[str]] = None) -> int:
 
     # Hand control to Qt's event loop.
     run_loop = getattr(app, "exec")
-    return run_loop()
+    rc = run_loop()
+
+    # Explicit teardown order to avoid PySide6/Shiboken shutdown segfault.
+    # Qt was crashing during interpreter exit because Shiboken's
+    # destructionVisitor was sweeping a stale QDoubleSpinBoxWrapper
+    # (and likely other widget wrappers) AFTER MainWindow.closeEvent had
+    # already run shutdown(). Force deterministic cleanup here:
+    try:
+        win.deleteLater()
+        app.processEvents()
+    except Exception:
+        pass
+    import gc as _gc_shutdown
+    _gc_shutdown.collect()
+    return rc

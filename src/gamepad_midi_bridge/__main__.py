@@ -171,4 +171,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    # Bypass Python's normal module-teardown chain on exit to avoid the
+    # PySide6/Shiboken destructionVisitor segfault on macOS. The app has
+    # already run its closeEvent + autobackup.mark_clean_shutdown, so all
+    # user-facing cleanup is complete. os._exit skips finalizers entirely.
+    import os as _os_exit
+    _os_exit._exit(_rc if _rc is not None else 0)
