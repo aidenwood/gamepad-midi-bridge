@@ -31,7 +31,8 @@ from PySide6.QtWidgets import (
 from .axis_scope import AxisScope
 
 
-INSPECTOR_WIDTH = 320  # Figma's default — fixed for layout predictability.
+INSPECTOR_WIDTH = 320  # Figma's default — used as the minimum width now.
+INSPECTOR_MAX_WIDTH = 720  # Inspector can grow horizontally inside its splitter.
 
 
 class Inspector(QWidget):
@@ -51,7 +52,11 @@ class Inspector(QWidget):
 
     def __init__(self, label: str = "INSPECTOR", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedWidth(INSPECTOR_WIDTH)
+        # Resizable: 320 min, 720 max — lets text fields breathe when the
+        # window is wide. The chrome QSplitter handle is the actual resize
+        # point; this just sets the bounds.
+        self.setMinimumWidth(INSPECTOR_WIDTH)
+        self.setMaximumWidth(INSPECTOR_MAX_WIDTH)
         self.setObjectName("Inspector")
 
         self._renderers: Dict[str, Callable[[dict], QWidget]] = {}

@@ -71,6 +71,9 @@ def _row_label(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet("color: #8a9099; font-size: 11px;")
     lbl.setMinimumWidth(118)
+    lbl.setMaximumWidth(180)  # column stays narrow but can absorb 1-2 word wraps
+    lbl.setWordWrap(True)
+    lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     return lbl
 
 
