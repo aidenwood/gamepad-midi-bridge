@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence, QShortcut, QAction
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QSplitter, QStackedLayout, QTabWidget, QVBoxLayout, QWidget, QMenu,
+    QPushButton, QSplitter, QStackedLayout, QVBoxLayout, QWidget, QMenu,
 )
 
 from typing import Dict, List, Optional
@@ -59,6 +59,7 @@ from .command_palette import Command, CommandPalette
 from .tray import TrayController, is_available as tray_available
 from .visualise_tab import VisualiseTab
 from .hud_overlay import HudOverlay
+from .responsive_tab_widget import ResponsiveTabWidget
 
 
 from .about_tab import AboutTab
@@ -958,16 +959,8 @@ class MainWindow(QMainWindow):
         """Persist the mapping to disk after debounce window expires."""
         _save_last_mapping(self._mapping)
 
-    def _build_tabs(self) -> QTabWidget:
-        tabs = QTabWidget()
-        tabs.setDocumentMode(True)
-        # On narrow windows the 11-tab strip would overflow — Qt's tab bar
-        # adds left/right scroll arrows automatically once we opt in here.
-        tabs.setUsesScrollButtons(True)
-        # Elide tab labels if the strip is still tight after scrolling.
-        from PySide6.QtCore import Qt as _Qt
-        tabs.tabBar().setElideMode(_Qt.ElideRight)
-        tabs.tabBar().setExpanding(False)
+    def _build_tabs(self) -> ResponsiveTabWidget:
+        tabs = ResponsiveTabWidget()
 
         # Live tab — primary meter always present. Secondary meter + Pro
         # nudge banner are hidden until a second controller is wired in.
