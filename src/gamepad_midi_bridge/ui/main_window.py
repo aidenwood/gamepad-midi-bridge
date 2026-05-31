@@ -201,45 +201,54 @@ class MainWindow(QMainWindow):
         # Build the native menu bar (File / Edit / View / Help)
         self._build_menu_bar()
 
-        # --- Background 3D visualiser layer ---
-        # QStackedLayout(StackAll) lets all children paint in Z order rather
-        # than swapping. Bottom layer = the BgLogo3DView; top layer = a plain
-        # QWidget (chrome_widget) that holds the actual status bar + body.
-        stack = QStackedLayout(central)
-        stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
-        stack.setContentsMargins(0, 0, 0, 0)
-
-        # Layer 0 — 3D background (full window, beneath chrome).
-        # GMB_NO_3D=1 skips it (QWebEngineView Chromium init can stall startup
-        # on macOS first-launches by 5-10+ seconds and has shown intermittent
-        # silent hangs in MainWindow.__init__ — keep the env-var escape hatch
-        # so the app can still start in dev / debug). Falls back to a plain
-        # transparent QWidget so the layout shape is unchanged.
+        # --- Background 3D visualiser layer (conditional) ---
+        # When the 3D logo is active we stack it under a translucent chrome
+        # layer via QStackedLayout(StackAll). When 3D is OFF (GMB_NO_3D=1 or
+        # BgLogo3DView fails to construct), we use a plain opaque chrome
+        # widget directly on a vertical layout — no stack, no translucency.
+        # Translucent ancestors on macOS prevent Qt from clearing pixels
+        # before each paint, which was the root cause of all the ghost-text
+        # / smeared-tab / doubled-logo bugs.
         import os as _os_3d
-        if _os_3d.environ.get("GMB_NO_3D") == "1":
-            self._bg_3d = QWidget(central)
-            self._bg_3d.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        else:
+        _three_d_disabled = _os_3d.environ.get("GMB_NO_3D") == "1"
+
+        bg_3d_widget: Optional[QWidget] = None
+        if not _three_d_disabled:
             try:
-                self._bg_3d = BgLogo3DView(parent=central, opacity=0.3)
-                self._bg_3d.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+                bg_3d_widget = BgLogo3DView(parent=central, opacity=0.3)
+                bg_3d_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             except Exception as _e_3d:
                 import logging as _log_3d
                 _log_3d.getLogger("ui").warning(
-                    "BgLogo3DView failed (%s); using plain background", _e_3d
+                    "BgLogo3DView failed (%s); falling back to opaque chrome", _e_3d
                 )
-                self._bg_3d = QWidget(central)
-                self._bg_3d.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        stack.addWidget(self._bg_3d)
+                bg_3d_widget = None
 
-        # Layer 1 — chrome (status bar + body). Transparent so 3D shows through.
-        chrome_widget = QWidget(central)
-        chrome_widget.setAttribute(Qt.WA_TranslucentBackground, True)
-        stack.addWidget(chrome_widget)
-
-        # Set the chrome layer as the "current" so it receives the layout geometry
-        # (StackAll means both paint, but currentIndex controls event delivery focus).
-        stack.setCurrentIndex(1)
+        if bg_3d_widget is not None:
+            # 3D path: stack the bg + translucent chrome.
+            self._bg_3d = bg_3d_widget
+            stack = QStackedLayout(central)
+            stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.addWidget(self._bg_3d)
+            chrome_widget = QWidget(central)
+            chrome_widget.setAttribute(Qt.WA_TranslucentBackground, True)
+            stack.addWidget(chrome_widget)
+            stack.setCurrentIndex(1)
+        else:
+            # No 3D path: opaque chrome on a plain QVBoxLayout. This kills
+            # the ghost-text bug for every descendant widget.
+            self._bg_3d = None
+            chrome_widget = QWidget(central)
+            chrome_widget.setObjectName("ChromeWidget")
+            chrome_widget.setAutoFillBackground(True)
+            chrome_widget.setStyleSheet(
+                "QWidget#ChromeWidget { background-color: #0c0d10; }"
+            )
+            outer = QVBoxLayout(central)
+            outer.setContentsMargins(0, 0, 0, 0)
+            outer.setSpacing(0)
+            outer.addWidget(chrome_widget)
 
         root = QVBoxLayout(chrome_widget)
         root.setContentsMargins(0, 0, 0, 0)
@@ -342,13 +351,16 @@ class MainWindow(QMainWindow):
 
         # 3D background toggle — persisted, default OFF.
         _bg3d_on = _read_bg3d_state()
-        self._3d_btn.setChecked(_bg3d_on)
+        self._3d_btn.setChecked(_bg3d_on and self._bg_3d is not None)
+        self._3d_btn.setEnabled(self._bg_3d is not None)
         self._3d_btn.clicked.connect(self._toggle_3d)
-        # Apply persisted state now: only show_bg() if it was on last session.
-        if _bg3d_on:
-            self._bg_3d.show_bg()
-        else:
-            self._bg_3d.setVisible(False)
+        # Apply persisted state now: only show_bg() if it was on last session
+        # AND the 3D widget actually exists (skipped if GMB_NO_3D=1 / failed init).
+        if self._bg_3d is not None:
+            if _bg3d_on:
+                self._bg_3d.show_bg()
+            else:
+                self._bg_3d.setVisible(False)
 
         # Stream stdlib logging + bridge activity into the console.
         self._log_console.install_root_handler()
@@ -610,11 +622,17 @@ class MainWindow(QMainWindow):
         # tool clusters separated by vertical dividers.
         bar = QFrame()
         bar.setObjectName("StatusBar")
+        # autoFillBackground + background-color (not shorthand `background`)
+        # so Qt clears the frame's pixels before each paint — required to
+        # stop status title text from ghosting through under translucent
+        # ancestors. setFixedHeight bumped 52 → 58 so descenders don't clip
+        # the two-line title column.
+        bar.setAutoFillBackground(True)
         bar.setStyleSheet(
-            "QFrame#StatusBar { background: #0e0f12; "
+            "QFrame#StatusBar { background-color: #0e0f12; "
             "border-bottom: 1px solid #1c1e25; }"
         )
-        bar.setFixedHeight(52)
+        bar.setFixedHeight(58)
         h = QHBoxLayout(bar)
         h.setContentsMargins(16, 8, 14, 8)
         h.setSpacing(10)
@@ -843,7 +861,10 @@ class MainWindow(QMainWindow):
         self._rebalance_content_splitter()
 
     def _toggle_3d(self) -> None:
-        """Show / hide the 3D background visualiser. Persists to config."""
+        """Show / hide the 3D background visualiser. Persists to config.
+        No-op when GMB_NO_3D=1 (self._bg_3d is None)."""
+        if self._bg_3d is None:
+            return
         want_on = self._3d_btn.isChecked()
         if want_on:
             self._bg_3d.show_bg()

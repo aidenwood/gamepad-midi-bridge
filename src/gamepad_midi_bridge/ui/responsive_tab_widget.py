@@ -23,7 +23,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-_COMPACT_THRESHOLD = 720  # pixels — switch below this width
+_COMPACT_THRESHOLD = 1100  # pixels — switch below this width. 11 tabs at
+# ~95 px each comfortably fit in ~1050 px; below this width we collapse to a
+# QComboBox dropdown so labels never get truncated to "Li..."/"Vis...".
 
 
 class ResponsiveTabWidget(QWidget):
@@ -44,8 +46,15 @@ class ResponsiveTabWidget(QWidget):
         self._tabs.setDocumentMode(True)
         self._tabs.setUsesScrollButtons(True)
         from PySide6.QtCore import Qt as _Qt
-        self._tabs.tabBar().setElideMode(_Qt.ElideRight)
+        # ElideNone — let tabs keep their natural width. With scroll buttons
+        # on + non-expanding, overflow tabs are reachable via ← → arrows
+        # instead of every label getting truncated to "Li..."
+        self._tabs.tabBar().setElideMode(_Qt.ElideNone)
         self._tabs.tabBar().setExpanding(False)
+        # Pad tabs to their label size, not a forced minimum width.
+        self._tabs.tabBar().setStyleSheet(
+            "QTabBar::tab { min-width: 0; padding: 8px 14px; }"
+        )
         # Keep the tab widget's own currentChanged wired to the combo so they
         # stay in sync regardless of which control the user interacts with.
         self._tabs.currentChanged.connect(self._on_tab_changed)
