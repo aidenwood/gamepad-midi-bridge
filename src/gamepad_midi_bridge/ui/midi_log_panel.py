@@ -94,9 +94,9 @@ class MidiLogPanel(QWidget):
         bar.setStyleSheet(
             "background-color: #16181d; border-top: 1px solid #24262d;"
         )
-        bar.setFixedHeight(30)
+        bar.setFixedHeight(48)
         h = QHBoxLayout(bar)
-        h.setContentsMargins(12, 2, 8, 2)
+        h.setContentsMargins(12, 10, 8, 10)
         h.setSpacing(8)
 
         title = QLabel("MIDI ACTIVITY")
@@ -109,6 +109,7 @@ class MidiLogPanel(QWidget):
 
         self._filter_combo = QComboBox()
         self._filter_combo.setMaximumWidth(140)
+        self._filter_combo.setFixedHeight(26)
         self._filter_combo.setStyleSheet(
             "QComboBox { color: #c2c6cc; background-color: #0e0f12; "
             "border: 1px solid #2c313b; border-radius: 3px; "
@@ -122,6 +123,7 @@ class MidiLogPanel(QWidget):
 
         clear_btn = QPushButton("Clear")
         clear_btn.setFlat(True)
+        clear_btn.setFixedHeight(26)
         clear_btn.setStyleSheet(
             "color: #8a9099; font-size: 11px; padding: 2px 8px;"
         )
@@ -130,7 +132,7 @@ class MidiLogPanel(QWidget):
 
         self._toggle_btn = QPushButton("▾")
         self._toggle_btn.setFlat(True)
-        self._toggle_btn.setFixedWidth(28)
+        self._toggle_btn.setFixedSize(28, 26)
         self._toggle_btn.setStyleSheet(
             "color: #c2c6cc; font-size: 14px; padding: 0; margin: 0;"
         )

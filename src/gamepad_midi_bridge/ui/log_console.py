@@ -150,9 +150,12 @@ class LogConsole(QWidget):
         bar.setStyleSheet(
             "background-color: #16181d; border-top: 1px solid #24262d;"
         )
-        bar.setFixedHeight(30)
+        # 48 px header strip — fixed-height Clear (26) + toggle (26) plus
+        # 1 px border-top + margins need at least 44; 48 gives consistent
+        # alignment with the MIDI panel header below.
+        bar.setFixedHeight(48)
         h = QHBoxLayout(bar)
-        h.setContentsMargins(12, 2, 8, 2)
+        h.setContentsMargins(12, 10, 8, 10)
         h.setSpacing(8)
 
         title = QLabel("CONSOLE")
@@ -165,13 +168,14 @@ class LogConsole(QWidget):
 
         clear = QPushButton("Clear")
         clear.setFlat(True)
+        clear.setFixedHeight(26)
         clear.setStyleSheet("color: #8a9099; font-size: 11px; padding: 2px 8px;")
         clear.clicked.connect(self.clear)
         h.addWidget(clear)
 
         self._toggle_btn = QPushButton("▾")
         self._toggle_btn.setFlat(True)
-        self._toggle_btn.setFixedWidth(28)
+        self._toggle_btn.setFixedSize(28, 26)
         self._toggle_btn.setStyleSheet(
             "color: #c2c6cc; font-size: 14px; padding: 0; margin: 0;"
         )

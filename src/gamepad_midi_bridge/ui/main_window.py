@@ -283,10 +283,7 @@ class MainWindow(QMainWindow):
         # presets, marketplace, etc). Hidden by default — toggled via the
         # status-bar Split button.
         body_splitter = QSplitter(Qt.Vertical)
-        # Wider handle (6 px) so the resize cursor target is reachable. 2 px
-        # was technically draggable but the hit zone was so thin macOS rarely
-        # showed the resize cursor. Subtle border + hover highlight gives
-        # users a visible affordance too.
+        # Wider handle (6 px) so the resize cursor target is reachable.
         body_splitter.setHandleWidth(6)
         body_splitter.setStyleSheet(
             "QSplitter::handle:vertical { "
@@ -296,11 +293,10 @@ class MainWindow(QMainWindow):
             "} "
             "QSplitter::handle:vertical:hover { background-color: #2c313b; }"
         )
-        # Children collapsible — both bottom panels can be dragged closed via
-        # the splitter handle. Their own toggle buttons emit
-        # ``collapse_changed`` which is wired to ``_set_bottom_panel_sizes``
-        # so the splitter is the single source of truth for sizing.
-        body_splitter.setChildrenCollapsible(True)
+        # Children NOT collapsible — dragging the handle should resize,
+        # not snap-to-zero. Collapse/expand goes through each panel's
+        # toggle button instead (which we wire to setSizes below).
+        body_splitter.setChildrenCollapsible(False)
 
         # Figma-style workspace layout:
         #   content_splitter (horizontal): [ inspector_a | workspace_a | workspace_b | inspector_b ]
@@ -309,7 +305,18 @@ class MainWindow(QMainWindow):
         # auto-opens it). This lets each side of a split keep its own
         # context-properties pane — Figma-style.
         content_splitter = QSplitter(Qt.Horizontal)
-        content_splitter.setHandleWidth(2)
+        # 6 px handle so the resize cursor is reachable; visible styling +
+        # hover highlight so the affordance is obvious. Matches the bottom
+        # body_splitter's treatment.
+        content_splitter.setHandleWidth(6)
+        content_splitter.setStyleSheet(
+            "QSplitter::handle:horizontal { "
+            "background-color: #16181d; "
+            "border-left: 1px solid #1c1e25; "
+            "border-right: 1px solid #1c1e25; "
+            "} "
+            "QSplitter::handle:horizontal:hover { background-color: #2c313b; }"
+        )
         content_splitter.setChildrenCollapsible(False)
 
         # Workspace A — the primary tabs.
@@ -354,10 +361,15 @@ class MainWindow(QMainWindow):
 
         body_splitter.addWidget(content_splitter)
         self._log_console = LogConsole()
+        # Minimum height = header strip only (36 px). Lets the user drag the
+        # handle down to "just header visible" but no further. Collapse via
+        # toggle button uses the same 36 px.
+        self._log_console.setMinimumHeight(48)
         body_splitter.addWidget(self._log_console)
 
         # MIDI Activity Log Panel — scrolling MIDI message feed
         self._midi_log_panel = MidiLogPanel()
+        self._midi_log_panel.setMinimumHeight(48)
         body_splitter.addWidget(self._midi_log_panel)
 
         body_splitter.setStretchFactor(0, 1)
@@ -661,40 +673,54 @@ class MainWindow(QMainWindow):
                 return
 
     def _build_status_bar(self) -> QFrame:
-        # Figma-style flat header — slim height, single-line status, clear
-        # tool clusters separated by vertical dividers.
+        # Responsive status bar — wide window → single row; narrow window →
+        # two rows so buttons never overflow off-screen. ``_arrange_status_bar``
+        # below moves widgets between the two row layouts based on width.
         bar = QFrame()
         bar.setObjectName("StatusBar")
-        # autoFillBackground + background-color (not shorthand `background`)
-        # so Qt clears the frame's pixels before each paint — required to
-        # stop status title text from ghosting through under translucent
-        # ancestors. setFixedHeight bumped 52 → 58 so descenders don't clip
-        # the two-line title column.
         bar.setAutoFillBackground(True)
+        bar.setAttribute(Qt.WA_StyledBackground, True)
         bar.setStyleSheet(
             "QFrame#StatusBar { background-color: #0e0f12; "
             "border-bottom: 1px solid #1c1e25; }"
         )
-        bar.setFixedHeight(58)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(16, 8, 14, 8)
-        h.setSpacing(10)
+        # Initial fixed height is the wide-mode value — adjusted by
+        # ``_arrange_status_bar`` if/when the window is narrow.
+        bar.setFixedHeight(64)
+        outer = QVBoxLayout(bar)
+        outer.setContentsMargins(16, 8, 14, 8)
+        outer.setSpacing(6)
 
-        # Status cluster — title + activity inline, more compact than the
-        # original stacked title/subtitle column.
-        title_col = QVBoxLayout()
-        title_col.setSpacing(0)
+        self._status_row1_layout = QHBoxLayout()
+        self._status_row1_layout.setContentsMargins(0, 0, 0, 0)
+        self._status_row1_layout.setSpacing(10)
+
+        self._status_row2_widget = QWidget()
+        self._status_row2_layout = QHBoxLayout(self._status_row2_widget)
+        self._status_row2_layout.setContentsMargins(0, 0, 0, 0)
+        self._status_row2_layout.setSpacing(10)
+        self._status_row2_widget.setVisible(False)  # wide mode default
+
+        outer.addLayout(self._status_row1_layout)
+        outer.addWidget(self._status_row2_widget)
+
+        # ---- Title column (wrapped in a QWidget so it can be re-parented) ----
+        self._title_col_widget = QWidget()
+        title_col = QVBoxLayout(self._title_col_widget)
+        title_col.setContentsMargins(0, 0, 0, 0)
+        title_col.setSpacing(2)
         self._status_title = QLabel("Idle")
         self._status_title.setObjectName("StatusTitle")
         self._status_title.setStyleSheet(
             "color: #f5f7fa; font-size: 13px; font-weight: 600;"
         )
+        self._status_title.setMinimumHeight(18)
         self._status_sub = QLabel("Plug in a controller and click Start.")
         self._status_sub.setObjectName("StatusSub")
         self._status_sub.setStyleSheet("color: #5a606b; font-size: 11px;")
+        self._status_sub.setMinimumHeight(16)
         title_col.addWidget(self._status_title)
         title_col.addWidget(self._status_sub)
-        h.addLayout(title_col, 1)
 
         self._rate_label = QLabel("")
         self._rate_label.setStyleSheet(
@@ -702,59 +728,54 @@ class MainWindow(QMainWindow):
         )
         self._rate_label.setMinimumWidth(70)
         self._rate_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        h.addWidget(self._rate_label)
 
         self._activity_dot = QLabel("●")
         self._activity_dot.setObjectName("ActivityDot")
         self._activity_dot.setStyleSheet("color: #2c313b; font-size: 14px;")
-        h.addWidget(self._activity_dot)
 
         self._start_btn = QPushButton("Start")
         self._start_btn.setObjectName("PrimaryButton")
-        self._start_btn.setMinimumWidth(110)
+        self._start_btn.setMinimumWidth(96)
+        self._start_btn.setFixedHeight(36)
         self._start_btn.clicked.connect(self._on_start)
-        h.addWidget(self._start_btn)
 
         self._stop_btn = QPushButton("Stop")
         self._stop_btn.setObjectName("StopButton")
-        self._stop_btn.setMinimumWidth(90)
+        self._stop_btn.setMinimumWidth(84)
+        self._stop_btn.setFixedHeight(36)
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._on_stop)
-        h.addWidget(self._stop_btn)
 
         self._panic_btn = QPushButton("PANIC")
         self._panic_btn.setObjectName("PanicButton")
-        self._panic_btn.setMinimumWidth(70)
+        self._panic_btn.setMinimumWidth(96)
+        self._panic_btn.setFixedHeight(36)
         self._panic_btn.setEnabled(False)
         self._panic_btn.setToolTip("Send all notes off (Ctrl+Shift+P)")
         self._panic_btn.setStyleSheet(
             "QPushButton#PanicButton { color: #f97316; font-weight: 700; }"
         )
         self._panic_btn.clicked.connect(self._on_panic)
-        h.addWidget(self._panic_btn)
 
         # Layout toggles — Split (side panel) + Console (bottom pane).
-        # Both are checkable so the pressed state mirrors the panel visibility.
-        # Click handlers are wired AFTER the panel + console widgets exist
-        # (see __init__) so we don't reference them before construction.
-        divider = QFrame()
-        divider.setFrameShape(QFrame.VLine)
-        divider.setStyleSheet("color: #2c313b;")
-        h.addWidget(divider)
+        # Click handlers wired in __init__ once dependent widgets exist.
+        self._status_divider1 = QFrame()
+        self._status_divider1.setFrameShape(QFrame.VLine)
+        self._status_divider1.setStyleSheet("color: #2c313b;")
 
         self._split_btn = QPushButton("Split")
         self._split_btn.setObjectName("LayoutToggle")
         self._split_btn.setCheckable(True)
         self._split_btn.setToolTip("Show controller meter alongside the current tab")
-        self._split_btn.setMinimumWidth(70)
-        h.addWidget(self._split_btn)
+        self._split_btn.setMinimumWidth(72)
+        self._split_btn.setFixedHeight(32)
 
         self._console_btn = QPushButton("Console")
         self._console_btn.setObjectName("LayoutToggle")
         self._console_btn.setCheckable(True)
         self._console_btn.setToolTip("Show or hide the log console at the bottom of the window")
-        self._console_btn.setMinimumWidth(80)
-        h.addWidget(self._console_btn)
+        self._console_btn.setMinimumWidth(92)
+        self._console_btn.setFixedHeight(32)
 
         self._inspect_btn = QPushButton("Inspect")
         self._inspect_btn.setObjectName("LayoutToggle")
@@ -762,8 +783,8 @@ class MainWindow(QMainWindow):
         self._inspect_btn.setToolTip(
             "Open the right-hand inspector — context properties for the selected item"
         )
-        self._inspect_btn.setMinimumWidth(80)
-        h.addWidget(self._inspect_btn)
+        self._inspect_btn.setMinimumWidth(88)
+        self._inspect_btn.setFixedHeight(32)
 
         self._3d_btn = QPushButton("3D")
         self._3d_btn.setObjectName("LayoutToggle")
@@ -771,13 +792,12 @@ class MainWindow(QMainWindow):
         self._3d_btn.setToolTip(
             "Show a rotating 3D controller behind the app UI"
         )
-        self._3d_btn.setMinimumWidth(50)
-        h.addWidget(self._3d_btn)
+        self._3d_btn.setMinimumWidth(52)
+        self._3d_btn.setFixedHeight(32)
 
-        divider2 = QFrame()
-        divider2.setFrameShape(QFrame.VLine)
-        divider2.setStyleSheet("color: #2c313b;")
-        h.addWidget(divider2)
+        self._status_divider2 = QFrame()
+        self._status_divider2.setFrameShape(QFrame.VLine)
+        self._status_divider2.setStyleSheet("color: #2c313b;")
 
         self._record_btn = QPushButton("● Record")
         self._record_btn.setObjectName("RecordButton")
@@ -786,15 +806,83 @@ class MainWindow(QMainWindow):
             "Record a macro — captures every MIDI message you send. "
             "Click again to stop and name the macro."
         )
-        self._record_btn.setMinimumWidth(90)
+        self._record_btn.setMinimumWidth(108)
+        self._record_btn.setFixedHeight(36)
         self._record_btn.setStyleSheet(
             "QPushButton#RecordButton { color: #8a9099; }"
             "QPushButton#RecordButton:checked { color: #ef4444; font-weight: 700; }"
         )
         self._record_btn.clicked.connect(self._on_record_toggled)
-        h.addWidget(self._record_btn)
 
+        # Populate row layouts via the responsive arranger. Initial mode is
+        # decided once the window has been sized — call once with current
+        # width so we don't start empty.
+        self._status_bar = bar
+        self._status_bar_compact = None  # force first arrange to apply
+        self._arrange_status_bar(self.width() if self.width() > 100 else 1280)
         return bar
+
+    # Status bar mode-switch threshold. Below this, buttons wrap to row 2.
+    _STATUS_BAR_COMPACT_WIDTH = 980
+
+    def _arrange_status_bar(self, width: int) -> None:
+        """Switch the status bar between single-row (wide) and two-row
+        (narrow) layouts so buttons never overflow off-screen."""
+        if not hasattr(self, "_status_row1_layout"):
+            return  # bar not built yet
+        compact = width < self._STATUS_BAR_COMPACT_WIDTH
+        if compact == self._status_bar_compact:
+            return
+        self._status_bar_compact = compact
+
+        # Strip both rows clean (preserves the underlying widgets — Qt
+        # re-parents them when we addWidget below).
+        for layout in (self._status_row1_layout, self._status_row2_layout):
+            while layout.count():
+                item = layout.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.setParent(None)
+
+        if compact:
+            # Row 1: status + activity + start/stop/panic
+            self._status_row1_layout.addWidget(self._title_col_widget, 1)
+            self._status_row1_layout.addWidget(self._rate_label)
+            self._status_row1_layout.addWidget(self._activity_dot)
+            self._status_row1_layout.addWidget(self._start_btn)
+            self._status_row1_layout.addWidget(self._stop_btn)
+            self._status_row1_layout.addWidget(self._panic_btn)
+            # Row 2: toggles + record (right-aligned)
+            self._status_row2_layout.addStretch(1)
+            self._status_row2_layout.addWidget(self._split_btn)
+            self._status_row2_layout.addWidget(self._console_btn)
+            self._status_row2_layout.addWidget(self._inspect_btn)
+            self._status_row2_layout.addWidget(self._3d_btn)
+            self._status_row2_layout.addWidget(self._status_divider2)
+            self._status_row2_layout.addWidget(self._record_btn)
+            self._status_row2_widget.setVisible(True)
+            # Hide divider1 — it separated start/panic from toggles in wide
+            # mode; in compact mode the row break is the separator.
+            self._status_divider1.setVisible(False)
+            self._status_bar.setFixedHeight(116)
+        else:
+            # Everything in row 1
+            self._status_row1_layout.addWidget(self._title_col_widget, 1)
+            self._status_row1_layout.addWidget(self._rate_label)
+            self._status_row1_layout.addWidget(self._activity_dot)
+            self._status_row1_layout.addWidget(self._start_btn)
+            self._status_row1_layout.addWidget(self._stop_btn)
+            self._status_row1_layout.addWidget(self._panic_btn)
+            self._status_divider1.setVisible(True)
+            self._status_row1_layout.addWidget(self._status_divider1)
+            self._status_row1_layout.addWidget(self._split_btn)
+            self._status_row1_layout.addWidget(self._console_btn)
+            self._status_row1_layout.addWidget(self._inspect_btn)
+            self._status_row1_layout.addWidget(self._3d_btn)
+            self._status_row1_layout.addWidget(self._status_divider2)
+            self._status_row1_layout.addWidget(self._record_btn)
+            self._status_row2_widget.setVisible(False)
+            self._status_bar.setFixedHeight(64)
 
     def _build_update_banner(self) -> QFrame:
         bar = QFrame()
@@ -835,36 +923,85 @@ class MainWindow(QMainWindow):
         self._update_banner.setVisible(True)
 
     def _build_side_panel(self) -> QWidget:
-        """Side panel — secondary ControllerMeter docked to the right of the
-        tabs so users can keep an eye on live controller activity while
-        editing on any tab. Toggled on/off via the status-bar Split button.
+        """Side panel — secondary view docked to the right of the tabs, with
+        a dropdown to pick which tab content to mirror. Lazy-builds each
+        option on first selection so we don't pay the cost up-front for
+        views the user never opens.
 
-        A SEPARATE meter instance from the Live-tab one so both can be
-        visible simultaneously — bridge signals fan out to both meters.
+        ``_side_meter`` (the Live Preview ControllerMeter) is the default and
+        is constructed eagerly so it can be wired into bridge signals from
+        ``_wire_signals``.
         """
+        from PySide6.QtWidgets import QComboBox, QStackedWidget
+
         wrap = QWidget()
-        wrap.setMinimumWidth(280)
-        wrap.setMaximumWidth(420)
+        wrap.setMinimumWidth(320)
+        wrap.setMaximumWidth(560)
         v = QVBoxLayout(wrap)
         v.setContentsMargins(12, 14, 14, 14)
         v.setSpacing(8)
 
-        header = QLabel("LIVE PREVIEW")
+        # Dropdown — pick which secondary view to show.
+        picker_row = QHBoxLayout()
+        picker_row.setSpacing(8)
+        header = QLabel("SPLIT VIEW")
         header.setStyleSheet(
             "color: #5a606b; font-size: 10px; font-weight: 700; "
             "letter-spacing: 1.4px;"
         )
-        v.addWidget(header)
+        picker_row.addWidget(header)
+        picker_row.addStretch(1)
 
-        # Secondary ControllerMeter — `_wire_signals` connects bridge events
-        # to both `_meter` (Live tab) and `_side_meter` (this side panel).
+        self._split_view_picker = QComboBox()
+        self._split_view_picker.setFixedHeight(28)
+        self._split_view_picker.setStyleSheet(
+            "QComboBox { color: #c2c6cc; background-color: #0e0f12; "
+            "border: 1px solid #2c313b; border-radius: 4px; "
+            "padding: 2px 8px; font-size: 12px; }"
+            "QComboBox::drop-down { border: none; }"
+        )
+        picker_row.addWidget(self._split_view_picker)
+        v.addLayout(picker_row)
+
+        # Stacked content — lazy-built per option. Each entry in
+        # ``_split_view_factories`` is (label, factory) — the factory is
+        # called the first time that option is picked.
+        self._split_view_stack = QStackedWidget()
+        v.addWidget(self._split_view_stack, 1)
+
+        # Eagerly build the Live Preview so _wire_signals can attach.
         self._side_meter = ControllerMeter()
         self._side_meter.selection_changed.connect(
             lambda p: self.push_inspector_selection("live", p)
         )
-        v.addWidget(self._side_meter, 1)
+        live_idx = self._split_view_stack.addWidget(self._side_meter)
 
+        # Lazy options — built on first selection.
+        self._split_view_factories: dict[str, callable] = {}
+        self._split_view_indices: dict[str, int] = {"Live Preview": live_idx}
+
+        def _add_lazy(label: str, factory) -> None:
+            self._split_view_picker.addItem(label)
+            self._split_view_factories[label] = factory
+
+        self._split_view_picker.addItem("Live Preview")
+        _add_lazy("Visualise", lambda: VisualiseTab())
+        _add_lazy("Bluetooth", lambda: BluetoothTab())
+        _add_lazy("Connectors", lambda: ConnectorsTab())
+        _add_lazy("Help", lambda: HelpTab())
+
+        self._split_view_picker.currentTextChanged.connect(self._on_split_view_changed)
         return wrap
+
+    def _on_split_view_changed(self, label: str) -> None:
+        """Show the chosen view in the split panel — lazy-build on first pick."""
+        if label not in self._split_view_indices:
+            factory = self._split_view_factories.get(label)
+            if factory is None:
+                return
+            widget = factory()
+            self._split_view_indices[label] = self._split_view_stack.addWidget(widget)
+        self._split_view_stack.setCurrentIndex(self._split_view_indices[label])
 
     def _toggle_split_view(self) -> None:
         """Show / hide the right-hand workspace (side panel + its own
@@ -891,9 +1028,9 @@ class MainWindow(QMainWindow):
         self._log_console.set_collapsed(not want_open)
 
     # Header strip height when a bottom panel is collapsed. Matches the
-    # ``setFixedHeight(30)`` used inside ``LogConsole._build_header`` and
+    # ``setFixedHeight(36)`` used inside ``LogConsole._build_header`` and
     # ``MidiLogPanel._build_header``.
-    _COLLAPSED_PANEL_PX = 30
+    _COLLAPSED_PANEL_PX = 48
     _OPEN_CONSOLE_PX = 200
     _OPEN_MIDI_PX = 200
 
@@ -1072,6 +1209,15 @@ class MainWindow(QMainWindow):
         self._meter2 = ControllerMeter()
         self._meter2.setVisible(False)
         self._live_splitter = QSplitter(Qt.Horizontal)
+        self._live_splitter.setHandleWidth(6)
+        self._live_splitter.setStyleSheet(
+            "QSplitter::handle:horizontal { "
+            "background-color: #16181d; "
+            "border-left: 1px solid #1c1e25; "
+            "border-right: 1px solid #1c1e25; "
+            "} "
+            "QSplitter::handle:horizontal:hover { background-color: #2c313b; }"
+        )
         self._live_splitter.addWidget(self._meter)
         self._live_splitter.addWidget(self._meter2)
         self._live_splitter.setChildrenCollapsible(False)
@@ -2025,6 +2171,14 @@ class MainWindow(QMainWindow):
             marker.unlink()
         n = seed_user_presets_once()
         self._on_status(f"Marketplace seed: {n} preset(s) restored")
+
+    # ============================================================== resize
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        # Reflow the status bar between 1-row (wide) and 2-row (narrow)
+        # modes whenever the window changes width.
+        self._arrange_status_bar(event.size().width())
 
     # ============================================================== close
 
