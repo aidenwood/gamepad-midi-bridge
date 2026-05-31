@@ -1,13 +1,19 @@
 name: build-release
 
-# Triggers only on semver tags pushed to the repo (e.g. `git tag v0.1.0 && git push --tags`).
+# Triggers only on MAJOR-version tags (v2.0.0, v3.0.0, v4.0.0, ...).
+# Intermediate tags (v2.1.0, v2.0.1) are intentionally ignored — we only
+# pay GitHub for full 3-OS builds at proper milestone releases. Local
+# testing covers everything in between.
+#
+# Example: `git tag v2.0.0 && git push origin v2.0.0`
+#
 # Builds the PyInstaller bundle on each OS, uploads per-OS zips as artifacts,
 # then a final job assembles a GitHub Release with all three zips attached.
 
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v*.0.0"
 
 # GITHUB_TOKEN is provided automatically by Actions; `contents: write` is
 # required for softprops/action-gh-release to create the release + upload assets.
