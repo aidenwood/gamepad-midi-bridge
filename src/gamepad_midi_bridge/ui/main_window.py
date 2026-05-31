@@ -2077,22 +2077,30 @@ class MainWindow(QMainWindow):
 
     def handle_deep_link(self, url: str) -> None:
         """React to a `gmb://` URL — e.g. one-click preset install from the
-        marketplace. URL shapes we support so far:
+        marketplace or one-click Pro activation from a Stripe success page.
 
+        Both URL schemes accepted (registered in Info.plist):
             gmb://activate?key=<license_blob>
+            gamepad-midi-bridge://activate?key=<license_blob>
+
+        Both query-param names accepted for the license blob: ``key`` (short
+        form used in marketing copy) or ``license`` (long form used in store
+        receipt emails).
+
+        Other actions:
             gmb://import?preset=<base64url(json)>
             gmb://import?id=<marketplace_id>   (fetches from the store API)
         """
         from urllib.parse import urlparse, parse_qs
 
         parsed = urlparse(url)
-        if parsed.scheme != "gmb":
+        if parsed.scheme not in ("gmb", "gamepad-midi-bridge"):
             return
         action = parsed.netloc or parsed.path.lstrip("/")
         params = parse_qs(parsed.query)
 
         if action == "activate":
-            keys = params.get("key", [])
+            keys = params.get("key", []) or params.get("license", [])
             if keys:
                 self._activate_with_blob(keys[0])
         elif action == "import":

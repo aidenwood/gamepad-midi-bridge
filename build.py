@@ -133,9 +133,23 @@ def _patch_macos_plist(app_bundle: Path) -> None:
     for key, value in MACOS_PLIST_KEYS.items():
         data[key] = value
 
+    # Custom URL scheme — registers `gmb://` with macOS so deep links from
+    # store.aidxn.com (e.g. ``gmb://activate?key=<license_blob>``) open this
+    # app and trigger one-click license activation. The handler lives in
+    # ``app.py::_MacOpenUrlFilter`` → ``MainWindow.handle_deep_link``.
+    # Also registers ``gamepad-midi-bridge://`` as a long-form alias for
+    # places where verbose URLs read better (docs, support links).
+    data["CFBundleURLTypes"] = [
+        {
+            "CFBundleURLName": f"{APP_ID}.gmb",
+            "CFBundleURLSchemes": ["gmb", "gamepad-midi-bridge"],
+            "CFBundleTypeRole": "Viewer",
+        }
+    ]
+
     with plist_path.open("wb") as fh:
         plistlib.dump(data, fh)
-    print(f"  Patched {plist_path.relative_to(ROOT)} with privacy + version keys")
+    print(f"  Patched {plist_path.relative_to(ROOT)} with privacy + version + URL scheme keys")
 
 
 def _find_icon(system: str) -> Path | None:

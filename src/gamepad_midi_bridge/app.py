@@ -31,9 +31,13 @@ class _MacOpenUrlFilter(QObject):
         return super().eventFilter(watched, event)
 
 
+_DEEP_LINK_PREFIXES = ("gmb://", "gamepad-midi-bridge://")
+
+
 def _extract_deep_links(argv: List[str]) -> List[str]:
-    """Pull every `gmb://` arg out of argv so we can hand them to the window."""
-    return [a for a in argv[1:] if a.startswith("gmb://")]
+    """Pull every deep-link URL out of argv. Accepts both the short ``gmb://``
+    scheme and the long ``gamepad-midi-bridge://`` alias."""
+    return [a for a in argv[1:] if a.startswith(_DEEP_LINK_PREFIXES)]
 
 
 def run(argv: Optional[List[str]] = None) -> int:
