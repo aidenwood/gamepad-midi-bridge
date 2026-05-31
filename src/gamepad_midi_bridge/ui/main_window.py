@@ -209,11 +209,21 @@ class MainWindow(QMainWindow):
         # Translucent ancestors on macOS prevent Qt from clearing pixels
         # before each paint, which was the root cause of all the ghost-text
         # / smeared-tab / doubled-logo bugs.
+        # 3D background is now OPT-IN via GMB_ENABLE_3D=1. The QtWebEngineCore
+        # (Chromium) used to render the GLB has crashed for the user with
+        # EXC_BAD_ACCESS in the CrBrowserMain thread on launch — happens during
+        # NetworkConfigWatcher/NetworkService init. Defaulting to no-3D means
+        # the app launches reliably for everyone; users who want the spinning
+        # logo can set GMB_ENABLE_3D=1 to opt back in. GMB_NO_3D=1 still works
+        # as an explicit disable (back-compat).
         import os as _os_3d
-        _three_d_disabled = _os_3d.environ.get("GMB_NO_3D") == "1"
+        _three_d_enabled = (
+            _os_3d.environ.get("GMB_ENABLE_3D") == "1"
+            and _os_3d.environ.get("GMB_NO_3D") != "1"
+        )
 
         bg_3d_widget: Optional[QWidget] = None
-        if not _three_d_disabled:
+        if _three_d_enabled:
             try:
                 bg_3d_widget = BgLogo3DView(parent=central, opacity=0.3)
                 bg_3d_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
