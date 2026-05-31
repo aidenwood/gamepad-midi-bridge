@@ -273,7 +273,8 @@ class TemplateBuilderTab(QWidget):
         root.setSpacing(12)
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(2)
+        # Global QSplitter::handle style in styles.qss handles the look.
+        splitter.setHandleWidth(6)
 
         self._diagram = DualSenseDiagram()
         self._diagram.control_clicked.connect(self._on_control_clicked)

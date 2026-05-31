@@ -283,16 +283,9 @@ class MainWindow(QMainWindow):
         # presets, marketplace, etc). Hidden by default — toggled via the
         # status-bar Split button.
         body_splitter = QSplitter(Qt.Vertical)
-        # Wider handle (6 px) so the resize cursor target is reachable.
+        # 6 px handle — visual styling comes from the global styles.qss
+        # ``QSplitter::handle`` rule so every splitter looks identical.
         body_splitter.setHandleWidth(6)
-        body_splitter.setStyleSheet(
-            "QSplitter::handle:vertical { "
-            "background-color: #16181d; "
-            "border-top: 1px solid #1c1e25; "
-            "border-bottom: 1px solid #1c1e25; "
-            "} "
-            "QSplitter::handle:vertical:hover { background-color: #2c313b; }"
-        )
         # Children NOT collapsible — dragging the handle should resize,
         # not snap-to-zero. Collapse/expand goes through each panel's
         # toggle button instead (which we wire to setSizes below).
@@ -305,18 +298,7 @@ class MainWindow(QMainWindow):
         # auto-opens it). This lets each side of a split keep its own
         # context-properties pane — Figma-style.
         content_splitter = QSplitter(Qt.Horizontal)
-        # 6 px handle so the resize cursor is reachable; visible styling +
-        # hover highlight so the affordance is obvious. Matches the bottom
-        # body_splitter's treatment.
         content_splitter.setHandleWidth(6)
-        content_splitter.setStyleSheet(
-            "QSplitter::handle:horizontal { "
-            "background-color: #16181d; "
-            "border-left: 1px solid #1c1e25; "
-            "border-right: 1px solid #1c1e25; "
-            "} "
-            "QSplitter::handle:horizontal:hover { background-color: #2c313b; }"
-        )
         content_splitter.setChildrenCollapsible(False)
 
         # Workspace A — the primary tabs.
@@ -795,6 +777,23 @@ class MainWindow(QMainWindow):
         self._3d_btn.setMinimumWidth(52)
         self._3d_btn.setFixedHeight(32)
 
+        # Font-scale cluster — A− / A+ so users can size the UI for their
+        # screen resolution. Persists across launches via the config file.
+        self._font_smaller_btn = QPushButton("A−")
+        self._font_smaller_btn.setObjectName("LayoutToggle")
+        self._font_smaller_btn.setToolTip("Decrease UI text size")
+        self._font_smaller_btn.setFixedSize(40, 32)
+        self._font_smaller_btn.clicked.connect(
+            lambda: self._adjust_font_scale(-0.1)
+        )
+        self._font_larger_btn = QPushButton("A+")
+        self._font_larger_btn.setObjectName("LayoutToggle")
+        self._font_larger_btn.setToolTip("Increase UI text size")
+        self._font_larger_btn.setFixedSize(40, 32)
+        self._font_larger_btn.clicked.connect(
+            lambda: self._adjust_font_scale(+0.1)
+        )
+
         self._status_divider2 = QFrame()
         self._status_divider2.setFrameShape(QFrame.VLine)
         self._status_divider2.setStyleSheet("color: #2c313b;")
@@ -858,6 +857,8 @@ class MainWindow(QMainWindow):
             self._status_row2_layout.addWidget(self._console_btn)
             self._status_row2_layout.addWidget(self._inspect_btn)
             self._status_row2_layout.addWidget(self._3d_btn)
+            self._status_row2_layout.addWidget(self._font_smaller_btn)
+            self._status_row2_layout.addWidget(self._font_larger_btn)
             self._status_row2_layout.addWidget(self._status_divider2)
             self._status_row2_layout.addWidget(self._record_btn)
             self._status_row2_widget.setVisible(True)
@@ -879,10 +880,110 @@ class MainWindow(QMainWindow):
             self._status_row1_layout.addWidget(self._console_btn)
             self._status_row1_layout.addWidget(self._inspect_btn)
             self._status_row1_layout.addWidget(self._3d_btn)
+            self._status_row1_layout.addWidget(self._font_smaller_btn)
+            self._status_row1_layout.addWidget(self._font_larger_btn)
             self._status_row1_layout.addWidget(self._status_divider2)
             self._status_row1_layout.addWidget(self._record_btn)
             self._status_row2_widget.setVisible(False)
             self._status_bar.setFixedHeight(64)
+
+    # Font-scale clamp + step. Lets users size the UI for their resolution.
+    _FONT_SCALE_MIN = 0.80
+    _FONT_SCALE_MAX = 1.60
+    _FONT_SCALE_STEP = 0.10
+    _FONT_BASE_PT = 13  # matches styles.qss QWidget { font-size: 13px; }
+
+    def _adjust_font_scale(self, delta: float) -> None:
+        """Bump app font scale by *delta* (e.g. +0.1 or -0.1) and apply.
+
+        Two-pronged because Qt's CSS cascade beats ``QApplication.setFont``
+        for any widget that has an explicit ``font-size:`` in its
+        stylesheet — and styles.qss is full of them. We:
+
+        1. Re-load styles.qss, regex-replace every ``font-size: Npx`` with
+           the scaled value, and re-apply via ``app.setStyleSheet``.
+        2. Also bump ``QApplication.font()`` so widgets without an explicit
+           QSS font-size pick up the new size.
+        """
+        current = getattr(self, "_font_scale", 1.0)
+        new_scale = max(
+            self._FONT_SCALE_MIN,
+            min(self._FONT_SCALE_MAX, round(current + delta, 2)),
+        )
+        if new_scale == current:
+            return
+        self._font_scale = new_scale
+        self._apply_font_scale()
+        # Persist via the config file shared with other UI prefs.
+        from ..paths import config_path
+        import json
+        path = config_path()
+        data: dict = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        data["font_scale"] = new_scale
+        try:
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _apply_font_scale(self) -> None:
+        """Re-apply the current ``_font_scale`` to the global stylesheet
+        and default application font."""
+        import re
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QFont
+        from .theme import load_theme_qss
+        app = QApplication.instance()
+        if app is None:
+            return
+        scale = getattr(self, "_font_scale", 1.0)
+        qss = load_theme_qss("system")
+
+        def _scale_px(match):
+            try:
+                n = int(match.group(1))
+            except ValueError:
+                return match.group(0)
+            return f"font-size: {max(1, round(n * scale))}px"
+
+        scaled_qss = re.sub(r"font-size:\s*(\d+)px", _scale_px, qss)
+        app.setStyleSheet(scaled_qss)
+        f: QFont = app.font()
+        f.setPointSizeF(self._FONT_BASE_PT * scale)
+        app.setFont(f)
+        # Many widgets set their own inline stylesheet at construction with
+        # an explicit font-size. Walk the widget tree and patch any inline
+        # ``font-size: Npx`` we find — same regex, but only on widgets that
+        # have ever called setStyleSheet themselves.
+        self._patch_inline_font_sizes(scale)
+
+    def _patch_inline_font_sizes(self, scale: float) -> None:
+        """Walk every descendant widget and rescale any inline-stylesheet
+        ``font-size: Npx`` it has set, preserving the original size as a
+        dynamic property so future adjustments scale from the base value."""
+        import re
+        from PySide6.QtWidgets import QApplication, QWidget
+        pattern = re.compile(r"font-size:\s*(\d+)px")
+
+        def _rescale(match):
+            n = int(match.group(1))
+            return f"font-size: {max(1, round(n * scale))}px"
+
+        for w in QApplication.allWidgets():
+            qss = w.styleSheet()
+            if not qss or "font-size" not in qss:
+                continue
+            base = w.property("_baseStyleSheet")
+            if base is None:
+                base = qss
+                w.setProperty("_baseStyleSheet", base)
+            scaled = pattern.sub(_rescale, base)
+            if scaled != qss:
+                w.setStyleSheet(scaled)
 
     def _build_update_banner(self) -> QFrame:
         bar = QFrame()
@@ -1038,12 +1139,20 @@ class MainWindow(QMainWindow):
         """Recompute QSplitter sizes for the bottom dock.
 
         Single source of truth for log-console + MIDI-activity sizing. Called
-        on every panel toggle (and once at startup). The splitter itself is
-        the only thing that resizes — panels never self-shrink, which is what
-        used to cause the drag flicker.
+        on every panel toggle (and once at startup). Deferred via
+        ``QTimer.singleShot(0, ...)`` so it runs after Qt's pending layout
+        pass — calling ``setSizes`` mid-layout can be silently dropped if
+        the splitter hasn't finished allocating its initial geometry yet.
         """
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._apply_bottom_panel_sizes)
+        # Keep the status-bar Console toggle in sync immediately.
+        if hasattr(self, "_console_btn"):
+            self._console_btn.setChecked(not self._log_console.is_collapsed())
+
+    def _apply_bottom_panel_sizes(self) -> None:
         if not hasattr(self, "_body_splitter"):
-            return  # not constructed yet
+            return
         console_h = (
             self._COLLAPSED_PANEL_PX
             if self._log_console.is_collapsed()
@@ -1054,15 +1163,15 @@ class MainWindow(QMainWindow):
             if self._midi_log_panel.is_collapsed()
             else self._OPEN_MIDI_PX
         )
-        # Give the content area whatever's left. setStretchFactor(0, 1) on
-        # the splitter means content auto-grows when the window resizes;
-        # the absolute value here is just a sensible initial allocation.
-        total = max(self._body_splitter.height(), 720)
+        # Use the splitter's actual current height; fall back to the parent
+        # widget if the splitter hasn't been sized yet.
+        total = self._body_splitter.height()
+        if total <= 0:
+            parent = self._body_splitter.parentWidget()
+            total = parent.height() if parent is not None else 720
+        total = max(total, 240)
         content_h = max(160, total - console_h - midi_h)
         self._body_splitter.setSizes([content_h, console_h, midi_h])
-        # Keep the status-bar Console toggle in sync with the panel's state.
-        if hasattr(self, "_console_btn"):
-            self._console_btn.setChecked(not self._log_console.is_collapsed())
 
     def _toggle_inspector(self) -> None:
         """Show / hide the right inspector(s). When split is on, both
@@ -1210,14 +1319,6 @@ class MainWindow(QMainWindow):
         self._meter2.setVisible(False)
         self._live_splitter = QSplitter(Qt.Horizontal)
         self._live_splitter.setHandleWidth(6)
-        self._live_splitter.setStyleSheet(
-            "QSplitter::handle:horizontal { "
-            "background-color: #16181d; "
-            "border-left: 1px solid #1c1e25; "
-            "border-right: 1px solid #1c1e25; "
-            "} "
-            "QSplitter::handle:horizontal:hover { background-color: #2c313b; }"
-        )
         self._live_splitter.addWidget(self._meter)
         self._live_splitter.addWidget(self._meter2)
         self._live_splitter.setChildrenCollapsible(False)

@@ -91,15 +91,15 @@ class MidiLogPanel(QWidget):
 
     def _build_header(self) -> QFrame:
         bar = QFrame()
-        bar.setStyleSheet(
-            "background-color: #16181d; border-top: 1px solid #24262d;"
-        )
+        # No border-top — QSplitter handle above is the visual divider.
+        bar.setStyleSheet("background-color: #16181d;")
         bar.setFixedHeight(48)
         h = QHBoxLayout(bar)
-        h.setContentsMargins(12, 10, 8, 10)
+        h.setContentsMargins(14, 11, 10, 11)
         h.setSpacing(8)
 
         title = QLabel("MIDI ACTIVITY")
+        title.setMinimumHeight(20)
         title.setStyleSheet(
             "color: #8a9099; font-size: 10px; font-weight: 700; "
             "letter-spacing: 1px;"

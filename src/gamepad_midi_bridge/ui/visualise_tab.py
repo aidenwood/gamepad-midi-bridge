@@ -398,8 +398,15 @@ class VisualiseTab(QWidget):
 
         # Tab widget to split content into Live, Scope, Throughput, Heatmap tabs
         self._tabs = QTabWidget()
+        # Same anti-elide fix as the main ResponsiveTabWidget — let tabs keep
+        # natural width and scroll on overflow rather than truncating every
+        # label to "Li..."/"Sc...".
+        from PySide6.QtCore import Qt as _Qt
+        self._tabs.tabBar().setElideMode(_Qt.ElideNone)
+        self._tabs.tabBar().setExpanding(False)
+        self._tabs.setUsesScrollButtons(True)
         self._tabs.setStyleSheet("""
-            QTabBar::tab { padding: 8px 12px; font-size: 11px; font-weight: 600; }
+            QTabBar::tab { padding: 8px 14px; font-size: 11px; font-weight: 600; min-width: 0; }
             QTabWidget::pane { border: none; }
         """)
         root.addWidget(self._tabs)

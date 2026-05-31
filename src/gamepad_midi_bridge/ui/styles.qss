@@ -228,3 +228,74 @@ QHeaderView::section {
     padding: 8px;
     font-weight: 600;
 }
+
+/* QSplitter handles intentionally NOT styled here — global QSS that
+ * customises the handle's background-color breaks dragging on macOS Qt 6
+ * (Qt stops dispatching mouse events to the styled handle). Splitter
+ * sizing is owned by ``setHandleWidth()`` on each splitter; appearance
+ * uses Qt's native rendering which is already visible enough. */
+
+/* ----- Global scrollbars -----------------------------------------------
+ * Minimal style — slim track, soft thumb, small chevron arrows. Matches
+ * the splitter palette so the chrome reads as one consistent surface. */
+QScrollBar:vertical {
+    background: #0e0f12;
+    width: 12px;
+    margin: 0px;
+    border: none;
+}
+QScrollBar::handle:vertical {
+    background: #2c313b;
+    border-radius: 3px;
+    min-height: 24px;
+    margin: 2px 3px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #3a414e;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    background: transparent;
+    height: 12px;
+    subcontrol-origin: margin;
+    border: none;
+}
+QScrollBar::up-arrow:vertical,
+QScrollBar::down-arrow:vertical {
+    background: transparent;
+    width: 7px;
+    height: 7px;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+QScrollBar:horizontal {
+    background: #0e0f12;
+    height: 12px;
+    margin: 0px;
+    border: none;
+}
+QScrollBar::handle:horizontal {
+    background: #2c313b;
+    border-radius: 3px;
+    min-width: 24px;
+    margin: 3px 2px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: #3a414e;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    background: transparent;
+    width: 12px;
+    subcontrol-origin: margin;
+    border: none;
+}
+QScrollBar::left-arrow:horizontal,
+QScrollBar::right-arrow:horizontal {
+    background: transparent;
+    width: 7px;
+    height: 7px;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: transparent;
+}

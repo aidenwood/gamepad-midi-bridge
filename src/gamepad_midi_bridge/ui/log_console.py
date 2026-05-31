@@ -147,18 +147,17 @@ class LogConsole(QWidget):
 
     def _build_header(self) -> QFrame:
         bar = QFrame()
-        bar.setStyleSheet(
-            "background-color: #16181d; border-top: 1px solid #24262d;"
-        )
-        # 48 px header strip — fixed-height Clear (26) + toggle (26) plus
-        # 1 px border-top + margins need at least 44; 48 gives consistent
-        # alignment with the MIDI panel header below.
+        # No border-top — the QSplitter handle above us is the visual divider.
+        bar.setStyleSheet("background-color: #16181d;")
+        # 48 px header — fits 26 px Clear/toggle buttons with 11 px breathing
+        # room. ``setFixedHeight`` so the layout can't squash it.
         bar.setFixedHeight(48)
         h = QHBoxLayout(bar)
-        h.setContentsMargins(12, 10, 8, 10)
+        h.setContentsMargins(14, 11, 10, 11)
         h.setSpacing(8)
 
         title = QLabel("CONSOLE")
+        title.setMinimumHeight(20)
         title.setStyleSheet(
             "color: #8a9099; font-size: 10px; font-weight: 700; "
             "letter-spacing: 1px;"
