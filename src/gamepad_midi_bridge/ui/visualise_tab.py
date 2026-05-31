@@ -398,6 +398,8 @@ class VisualiseTab(QWidget):
 
         # Tab widget to split content into Live, Scope, Throughput, Heatmap tabs
         self._tabs = QTabWidget()
+        self._tabs.setObjectName("VisualiseSubTabs")
+        self._tabs.tabBar().setObjectName("VisualiseSubTabsBar")
         # Same anti-elide fix as the main ResponsiveTabWidget — let tabs keep
         # natural width and scroll on overflow rather than truncating every
         # label to "Li..."/"Sc...".
@@ -405,10 +407,7 @@ class VisualiseTab(QWidget):
         self._tabs.tabBar().setElideMode(_Qt.ElideNone)
         self._tabs.tabBar().setExpanding(False)
         self._tabs.setUsesScrollButtons(True)
-        self._tabs.setStyleSheet("""
-            QTabBar::tab { padding: 8px 14px; font-size: 11px; font-weight: 600; min-width: 0; }
-            QTabWidget::pane { border: none; }
-        """)
+        # Styled via QTabWidget#VisualiseSubTabs in styles.qss.
         root.addWidget(self._tabs)
 
         # === Live Tab: DualSense diagram + stats panel ===
@@ -441,9 +440,9 @@ class VisualiseTab(QWidget):
         scope_container_layout.addStretch()
 
         scope_scroll = QScrollArea()
+        scope_scroll.setObjectName("VisualiseScopeScroll")
         scope_scroll.setWidget(scope_container)
         scope_scroll.setWidgetResizable(True)
-        scope_scroll.setStyleSheet("border: none;")
         scope_layout.addWidget(scope_scroll, 1)
         self._tabs.addTab(scope_widget, "Scope")
 
@@ -501,15 +500,13 @@ class VisualiseTab(QWidget):
     @staticmethod
     def _panel_frame() -> QFrame:
         f = QFrame()
-        f.setStyleSheet(f"background-color: {PANEL_BG.name()}; border-radius: 8px;")
+        f.setObjectName("VisualisePanelFrame")
         return f
 
     @staticmethod
     def _section_title(text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
-        )
+        lbl.setObjectName("VisualiseScopeHeading")
         return lbl
 
     def _build_stats_panel(self) -> QWidget:
@@ -532,9 +529,9 @@ class VisualiseTab(QWidget):
         """Build label+value pair, return the value QLabel for later mutation."""
         row = QVBoxLayout(); row.setSpacing(2)
         lbl = QLabel(label.upper())
-        lbl.setStyleSheet("color: #5a606b; font-size: 9px; font-weight: 600;")
+        lbl.setObjectName("VisualiseStatLabel")
         val = QLabel(value)
-        val.setStyleSheet("color: #f5f7fa; font-size: 14px; font-weight: 600;")
+        val.setObjectName("VisualiseStatValue")
         row.addWidget(lbl); row.addWidget(val)
         layout.addLayout(row)
         return val

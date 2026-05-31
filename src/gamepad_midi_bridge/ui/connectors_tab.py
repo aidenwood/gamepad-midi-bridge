@@ -136,10 +136,7 @@ class ConnectorsTab(QWidget):
             return  # section stays hidden when nothing is found
 
         section_title = QLabel("DETECTED ON YOUR SYSTEM")
-        section_title.setStyleSheet(
-            "font-size: 11px; font-weight: 700; letter-spacing: 1px; "
-            "color: #5a606b; padding-bottom: 2px;"
-        )
+        section_title.setObjectName("ConnectorsSectionTitle")
         self._detected_layout.addWidget(section_title)
 
         for app in apps:
@@ -147,15 +144,12 @@ class ConnectorsTab(QWidget):
 
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet("color: #24262d; margin: 6px 0;")
+        separator.setObjectName("ConnectorsSeparator")
         self._detected_layout.addWidget(separator)
 
     def _detected_row(self, app: DetectedApp) -> QFrame:
         card = QFrame()
-        card.setStyleSheet(
-            "QFrame { background-color: #0f1117; border: 1px solid #1e2029; "
-            "border-radius: 6px; }"
-        )
+        card.setObjectName("ConnectorsTemplateCard")
         h = QHBoxLayout(card)
         h.setContentsMargins(14, 10, 14, 10)
         h.setSpacing(12)
@@ -235,10 +229,7 @@ class ConnectorsTab(QWidget):
             pass
 
         card = QFrame()
-        card.setStyleSheet(
-            "QFrame { background-color: #16181d; border: 1px solid #24262d; "
-            "border-radius: 8px; padding: 14px; }"
-        )
+        card.setObjectName("ConnectorsHostCard")
         h = QHBoxLayout(card)
         h.setContentsMargins(14, 12, 14, 12)
         h.setSpacing(14)
@@ -269,7 +260,9 @@ class ConnectorsTab(QWidget):
         right = QVBoxLayout()
         right.setSpacing(6)
         status = UILabel("Installed ✓" if installed else "Not installed", variant="caption")
-        # Keep bespoke: installed state uses distinct accent vs muted color (more than just color)
+        # State-dependent override of UILabel's self-styled caption colour
+        # (UILabel sets its own stylesheet for cascade-defense — see
+        # primitives/label.py; this overlay is intentional).
         status.setStyleSheet(
             "color: #2dd4bf; font-weight: 600;" if installed
             else "color: #8a9099;"

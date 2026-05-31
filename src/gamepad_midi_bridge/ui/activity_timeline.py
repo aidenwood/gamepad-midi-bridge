@@ -81,7 +81,8 @@ class ActivityTimeline(QWidget):
     # ---------------------------------------------------------------- UI
 
     def _build_ui(self) -> None:
-        self.setStyleSheet(f"background-color: {_BG};")
+        self.setObjectName("ActivityTimeline")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 8)
         root.setSpacing(8)
@@ -89,31 +90,20 @@ class ActivityTimeline(QWidget):
         # Header row
         header = QHBoxLayout()
         title = QLabel("SESSION TIMELINE")
-        title.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
-        )
+        title.setObjectName("ActivityTimelineTitle")
         header.addWidget(title)
         header.addStretch()
 
         self._clear_btn = QPushButton("Clear log")
+        self._clear_btn.setObjectName("ActivityTimelineClearButton")
         self._clear_btn.setFixedHeight(24)
-        self._clear_btn.setStyleSheet(
-            "QPushButton { background: #1f232b; color: #8a9099; border: 1px solid #2c313b;"
-            "border-radius: 4px; font-size: 10px; padding: 0 10px; }"
-            "QPushButton:hover { background: #262b35; color: #d0d4dc; }"
-        )
         self._clear_btn.clicked.connect(self._on_clear)
         header.addWidget(self._clear_btn)
         root.addLayout(header)
 
         # List
         self._list = QListWidget()
-        self._list.setStyleSheet(
-            f"QListWidget {{ background: {_BG}; border: none; }}"
-            f"QListWidget::item {{ background: {_ITEM_BG}; border-radius: 4px;"
-            f"  padding: 4px 8px; margin-bottom: 2px; }}"
-            f"QListWidget::item:selected {{ background: #24272f; }}"
-        )
+        self._list.setObjectName("ActivityTimelineList")
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # Track user scroll to suppress auto-scroll when looking back.
@@ -122,8 +112,8 @@ class ActivityTimeline(QWidget):
 
         # Empty-state label (shown when list is empty)
         self._empty_label = QLabel("No events yet — start the bridge to begin recording.")
+        self._empty_label.setObjectName("ActivityTimelineEmptyLabel")
         self._empty_label.setAlignment(Qt.AlignCenter)
-        self._empty_label.setStyleSheet(f"color: {_DIM}; font-size: 11px;")
         root.addWidget(self._empty_label)
         self._empty_label.setVisible(True)
 

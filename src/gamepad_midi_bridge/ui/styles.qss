@@ -1,5 +1,47 @@
-/* Universal Controller MIDI — dark theme.
-   Targets standard QWidget classes so the file works without per-widget objectName. */
+/* ===================================================================
+ * Universal Controller MIDI — Central Stylesheet
+ * Single source of truth for every visual rule in the app.
+ *
+ * Editing this file is the supported way to retheme the app. Every
+ * widget that needs a custom look has been given a stable objectName
+ * (camelCase) so the QSS selectors below target one widget cleanly.
+ *
+ * EXCEPTIONS (rules that intentionally stay inline in Python):
+ *   1. QSplitter handles — global QSplitter::handle QSS breaks drag on
+ *      macOS Qt 6. The three splitters in main_window.py keep per-widget
+ *      setStyleSheet calls with comments explaining why.
+ *   2. UIButton / UILabel / UIInput / UICard / UIChromeFrame primitives
+ *      in src/gamepad_midi_bridge/ui/primitives/ — these self-style at
+ *      construction as defence-in-depth against the macOS translucent-
+ *      ancestor paint bug (cascade dies under WA_TranslucentBackground).
+ *      Documented in each primitive's docstring.
+ *   3. State-dependent runtime restyling (e.g. _activity_dot teal/grey
+ *      pulse, MIDI rate label colour swap) — kept inline because the
+ *      values change every frame.
+ *   4. Per-instance dynamic colour (template tag accents, connector
+ *      verify chips) where the colour is data-driven from runtime info.
+ *
+ * Token reference (mirror of src/gamepad_midi_bridge/ui/tokens.py):
+ *   Backgrounds:  BG_BASE #0c0d10 · BG_SURFACE #15171d
+ *                 BG_ELEVATED #1d2028 · BG_HOVER #22242c
+ *                 BG_PRESSED #2a2d36
+ *   Chrome:       #0e0f12 (app shell) · #16181d (chrome surfaces)
+ *                 #11131a (sunken cards) · #1f232b (subtle border)
+ *   Text:         TEXT_PRIMARY #f5f7fa · TEXT_SECONDARY #c2c6cc
+ *                 TEXT_MUTED #8a9099 · TEXT_DISABLED #5a606b
+ *   Accent:       ACCENT_TEAL #2dd4bf · TEAL_LIGHT #5eead4
+ *                 ACCENT_CORAL #f87171 · ACCENT_RED #f97373
+ *                 ACCENT_ORANGE #f97316 · ACCENT_AMBER #fbbf24
+ *                 ACCENT_BLUE #3b82f6 · ACCENT_BLUE_LIGHT #93c5fd
+ *   Borders:      BORDER_SUBTLE #24262d · BORDER_STRONG #3a3d46
+ *                 BORDER_DIVIDER #2c313b
+ * =================================================================== */
+
+
+/* ===================================================================
+ * 1. GLOBAL BASE STYLES
+ * QWidget defaults — fonts, base colours, every-widget chrome.
+ * =================================================================== */
 
 QWidget {
     background-color: #0e0f12;
@@ -12,26 +54,8 @@ QMainWindow {
     background-color: #0e0f12;
 }
 
-QFrame#StatusBar {
-    background-color: #16181d;
-    border-bottom: 1px solid #24262d;
-    padding: 14px 18px;
-}
-
-QLabel#StatusTitle {
-    font-size: 15px;
-    font-weight: 600;
-    color: #f5f7fa;
-}
-
-QLabel#StatusSub {
-    color: #8a9099;
-    font-size: 12px;
-}
-
-QLabel#ActivityDot {
-    color: #2dd4bf;
-    font-size: 18px;
+QFrame#ChromeWidget {
+    background-color: #0c0d10;
 }
 
 QPushButton {
@@ -42,16 +66,13 @@ QPushButton {
     color: #e6e8eb;
     font-weight: 500;
 }
-
 QPushButton:hover {
     background-color: #272c36;
     border-color: #3a414e;
 }
-
 QPushButton:pressed {
     background-color: #1a1d24;
 }
-
 QPushButton:disabled {
     color: #5a606b;
     background-color: #161920;
@@ -62,11 +83,9 @@ QPushButton#PrimaryButton {
     color: #0e0f12;
     border: none;
 }
-
 QPushButton#PrimaryButton:hover {
     background-color: #4ae0cd;
 }
-
 QPushButton#PrimaryButton:disabled {
     background-color: #1a4d47;
     color: #5a606b;
@@ -77,84 +96,8 @@ QPushButton#StopButton {
     color: #0e0f12;
     border: none;
 }
-
 QPushButton#StopButton:hover {
     background-color: #fb8b8b;
-}
-
-/* Figma-style layout toggles — flat chips in the right side of the header.
-   Sit alongside Start/Stop but feel less primary, more like editor tools.
-   Vertical padding is ZERO because these buttons all use ``setFixedHeight``
-   in Python — non-zero vertical padding overflows the fixed height on
-   macOS Qt 6 and clips the label. Width padding (11 px) is fine. */
-QPushButton#LayoutToggle {
-    background-color: transparent;
-    color: #8a9099;
-    border: 1px solid #24262d;
-    border-radius: 6px;
-    padding: 3px 11px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-}
-
-QPushButton#LayoutToggle:hover {
-    color: #c2c6cc;
-    border-color: #3a3e48;
-    background-color: rgba(255, 255, 255, 0.03);
-}
-
-QPushButton#LayoutToggle:checked {
-    color: #5eead4;
-    border-color: rgba(45, 212, 191, 0.4);
-    background-color: rgba(45, 212, 191, 0.10);
-}
-
-QPushButton#LayoutToggle:checked:hover {
-    background-color: rgba(45, 212, 191, 0.16);
-}
-
-QTabWidget::pane {
-    border: none;
-    background-color: #0e0f12;
-}
-
-QTabBar::tab {
-    background-color: transparent;
-    color: #8a9099;
-    padding: 10px 18px;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-right: 4px;
-}
-
-QTabBar::tab:selected {
-    color: #f5f7fa;
-    border-bottom: 2px solid #2dd4bf;
-}
-
-QTabBar::tab:hover {
-    color: #c2c6cc;
-}
-
-QLabel#ProLockTitle {
-    font-size: 22px;
-    font-weight: 700;
-    color: #f5f7fa;
-}
-
-QLabel#ProLockSub {
-    color: #8a9099;
-    font-size: 13px;
-}
-
-QFrame#ProBadge {
-    background-color: #2dd4bf;
-    color: #0e0f12;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 10px;
-    font-weight: 700;
 }
 
 QGroupBox {
@@ -164,7 +107,6 @@ QGroupBox {
     padding-top: 12px;
     color: #c2c6cc;
 }
-
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 14px;
@@ -182,7 +124,6 @@ QProgressBar {
     text-align: center;
     color: #e6e8eb;
 }
-
 QProgressBar::chunk {
     background-color: #2dd4bf;
     border-radius: 3px;
@@ -195,7 +136,6 @@ QSpinBox, QDoubleSpinBox, QLineEdit {
     padding: 6px 8px;
     color: #e6e8eb;
 }
-
 QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
     border-color: #2dd4bf;
 }
@@ -206,12 +146,10 @@ QListWidget {
     border-radius: 6px;
     padding: 4px;
 }
-
 QListWidget::item {
     padding: 8px 10px;
     border-radius: 4px;
 }
-
 QListWidget::item:selected {
     background-color: #1f3a36;
     color: #2dd4bf;
@@ -232,15 +170,1358 @@ QHeaderView::section {
     font-weight: 600;
 }
 
-/* QSplitter handles intentionally NOT styled here — global QSS that
- * customises the handle's background-color breaks dragging on macOS Qt 6
- * (Qt stops dispatching mouse events to the styled handle). Splitter
- * sizing is owned by ``setHandleWidth()`` on each splitter; appearance
- * uses Qt's native rendering which is already visible enough. */
 
-/* ----- Global scrollbars -----------------------------------------------
- * Minimal style — slim track, soft thumb, small chevron arrows. Matches
- * the splitter palette so the chrome reads as one consistent surface. */
+/* ===================================================================
+ * 2. TAB NAVIGATION
+ * Files: responsive_tab_widget.py + main_window.py (_build_tabs)
+ * =================================================================== */
+
+QTabWidget::pane {
+    border: none;
+    background-color: #0e0f12;
+}
+
+QTabBar::tab {
+    background-color: transparent;
+    color: #8a9099;
+    padding: 10px 18px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-right: 4px;
+}
+QTabBar::tab:selected {
+    color: #f5f7fa;
+    border-bottom: 2px solid #2dd4bf;
+}
+QTabBar::tab:hover {
+    color: #c2c6cc;
+}
+
+
+/* ===================================================================
+ * 3. TOP STATUS BAR (chrome)
+ * File: main_window.py (_build_status_bar)
+ * Header strip: title/sub/rate/activity-dot + Start/Stop/Panic + layout
+ * toggle chips (Split, Console, Inspect, 3D, A-, A+) + Record.
+ * =================================================================== */
+
+QFrame#StatusBar {
+    background-color: #0e0f12;
+    border-bottom: 1px solid #1c1e25;
+}
+
+QLabel#StatusTitle {
+    color: #f5f7fa;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#StatusSub {
+    color: #5a606b;
+    font-size: 11px;
+}
+
+QLabel#StatusRateLabel {
+    color: #8a9099;
+    font-size: 10px;
+    font-family: ui-monospace, Menlo, monospace;
+}
+
+/* ActivityDot — base style. Live state is teal (active) vs grey
+ * (idle); the colour swap is driven at runtime in main_window.py so
+ * those two stylesheets stay inline. */
+QLabel#ActivityDot {
+    color: #2c313b;
+    font-size: 14px;
+}
+
+QPushButton#PanicButton {
+    color: #f97316;
+    font-weight: 700;
+}
+
+/* Record button — colour cycles checked/unchecked via objectName. */
+QPushButton#RecordButton {
+    color: #8a9099;
+}
+QPushButton#RecordButton:checked {
+    color: #ef4444;
+    font-weight: 700;
+}
+
+/* Status-bar dividers (vertical hairlines between groups). */
+QFrame#StatusDivider {
+    color: #2c313b;
+}
+
+/* Figma-style layout toggles — flat chips on the right of the header.
+ * Vertical padding is intentionally tiny (3px) — these all use
+ * setFixedHeight in Python and any more padding clips the label on
+ * macOS Qt 6. Don't change this number without re-testing every
+ * status bar mode. */
+QPushButton#LayoutToggle {
+    background-color: transparent;
+    color: #8a9099;
+    border: 1px solid #24262d;
+    border-radius: 6px;
+    padding: 3px 11px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+QPushButton#LayoutToggle:hover {
+    color: #c2c6cc;
+    border-color: #3a3e48;
+    background-color: rgba(255, 255, 255, 0.03);
+}
+QPushButton#LayoutToggle:checked {
+    color: #5eead4;
+    border-color: rgba(45, 212, 191, 0.4);
+    background-color: rgba(45, 212, 191, 0.10);
+}
+QPushButton#LayoutToggle:checked:hover {
+    background-color: rgba(45, 212, 191, 0.16);
+}
+
+
+/* ===================================================================
+ * 4. UPDATE BANNER (chrome)
+ * File: main_window.py (_build_update_banner)
+ * Slim teal strip shown when a new version is available.
+ * =================================================================== */
+
+QFrame#UpdateBanner {
+    background-color: #1f3a36;
+    border-bottom: 1px solid #2dd4bf;
+}
+
+QLabel#UpdateBannerLabel {
+    color: #2dd4bf;
+    font-weight: 500;
+}
+
+QPushButton#UpdateBannerOpenButton {
+    color: #0e0f12;
+    background-color: #2dd4bf;
+}
+
+QPushButton#UpdateBannerDismissButton {
+    color: #2dd4bf;
+}
+
+
+/* ===================================================================
+ * 5. SIDE PANEL + SPLIT VIEW PICKER
+ * File: main_window.py (_build_side_panel)
+ * Right-docked panel that mirrors a chosen tab next to the active one.
+ * =================================================================== */
+
+QLabel#SplitViewHeader {
+    color: #5a606b;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+
+QComboBox#SplitViewPicker {
+    color: #c2c6cc;
+    background-color: #0e0f12;
+    border: 1px solid #2c313b;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+}
+QComboBox#SplitViewPicker::drop-down {
+    border: none;
+}
+
+
+/* ===================================================================
+ * 6. LIVE TAB — PRO NUDGE
+ * File: main_window.py (_build_tabs / Live)
+ * Amber pill that appears when a 2nd controller is plugged into a
+ * non-Pro install — invites the user to upgrade.
+ * =================================================================== */
+
+QLabel#ProNudgeLabel {
+    color: #facc15;
+    background: #2a2410;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+
+/* ===================================================================
+ * 7. INSPECTOR PANEL
+ * Files: inspector.py + inspector_renderers.py
+ * Right-side context-properties drawer (Figma pattern).
+ * =================================================================== */
+
+QFrame#InspectorHeader {
+    background-color: #16181d;
+    border-bottom: 1px solid #24262d;
+}
+
+QLabel#InspectorTitle {
+    color: #f5f7fa;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+QPushButton#InspectorCloseButton {
+    background: transparent;
+    color: #8a9099;
+    border: none;
+    font-size: 16px;
+}
+QPushButton#InspectorCloseButton:hover {
+    color: #f5f7fa;
+}
+
+QScrollArea#InspectorScroll {
+    background: #0a0b0e;
+    border: none;
+}
+
+QWidget#InspectorBodyHost {
+    background: #0a0b0e;
+}
+
+/* Renderer chips & divider — emitted by inspector_renderers.py */
+QLabel#InspectorKindChip {
+    background-color: #1f3a36;
+    color: #2dd4bf;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+QLabel#InspectorKindChip[variant="live"] {
+    background-color: #3a311a;
+    color: #f5c450;
+}
+
+QLabel#InspectorAuthor {
+    color: #8a9099;
+    font-size: 11px;
+}
+
+QFrame#InspectorDivider {
+    color: #24262d;
+}
+
+QFrame#InspectorRendererDivider {
+    color: #1c1e25;
+}
+
+QLabel#InspectorStatusChip {
+    background-color: #1d2028;
+    color: #c2c6cc;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+QLabel#InspectorStatusChip[state="installed"] {
+    background-color: #1f3a36;
+    color: #2dd4bf;
+}
+QLabel#InspectorStatusChip[state="missing"] {
+    background-color: #1d2028;
+    color: #8a9099;
+}
+
+
+/* ===================================================================
+ * 8. BOTTOM CONSOLE PANEL HEADER
+ * File: log_console.py
+ * Collapsible log dock — header strip + body scroll area.
+ * =================================================================== */
+
+QWidget#LogConsoleHeader {
+    background-color: #16181d;
+}
+
+QLabel#LogConsoleTitle {
+    color: #c2c6cc;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+QPushButton#LogConsoleClearButton {
+    background-color: transparent;
+    color: #8a9099;
+    border: none;
+    padding: 2px 6px;
+    font-size: 11px;
+}
+QPushButton#LogConsoleClearButton:hover {
+    color: #f5f7fa;
+}
+
+QPushButton#LogConsoleToggleButton {
+    background-color: transparent;
+    color: #c2c6cc;
+    border: none;
+    padding: 2px 8px;
+    font-size: 12px;
+}
+QPushButton#LogConsoleToggleButton:hover {
+    color: #f5f7fa;
+}
+
+QPlainTextEdit#LogConsoleBody {
+    background-color: #0e0f12;
+    color: #c2c6cc;
+    border: none;
+    selection-background-color: #1f3a36;
+}
+
+
+/* ===================================================================
+ * 9. MIDI ACTIVITY LOG PANEL
+ * File: midi_log_panel.py
+ * Collapsible MIDI message stream — header + filter dropdown + list.
+ * =================================================================== */
+
+QWidget#MidiLogPanelHeader {
+    background-color: #16181d;
+}
+
+QLabel#MidiLogPanelTitle {
+    color: #c2c6cc;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+QComboBox#MidiLogPanelFilterCombo {
+    background-color: #0e0f12;
+    color: #c2c6cc;
+    border: 1px solid #2c313b;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+}
+QComboBox#MidiLogPanelFilterCombo::drop-down {
+    border: none;
+}
+
+QPushButton#MidiLogPanelClearButton {
+    background-color: transparent;
+    color: #8a9099;
+    border: none;
+    padding: 2px 6px;
+    font-size: 11px;
+}
+QPushButton#MidiLogPanelClearButton:hover {
+    color: #f5f7fa;
+}
+
+QPushButton#MidiLogPanelToggleButton {
+    background-color: transparent;
+    color: #c2c6cc;
+    border: none;
+    padding: 2px 8px;
+    font-size: 12px;
+}
+QPushButton#MidiLogPanelToggleButton:hover {
+    color: #f5f7fa;
+}
+
+QListWidget#MidiLogPanelList {
+    background-color: #0e0f12;
+    color: #c2c6cc;
+    border: none;
+    selection-background-color: #1f3a36;
+}
+
+
+/* ===================================================================
+ * 10. PRO LOCK OVERLAY
+ * File: pro_lock.py
+ * Semi-opaque blocker over Pro-gated tabs/dialogs.
+ * =================================================================== */
+
+QWidget#ProLockOverlay {
+    background-color: rgba(14, 15, 18, 240);
+}
+
+QFrame#ProLockCard {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 12px;
+    padding: 28px;
+}
+
+QLabel#ProBadge {
+    background-color: #2dd4bf;
+    color: #0e0f12;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+QLabel#ProLockTitle {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f5f7fa;
+}
+
+QLabel#ProLockSub {
+    color: #8a9099;
+    font-size: 13px;
+}
+
+
+/* ===================================================================
+ * 11. RECONNECT OVERLAY
+ * File: reconnect_overlay.py
+ * Full-window blocker shown when a controller disconnects mid-session.
+ * Title text restyles per state (scanning / found / failed) — those
+ * three states are driven inline in Python because the colours change.
+ * =================================================================== */
+
+QWidget#ReconnectOverlay {
+    background: rgba(10, 11, 14, 200);
+}
+
+QLabel#ReconnectTitle {
+    color: #f5f7fa;
+    font-size: 26px;
+    font-weight: 700;
+}
+QLabel#ReconnectTitle[state="success"] {
+    color: #2dd4bf;
+}
+QLabel#ReconnectTitle[state="failed"] {
+    color: #f59e0b;
+}
+
+QLabel#ReconnectSubtitle {
+    color: #8a9099;
+    font-size: 14px;
+}
+
+
+/* ===================================================================
+ * 12. ONBOARDING WIZARD
+ * File: onboarding.py
+ * Ten-step first-launch modal. Heading sizes pick "big" mode for the
+ * welcome + done pages; everything else uses the standard heading.
+ * =================================================================== */
+
+QLabel#OnboardingHeading {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f5f7fa;
+}
+
+QLabel#OnboardingHeadingBig {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f5f7fa;
+}
+
+QLabel#OnboardingBody {
+    color: #c2c6cc;
+    font-size: 13px;
+}
+
+QLabel#OnboardingHint {
+    color: #8a9099;
+    font-size: 12px;
+}
+
+QLabel#OnboardingStatus {
+    color: #c2c6cc;
+}
+
+/* Status colour swaps for the controller / midi probe — set via
+ * dynamic property "state" (scanning|ok|error) so the inline restyle
+ * goes away. main_window.py / onboarding.py set the property and call
+ * style().polish(widget) after each change. */
+QLabel#OnboardingStatus[state="ok"] {
+    color: #2dd4bf;
+}
+QLabel#OnboardingStatus[state="error"] {
+    color: #f97373;
+}
+
+QFrame#OnboardingConnectorRow {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 6px;
+}
+
+QCheckBox#OnboardingConnectorCheck {
+    color: #f5f7fa;
+    font-weight: 500;
+}
+
+QLabel#OnboardingConnectorDesc {
+    color: #8a9099;
+    font-size: 12px;
+}
+
+QLabel#OnboardingConnectorStatus {
+    color: #2dd4bf;
+    font-size: 12px;
+}
+QLabel#OnboardingConnectorStatus[state="missing"] {
+    color: #8a9099;
+}
+QLabel#OnboardingConnectorStatus[state="error"] {
+    color: #f97373;
+}
+
+QFrame#OnboardingTriggerModeRow {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 6px;
+}
+
+QLabel#OnboardingTriggerModeName {
+    color: #2dd4bf;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#OnboardingTriggerModeDesc {
+    color: #8a9099;
+    font-size: 12px;
+}
+
+QLabel#OnboardingPolarDiagram {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 6px;
+    padding: 10px;
+    color: #2dd4bf;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+QPushButton#OnboardingSkipLink {
+    color: #8a9099;
+    background: transparent;
+    border: none;
+}
+QPushButton#OnboardingSkipLink:hover {
+    color: #f5f7fa;
+}
+
+QFrame#OnboardingFooter {
+    background-color: #16181d;
+    border-top: 1px solid #24262d;
+}
+
+
+/* ===================================================================
+ * 13. WORKSPACE — MAPPING EDITOR
+ * File: mapping_editor.py
+ * Mapping rows table + tip strip + close button + section divider.
+ * =================================================================== */
+
+QWidget#MappingTipStrip {
+    background: #1c2d44;
+    border-radius: 4px;
+}
+
+QLabel#MappingTipIcon {
+    font-size: 16px;
+    color: #3b82f6;
+    background: transparent;
+}
+
+QLabel#MappingTipText {
+    color: #93c5fd;
+    font-size: 11px;
+    background: transparent;
+}
+
+QPushButton#MappingTipCloseButton {
+    background: transparent;
+    border: none;
+    color: #93c5fd;
+    font-size: 14px;
+    padding: 0;
+}
+QPushButton#MappingTipCloseButton:hover {
+    color: #3b82f6;
+}
+
+QFrame#MappingDivider {
+    color: #1c1e25;
+}
+
+QLabel#MappingSectionLabel {
+    color: #8a9099;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+QPushButton#MappingActionChip {
+    background-color: #16181d;
+    color: #c2c6cc;
+    border: 1px solid #24262d;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+}
+QPushButton#MappingActionChip:hover {
+    color: #f5f7fa;
+    border-color: #3a3e48;
+}
+
+QPushButton#MappingCaptureButton {
+    font-size: 11px;
+    padding: 0;
+    border-radius: 4px;
+    background: #1c1e25;
+    color: #8a9099;
+    border: 1px solid #2c313b;
+}
+QPushButton#MappingCaptureButton:hover {
+    background: #252830;
+    color: #f5f7fa;
+}
+
+
+/* ===================================================================
+ * 14. WORKSPACE — TEMPLATE BUILDER TAB
+ * File: template_builder_tab.py
+ * Visual mapping diagram + binding form + starter-templates strip.
+ * NOTE: per-template tag colours stay data-driven in Python — the tag
+ * chip + Apply button take their accent from a runtime palette so the
+ * card hover ring also matches the tag colour.
+ * =================================================================== */
+
+QLabel#TemplateBuilderSelectionHeader {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f5f7fa;
+}
+
+QFrame#TemplateBuilderForm {
+    background: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 8px;
+    padding: 10px;
+}
+QFrame#TemplateBuilderForm QLabel {
+    color: #8a9099;
+    font-size: 11px;
+}
+
+QPushButton#TemplateBuilderSaveBinding {
+    background: #2dd4bf;
+    color: #0e0f12;
+    font-weight: 600;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+}
+QPushButton#TemplateBuilderSaveBinding:hover {
+    background: #4ae0cd;
+}
+
+QFrame#TemplatesPanel {
+    background: #0e0f12;
+    border: 1px solid #24262d;
+    border-radius: 8px;
+    padding: 6px;
+}
+
+QLabel#TemplatesPanelHeader {
+    color: #f5f7fa;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}
+
+QScrollArea#TemplatesPanelScroll {
+    background: transparent;
+    border: none;
+}
+
+QWidget#TemplatesPanelCardsHost {
+    background: transparent;
+}
+
+QFrame#TemplateCard {
+    background: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 6px;
+}
+QFrame#TemplateCard:hover {
+    border: 1px solid #2dd4bf;
+}
+
+QLabel#TemplateCardName {
+    color: #f5f7fa;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QLabel#TemplateCardDesc {
+    color: #8a9099;
+    font-size: 9px;
+}
+
+
+/* ===================================================================
+ * 15. WORKSPACE — VISUALISE TAB
+ * File: visualise_tab.py
+ * Tabbed sub-views (sparklines, heatmap, scope) inside the Visualise tab.
+ * =================================================================== */
+
+QTabWidget#VisualiseSubTabs::pane {
+    border: none;
+    background-color: #0e0f12;
+}
+QTabBar#VisualiseSubTabsBar::tab {
+    background-color: transparent;
+    color: #8a9099;
+    padding: 6px 12px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-right: 2px;
+    font-size: 11px;
+}
+QTabBar#VisualiseSubTabsBar::tab:selected {
+    color: #2dd4bf;
+    border-bottom: 2px solid #2dd4bf;
+}
+QTabBar#VisualiseSubTabsBar::tab:hover {
+    color: #c2c6cc;
+}
+
+QScrollArea#VisualiseScopeScroll {
+    border: none;
+}
+
+QLabel#VisualiseScopeHeading {
+    color: #8a9099;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+QFrame#VisualisePanelFrame {
+    background-color: #13151a;
+    border-radius: 8px;
+}
+
+QLabel#VisualiseStatLabel {
+    color: #5a606b;
+    font-size: 9px;
+    font-weight: 600;
+}
+
+QLabel#VisualiseStatValue {
+    color: #f5f7fa;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+
+/* ===================================================================
+ * 16. WORKSPACE — BLUETOOTH TAB
+ * File: bluetooth_tab.py
+ * =================================================================== */
+
+QLabel#BluetoothHeader {
+    font-size: 14px;
+    font-weight: 600;
+    color: #f5f7fa;
+}
+
+QLabel#BluetoothSubLabel {
+    color: #8a9099;
+}
+
+QPushButton#BluetoothDocsLink {
+    color: #666;
+    text-decoration: underline;
+    background: transparent;
+    border: none;
+}
+
+QLabel#BluetoothEmptyState {
+    color: #8a9099;
+    padding: 40px;
+}
+
+QFrame#BluetoothPairedDeviceCard {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 8px;
+    padding: 14px;
+}
+
+QLabel#BluetoothPairedDeviceTitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: #f5f7fa;
+}
+
+QLabel#BluetoothPairedDeviceMeta {
+    color: #8a9099;
+    font-size: 12px;
+}
+
+QLabel#BluetoothPairedDeviceStatus {
+    color: #8a9099;
+    font-size: 12px;
+    font-weight: 600;
+}
+QLabel#BluetoothPairedDeviceStatus[state="connected"] {
+    color: #2dd4bf;
+}
+
+
+/* ===================================================================
+ * 17. WORKSPACE — CONNECTORS TAB
+ * File: connectors_tab.py
+ * Install-host cards (Ableton, Resolume, etc.) with verify chips.
+ * =================================================================== */
+
+QLabel#ConnectorsSectionTitle {
+    color: #f5f7fa;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QFrame#ConnectorsSeparator {
+    color: #24262d;
+    margin: 6px 0;
+}
+
+QFrame#ConnectorsHostCard {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 8px;
+    padding: 14px;
+}
+
+QFrame#ConnectorsTemplateCard {
+    background-color: #0f1117;
+    border: 1px solid #1e2029;
+    border-radius: 6px;
+}
+
+QLabel#ConnectorsStatusLabel {
+    color: #8a9099;
+    font-size: 12px;
+}
+
+QLabel#ConnectorsVerifyChip {
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    background-color: #1d2028;
+    color: #c2c6cc;
+}
+QLabel#ConnectorsVerifyChip[verifyState="ok"] {
+    background-color: #1f3a36;
+    color: #2dd4bf;
+}
+QLabel#ConnectorsVerifyChip[verifyState="fail"] {
+    background-color: #3a1f1f;
+    color: #f97373;
+}
+
+QLabel#ConnectorsChip {
+    background-color: #1d2028;
+    color: #c2c6cc;
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+
+/* ===================================================================
+ * 18. WORKSPACE — HELP TAB
+ * File: help_tab.py
+ * Cards, FAQ rows, shortcut keys, troubleshooting bullets, version info.
+ * =================================================================== */
+
+QFrame#HelpCard {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 10px;
+}
+
+QFrame#HelpFaqRow {
+    background-color: #11131a;
+    border: 1px solid #1f232b;
+    border-radius: 8px;
+}
+
+QPushButton#HelpFaqToggle {
+    text-align: left;
+    padding: 12px 14px;
+    background: transparent;
+    border: none;
+    color: #e6e8eb;
+    font-weight: 500;
+}
+QPushButton#HelpFaqToggle:hover {
+    color: #2dd4bf;
+}
+
+QLabel#HelpFaqAnswer {
+    color: #c2c6cc;
+    padding: 0 14px 14px 14px;
+    font-size: 12px;
+}
+
+QWidget#HelpLogo3D {
+    background: transparent;
+    border: 0;
+}
+
+QLabel#HelpShortcutKey {
+    color: #2dd4bf;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: #11131a;
+    border: 1px solid #1f232b;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+QLabel#HelpShortcutDesc {
+    color: #e6e8eb;
+}
+
+QLabel#HelpBulletDot {
+    color: #2dd4bf;
+    font-size: 14px;
+}
+
+QLabel#HelpBulletText {
+    color: #c2c6cc;
+    font-size: 12px;
+}
+
+QLabel#HelpLinksNote {
+    color: #8a9099;
+    font-size: 12px;
+}
+
+QLabel#HelpVersionLabel {
+    color: #8a9099;
+    font-weight: 500;
+    min-width: 100px;
+}
+
+QLabel#HelpVersionValue {
+    color: #e6e8eb;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+}
+
+
+/* ===================================================================
+ * 19. DIALOG — LATENCY DIALOG
+ * File: latency_dialog.py
+ * Measures end-to-end controller→MIDI latency over multiple samples.
+ * =================================================================== */
+
+QDialog#LatencyDialog {
+    background-color: #0e0f12;
+}
+
+QLabel#LatencyDialogTitle {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f5f7fa;
+}
+
+QLabel#LatencyDialogSub {
+    color: #8a9099;
+    font-size: 12px;
+}
+
+QWidget#LatencyDialogCard {
+    background-color: #11131a;
+    border: 1px solid #1f232b;
+    border-radius: 8px;
+    padding: 16px 20px;
+}
+
+QLabel#LatencyDialogPrompt {
+    color: #e6e8eb;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel#LatencyDialogCounter {
+    color: #2dd4bf;
+    font-size: 36px;
+    font-weight: 700;
+    font-family: ui-monospace, Menlo, monospace;
+}
+
+QLabel#LatencyDialogSectionLabel {
+    color: #8a9099;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+QLabel#LatencyDialogResultLabel {
+    color: #c2c6cc;
+    font-size: 12px;
+}
+
+
+/* ===================================================================
+ * 20. DIALOG — TEST WIZARD
+ * File: test_wizard.py
+ * Step-through controller test (press each button / wiggle sticks).
+ * =================================================================== */
+
+QLabel#TestWizardTitle {
+    color: #f5f7fa;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+QLabel#TestWizardSub {
+    color: #8a9099;
+}
+
+QLabel#TestWizardProgress {
+    color: #8a9099;
+    padding: 8px 0;
+}
+
+QFrame#TestWizardStepFrame {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 8px;
+    padding: 14px;
+}
+
+QLabel#TestWizardStepLabel {
+    color: #f5f7fa;
+    font-size: 14px;
+}
+
+QLabel#TestWizardStepCheckmark {
+    color: #4ade80;
+    font-size: 20px;
+}
+
+
+/* ===================================================================
+ * 21. ACTIVITY TIMELINE
+ * File: activity_timeline.py
+ * Session event log inside the Visualise tab.
+ * =================================================================== */
+
+QWidget#ActivityTimeline {
+    background-color: #0e0f12;
+}
+
+QLabel#ActivityTimelineTitle {
+    color: #8a9099;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+QPushButton#ActivityTimelineClearButton {
+    background: #1f232b;
+    color: #8a9099;
+    border: 1px solid #2c313b;
+    border-radius: 4px;
+    font-size: 10px;
+    padding: 0 10px;
+}
+QPushButton#ActivityTimelineClearButton:hover {
+    background: #262b35;
+    color: #d0d4dc;
+}
+
+QListWidget#ActivityTimelineList {
+    background: #0e0f12;
+    border: none;
+}
+QListWidget#ActivityTimelineList::item {
+    background: #16181d;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-bottom: 2px;
+}
+QListWidget#ActivityTimelineList::item:selected {
+    background: #24272f;
+}
+
+QLabel#ActivityTimelineEmptyLabel {
+    color: #5a606b;
+    font-size: 11px;
+}
+
+
+/* ===================================================================
+ * 22. EASTER EGG CONSOLE (about_tab.py)
+ * =================================================================== */
+
+QLabel#AboutEasterEggConsole {
+    background-color: #0a0e27;
+    color: #00d084;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 12px;
+    border-radius: 4px;
+}
+
+
+/* ===================================================================
+ * 23. SMALL DIALOGS — calibration, capture, haptic input
+ * Files: calibration_dialog.py, capture_dialog.py, haptic_input_dialog.py
+ * =================================================================== */
+
+QLabel#CalibrationDialogTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f5f7fa;
+}
+QLabel#CalibrationDialogSub {
+    color: #8a9099;
+}
+QLabel#CalibrationDialogResult {
+    color: #c2c6cc;
+    padding-top: 8px;
+}
+
+QLabel#CaptureDialogInstruction {
+    font-size: 14px;
+    font-weight: 600;
+    color: #f5f7fa;
+}
+QLabel#CaptureDialogPreview {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 4px;
+    padding: 12px;
+    color: #2dd4bf;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 13px;
+}
+
+QLabel#HapticInputDialogIntro {
+    color: #8a9099;
+}
+
+
+/* ===================================================================
+ * 24. COMMAND PALETTE
+ * File: command_palette.py
+ * Spotlight-style ⌘K palette overlay.
+ * =================================================================== */
+
+QFrame#CommandPaletteCard {
+    background-color: #16181d;
+    border: 1px solid #2c313b;
+    border-radius: 8px;
+}
+
+QLineEdit#CommandPaletteSearch {
+    background-color: #0e0f12;
+    color: #f5f7fa;
+    border: 1px solid #24262d;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-size: 14px;
+}
+QLineEdit#CommandPaletteSearch:focus {
+    border-color: #2dd4bf;
+}
+
+QListWidget#CommandPaletteList {
+    background-color: transparent;
+    border: none;
+    color: #e6e8eb;
+}
+QListWidget#CommandPaletteList::item {
+    padding: 6px 10px;
+    border-radius: 4px;
+}
+QListWidget#CommandPaletteList::item:selected {
+    background-color: #1f3a36;
+    color: #2dd4bf;
+}
+
+QLabel#CommandPaletteHint {
+    color: #5a606b;
+    font-size: 11px;
+}
+
+
+/* ===================================================================
+ * 25. HUD OVERLAY
+ * File: hud_overlay.py
+ * On-screen overlay shown over the bridge while performing.
+ * Status-dot colour is driven at runtime (active/idle/error) — those
+ * three states stay inline because they swap every disconnect tick.
+ * =================================================================== */
+
+QLabel#HudPresetLabel {
+    color: #f5f7fa;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#HudThroughputLabel {
+    color: #8a9099;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+}
+
+
+/* ===================================================================
+ * 26. MARKETPLACE TAB
+ * File: marketplace_tab.py
+ * Preset cards with tag chips — chip backgrounds vary by tag (runtime).
+ * =================================================================== */
+
+QFrame#MarketplaceCard {
+    background-color: #16181d;
+    border: 1px solid #24262d;
+    border-radius: 8px;
+}
+QFrame#MarketplaceCard:hover {
+    border-color: #3a3e48;
+}
+
+
+/* ===================================================================
+ * 27. RESPONSIVE TAB WIDGET
+ * File: responsive_tab_widget.py
+ * Wraps QTabBar — pinches to a QComboBox at narrow widths.
+ * =================================================================== */
+
+QComboBox#ResponsiveTabPickerCombo {
+    background: #0e0f12;
+    color: #f5f7fa;
+    border: 1px solid #2c313b;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 500;
+}
+QComboBox#ResponsiveTabPickerCombo::drop-down {
+    border: none;
+}
+
+QTabBar#ResponsiveTabBar::tab {
+    min-width: 0;
+    padding: 8px 14px;
+}
+
+
+/* ===================================================================
+ * 28. SETTINGS PANEL — DANGER ZONE
+ * File: settings_panel.py
+ * Red-tinted group box for reset-everything style actions.
+ * =================================================================== */
+
+QGroupBox#SettingsDangerZone {
+    border: 1px solid #c0392b;
+    border-radius: 4px;
+    margin-top: 18px;
+    padding-top: 12px;
+}
+QGroupBox#SettingsDangerZone::title {
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 6px;
+    color: #c0392b;
+}
+
+/* Search-filter highlight on settings groups. */
+QGroupBox[searchState="match"] {
+    border: 2px solid #1abc9c;
+    border-radius: 4px;
+}
+QGroupBox[searchState="match"]::title {
+    font-weight: bold;
+    color: #1abc9c;
+}
+QGroupBox[searchState="dim"] {
+    border: 1px solid #bdc3c7;
+    border-radius: 4px;
+}
+QGroupBox[searchState="dim"]::title {
+    color: #7f8c8d;
+}
+
+
+/* ===================================================================
+ * 29. THROUGHPUT PANEL FRAME
+ * File: throughput_panel.py
+ * =================================================================== */
+
+QWidget#ThroughputPanel {
+    background: #0e0f12;
+    border: 1px solid #1c1e25;
+    border-radius: 6px;
+}
+
+
+/* ===================================================================
+ * 30. USAGE HEATMAP CONTROLS
+ * File: usage_heatmap.py
+ * =================================================================== */
+
+QLabel#UsageHeatmapLabel {
+    color: #8a9099;
+    font-size: 11px;
+}
+
+QLabel#UsageHeatmapTitle {
+    color: #8a9099;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+QPushButton#UsageHeatmapResetButton {
+    background: #1f232b;
+    color: #8a9099;
+    border: 1px solid #2c313b;
+    border-radius: 4px;
+    font-size: 10px;
+    padding: 4px 10px;
+}
+QPushButton#UsageHeatmapResetButton:hover {
+    background: #262b35;
+    color: #d0d4dc;
+}
+
+QLabel#UsageHeatmapTop5Title {
+    color: #5a606b;
+    font-size: 9px;
+    font-weight: 600;
+}
+
+
+/* ===================================================================
+ * Global scrollbars — minimal style, slim track, soft thumb.
+ * =================================================================== */
+
 QScrollBar:vertical {
     background: #0e0f12;
     width: 12px;
@@ -302,3 +1583,13 @@ QScrollBar::right-arrow:horizontal {
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     background: transparent;
 }
+
+
+/* ===================================================================
+ * SPLITTER HANDLES — INTENTIONALLY NOT STYLED HERE
+ * Global QSS rules that customise QSplitter::handle break drag
+ * dispatch on macOS Qt 6. The three splitters in main_window.py
+ * (body_splitter, content_splitter, _live_splitter) own their look
+ * via per-widget setStyleSheet calls in Python. Don't add a global
+ * QSplitter::handle rule here — it will silently break dragging.
+ * =================================================================== */

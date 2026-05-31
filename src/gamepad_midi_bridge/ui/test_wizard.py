@@ -50,43 +50,41 @@ class ControllerTestWizard(QDialog):
         v.setContentsMargins(24, 24, 24, 24)
         v.setSpacing(16)
 
-        # Title
+        # Title — visual rules in styles.qss → "TEST WIZARD" section.
         title = QLabel("Test Your Controller")
+        title.setObjectName("TestWizardTitle")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
         title.setFont(title_font)
-        title.setStyleSheet("color: #f5f7fa;")
         v.addWidget(title)
 
         # Subtitle
         sub = QLabel(f"Connected: {controller_info.name}")
-        sub.setStyleSheet("color: #8a9099;")
+        sub.setObjectName("TestWizardSub")
         v.addWidget(sub)
 
         # Progress
         self._progress = QLabel()
-        self._progress.setStyleSheet("color: #8a9099; padding: 8px 0;")
+        self._progress.setObjectName("TestWizardProgress")
         v.addWidget(self._progress)
 
         # Current step display
         step_frame = QFrame()
-        step_frame.setStyleSheet(
-            "QFrame { border: 1px solid #4a4f59; border-radius: 6px; padding: 16px; }"
-        )
+        step_frame.setObjectName("TestWizardStepFrame")
         step_layout = QVBoxLayout(step_frame)
         step_layout.setContentsMargins(0, 0, 0, 0)
 
         self._step_label = QLabel()
+        self._step_label.setObjectName("TestWizardStepLabel")
         step_font = QFont()
         step_font.setPointSize(14)
         step_font.setBold(True)
         self._step_label.setFont(step_font)
-        self._step_label.setStyleSheet("color: #f5f7fa;")
         step_layout.addWidget(self._step_label)
 
         self._step_checkmark = QLabel()
-        self._step_checkmark.setStyleSheet("color: #4ade80; font-size: 20px;")
+        self._step_checkmark.setObjectName("TestWizardStepCheckmark")
         step_layout.addWidget(self._step_checkmark, alignment=Qt.AlignCenter)
 
         v.addWidget(step_frame, 1)

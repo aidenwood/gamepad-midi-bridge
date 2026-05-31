@@ -285,18 +285,11 @@ class TemplateBuilderTab(QWidget):
         v.setContentsMargins(8, 0, 0, 0)
         v.setSpacing(10)
         self._sel_header = QLabel("Selected: —")
-        self._sel_header.setStyleSheet(
-            "font-size: 15px; font-weight: 600; color: #f5f7fa;"
-        )
+        self._sel_header.setObjectName("TemplateBuilderSelectionHeader")
         v.addWidget(self._sel_header)
 
         form = QFrame()
-        form.setObjectName("BuilderForm")
-        form.setStyleSheet(
-            "QFrame#BuilderForm { background:#16181d; border:1px solid #24262d; "
-            "border-radius:8px; padding:10px; }"
-            "QLabel { color:#8a9099; font-size:11px; }"
-        )
+        form.setObjectName("TemplateBuilderForm")
         fl = QVBoxLayout(form); fl.setSpacing(6)
 
         row_type = QHBoxLayout()
@@ -325,10 +318,7 @@ class TemplateBuilderTab(QWidget):
 
         row_btn = QHBoxLayout()
         self._save_btn = QPushButton("Save binding")
-        self._save_btn.setObjectName("PrimaryButton")
-        self._save_btn.setStyleSheet(
-            "background:#2dd4bf; color:#0e0f12; font-weight:600; padding:6px 12px;"
-        )
+        self._save_btn.setObjectName("TemplateBuilderSaveBinding")
         self._save_btn.clicked.connect(self._on_save_binding)
         self._clear_btn = QPushButton("Clear binding")
         self._clear_btn.clicked.connect(self._on_clear_binding)
@@ -383,25 +373,21 @@ class TemplateBuilderTab(QWidget):
         """Scrollable row of starter-template cards with one-click Apply."""
         outer = QFrame()
         outer.setObjectName("TemplatesPanel")
-        outer.setStyleSheet(
-            "QFrame#TemplatesPanel { background:#0e0f12; border:1px solid #24262d; "
-            "border-radius:8px; padding:6px; }"
-        )
         ol = QVBoxLayout(outer); ol.setContentsMargins(6, 6, 6, 6); ol.setSpacing(4)
 
         hdr = QLabel("Starter Templates")
-        hdr.setStyleSheet("color:#f5f7fa; font-size:12px; font-weight:600;")
+        hdr.setObjectName("TemplatesPanelHeader")
         ol.addWidget(hdr)
 
         scroll = QScrollArea()
+        scroll.setObjectName("TemplatesPanelScroll")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFixedHeight(104)
-        scroll.setStyleSheet("background:transparent; border:none;")
 
         cards_widget = QWidget()
-        cards_widget.setStyleSheet("background:transparent;")
+        cards_widget.setObjectName("TemplatesPanelCardsHost")
         cards_layout = QHBoxLayout(cards_widget)
         cards_layout.setContentsMargins(0, 0, 0, 0)
         cards_layout.setSpacing(8)
@@ -421,6 +407,9 @@ class TemplateBuilderTab(QWidget):
         card = QFrame()
         card.setObjectName("TemplateCard")
         card.setFixedWidth(160)
+        # Base styles live in styles.qss → "TEMPLATE BUILDER TAB". Hover ring
+        # uses the tag's runtime accent colour so it stays inline as a
+        # data-driven override.
         card.setStyleSheet(
             f"QFrame#TemplateCard {{ background:#16181d; border:1px solid #24262d; "
             f"border-radius:6px; }}"
@@ -439,7 +428,7 @@ class TemplateBuilderTab(QWidget):
         cl.addWidget(tag_lbl)
 
         name_lbl = QLabel(tmpl.name)
-        name_lbl.setStyleSheet("color:#f5f7fa; font-size:11px; font-weight:600;")
+        name_lbl.setObjectName("TemplateCardName")
         cl.addWidget(name_lbl)
 
         # Truncate description to keep cards compact.
@@ -447,8 +436,8 @@ class TemplateBuilderTab(QWidget):
         if len(desc) > 72:
             desc = desc[:69] + "…"
         desc_lbl = QLabel(desc)
+        desc_lbl.setObjectName("TemplateCardDesc")
         desc_lbl.setWordWrap(True)
-        desc_lbl.setStyleSheet("color:#8a9099; font-size:9px;")
         desc_lbl.setFixedHeight(30)
         cl.addWidget(desc_lbl)
 

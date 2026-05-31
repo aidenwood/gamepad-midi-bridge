@@ -16,17 +16,16 @@ class ProLockOverlay(QWidget):
     def __init__(self, feature_title: str, description: str,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setStyleSheet("background-color: rgba(14, 15, 18, 240);")
+        # All visual rules in styles.qss → "PRO LOCK OVERLAY" section.
+        self.setObjectName("ProLockOverlay")
+        self.setAttribute(Qt.WA_StyledBackground, True)
 
         outer = QVBoxLayout(self)
         outer.setAlignment(Qt.AlignCenter)
 
         card = QFrame()
+        card.setObjectName("ProLockCard")
         card.setMaximumWidth(440)
-        card.setStyleSheet(
-            "background-color: #16181d; border: 1px solid #24262d; "
-            "border-radius: 12px; padding: 28px;"
-        )
 
         inner = QVBoxLayout(card)
         inner.setSpacing(12)
@@ -35,21 +34,15 @@ class ProLockOverlay(QWidget):
         badge.setObjectName("ProBadge")
         badge.setAlignment(Qt.AlignCenter)
         badge.setFixedWidth(48)
-        badge.setStyleSheet(
-            "background-color: #2dd4bf; color: #0e0f12; border-radius: 4px; "
-            "padding: 2px 8px; font-size: 10px; font-weight: 700;"
-        )
         inner.addWidget(badge)
 
         title = QLabel(feature_title)
         title.setObjectName("ProLockTitle")
-        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f5f7fa;")
         title.setWordWrap(True)
         inner.addWidget(title)
 
         desc = QLabel(description)
         desc.setObjectName("ProLockSub")
-        desc.setStyleSheet("color: #8a9099; font-size: 13px;")
         desc.setWordWrap(True)
         inner.addWidget(desc)
 

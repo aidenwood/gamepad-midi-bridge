@@ -92,56 +92,40 @@ class MidiLogPanel(QWidget):
     def _build_header(self) -> QFrame:
         bar = QFrame()
         # No border-top — QSplitter handle above is the visual divider.
-        bar.setStyleSheet("background-color: #16181d;")
+        # Styling lives in styles.qss → "MIDI ACTIVITY LOG PANEL".
+        bar.setObjectName("MidiLogPanelHeader")
+        bar.setAttribute(Qt.WA_StyledBackground, True)
         bar.setFixedHeight(36)
         h = QHBoxLayout(bar)
         h.setContentsMargins(12, 5, 8, 5)
         h.setSpacing(8)
 
         title = QLabel("MIDI ACTIVITY")
+        title.setObjectName("MidiLogPanelTitle")
         title.setMinimumHeight(20)
-        title.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 1px;"
-        )
         h.addWidget(title)
         h.addStretch(1)
 
         self._filter_combo = QComboBox()
+        self._filter_combo.setObjectName("MidiLogPanelFilterCombo")
         self._filter_combo.setMaximumWidth(140)
         self._filter_combo.setFixedHeight(26)
-        # padding 0 vertical so the combo's rendered height matches the
-        # fixed 26 px and the dropdown doesn't clip its baseline.
-        self._filter_combo.setStyleSheet(
-            "QComboBox { color: #c2c6cc; background-color: #0e0f12; "
-            "border: 1px solid #2c313b; border-radius: 3px; "
-            "padding: 0 6px; font-size: 11px; }"
-            "QComboBox::drop-down { border: none; }"
-        )
         for f in MidiFilter:
             self._filter_combo.addItem(f.value, f)
         self._filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         h.addWidget(self._filter_combo)
 
         clear_btn = QPushButton("Clear")
+        clear_btn.setObjectName("MidiLogPanelClearButton")
         clear_btn.setFlat(True)
         clear_btn.setFixedHeight(26)
-        # Reset global QPushButton padding/border so fixed-height matches.
-        clear_btn.setStyleSheet(
-            "QPushButton { color: #8a9099; font-size: 11px; "
-            "padding: 0 8px; border: none; background: transparent; }"
-            "QPushButton:hover { color: #c2c6cc; }"
-        )
         clear_btn.clicked.connect(self._clear_all)
         h.addWidget(clear_btn)
 
         self._toggle_btn = QPushButton("▾")
+        self._toggle_btn.setObjectName("MidiLogPanelToggleButton")
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setFixedSize(28, 26)
-        self._toggle_btn.setStyleSheet(
-            "QPushButton { color: #c2c6cc; font-size: 14px; "
-            "padding: 0; margin: 0; border: none; background: transparent; }"
-        )
         self._toggle_btn.clicked.connect(self.toggle_collapsed)
         h.addWidget(self._toggle_btn)
 
@@ -154,10 +138,7 @@ class MidiLogPanel(QWidget):
         v.setSpacing(0)
 
         self._list = QListWidget()
-        self._list.setStyleSheet(
-            "QListWidget { background-color: #0e0f12; color: #c2c6cc; "
-            "border: none; selection-background-color: #1f3a36; }"
-        )
+        self._list.setObjectName("MidiLogPanelList")
         # Minimum height keeps the list scrollable when fully expanded;
         # the parent QSplitter owns the actual size.
         self._list.setMinimumHeight(80)

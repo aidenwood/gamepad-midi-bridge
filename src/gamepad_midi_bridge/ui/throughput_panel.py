@@ -33,9 +33,8 @@ class ThroughputPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(120)
-        self.setStyleSheet(
-            "QWidget { background: #0e0f12; border: 1px solid #1c1e25; border-radius: 6px; }"
-        )
+        self.setObjectName("ThroughputPanel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
 
         # Ring buffer: (timestamp_s, outbound_per_sec, inbound_per_sec)
         # Capacity 60 → 1 entry per second, 60s history

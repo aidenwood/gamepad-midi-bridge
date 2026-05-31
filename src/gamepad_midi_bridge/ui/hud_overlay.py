@@ -73,10 +73,7 @@ class HudOverlay(QWidget):
 
         # Row 1: preset name
         self._preset_label = QLabel(self._preset_name)
-        self._preset_label.setStyleSheet(
-            "color: #f5f7fa; font-size: 11px; font-weight: 700;"
-            " background: transparent;"
-        )
+        self._preset_label.setObjectName("HudPresetLabel")
         outer.addWidget(self._preset_label)
 
         # Row 2: throughput + status dot
@@ -85,13 +82,10 @@ class HudOverlay(QWidget):
         row2.setSpacing(6)
 
         self._throughput_label = QLabel("▲0 ▼0 msg/s")
-        self._throughput_label.setStyleSheet(
-            "color: #8a9099; font-size: 10px;"
-            " font-family: ui-monospace, Menlo, monospace;"
-            " background: transparent;"
-        )
+        self._throughput_label.setObjectName("HudThroughputLabel")
         row2.addWidget(self._throughput_label, 1)
 
+        # Status dot — colour swaps at runtime via set_status(); stays inline.
         self._status_dot = QLabel("●")
         self._status_dot.setStyleSheet(
             "color: #2c313b; font-size: 14px; background: transparent;"

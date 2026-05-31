@@ -303,10 +303,7 @@ class AboutTab(QWidget):
             "> –aiden\n\n"
         )
         console.setText(console_text)
-        console.setStyleSheet(
-            "background-color: #0a0e27; color: #00d084; font-family: monospace; "
-            "font-size: 12px; padding: 12px; border-radius: 4px;"
-        )
+        console.setObjectName("AboutEasterEggConsole")
         console.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(console)
 

@@ -70,7 +70,7 @@ def _row_label(text: str) -> UILabel:
 def _divider() -> QFrame:
     line = QFrame()
     line.setFrameShape(QFrame.HLine)
-    line.setStyleSheet("color: #1c1e25;")
+    line.setObjectName("InspectorRendererDivider")
     return line
 
 

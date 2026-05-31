@@ -58,36 +58,33 @@ class MappingEditor(QWidget):
         
         if not self._tip_dismissed:
             tip_strip = QWidget()
-            # Style belongs on the widget, not on its layout — QHBoxLayout
-            # has no setStyleSheet method.
-            tip_strip.setStyleSheet("background: #1c2d44; border-radius: 4px;")
+            # Visual rules in styles.qss → "MAPPING EDITOR" section.
+            tip_strip.setObjectName("MappingTipStrip")
+            tip_strip.setAttribute(Qt.WA_StyledBackground, True)
             tip_layout = QHBoxLayout(tip_strip)
             tip_layout.setContentsMargins(10, 8, 10, 8)
             tip_layout.setSpacing(8)
-            
+
             tip_icon = QLabel("💡")
-            tip_icon.setStyleSheet("font-size: 16px; color: #3b82f6;")
+            tip_icon.setObjectName("MappingTipIcon")
             tip_layout.addWidget(tip_icon)
-            
+
             tip_text = QLabel("Click any row to edit its config in the right panel. 4 trigger modes available — try Latch for toggle-style triggers.")
-            tip_text.setStyleSheet("color: #93c5fd; font-size: 11px;")
+            tip_text.setObjectName("MappingTipText")
             tip_text.setWordWrap(True)
             tip_layout.addWidget(tip_text, 1)
-            
+
             def _dismiss_tip() -> None:
                 self._tip_dismissed = True
                 settings.setValue("mapping_editor_tip_dismissed", True)
                 tip_strip.setVisible(False)
-            
+
             close_btn = QPushButton("×")
-            close_btn.setStyleSheet(
-                "color: #93c5fd; border: none; background: transparent; "
-                "font-size: 16px; padding: 0; min-width: 20px;"
-            )
+            close_btn.setObjectName("MappingTipCloseButton")
             close_btn.setFlat(True)
             close_btn.clicked.connect(_dismiss_tip)
             tip_layout.addWidget(close_btn)
-            
+
             v.addWidget(tip_strip)
 
         # ── Mapping-globals shortcut button ──
@@ -126,7 +123,7 @@ class MappingEditor(QWidget):
         v.addWidget(port_row)
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet('color: #1c1e25;')
+        line.setObjectName("MappingDivider")
         v.addWidget(line)
 
 
@@ -556,10 +553,7 @@ class MappingEditor(QWidget):
 
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setStyleSheet(
-            "color: #8a9099; font-size: 11px; font-weight: 700; "
-            "letter-spacing: 1px; padding-top: 8px;"
-        )
+        lbl.setObjectName("MappingSectionLabel")
         return lbl
 
     def _make_table(self, headers: list, capture_kind: str = "") -> QTableWidget:
@@ -606,13 +600,9 @@ class MappingEditor(QWidget):
             table.setItem(r, 1, bi)
             if capture_kind:
                 btn = QPushButton("⊙")
+                btn.setObjectName("MappingCaptureButton")
                 btn.setToolTip("Press a controller input to assign this row")
                 btn.setFixedSize(28, 22)
-                btn.setStyleSheet(
-                    "QPushButton { font-size: 11px; padding: 0; border-radius: 4px; "
-                    "background: #1c1e25; color: #8a9099; border: 1px solid #2c313b; }"
-                    "QPushButton:hover { background: #252830; color: #f5f7fa; }"
-                )
                 btn.clicked.connect(
                     lambda _checked, row=r, kind=capture_kind, tbl=table:
                     self._on_capture_clicked(tbl, row, kind)

@@ -56,6 +56,14 @@ def mark_complete() -> None:
     config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
+def _set_state(widget: QWidget, state: str) -> None:
+    """Set the ``state`` dynamic property and re-polish so the QSS rule
+    (e.g. ``QLabel#OnboardingStatus[state="ok"]``) re-evaluates."""
+    widget.setProperty("state", state)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+
+
 # ============================================================== wizard
 
 class OnboardingWizard(QDialog):
@@ -116,7 +124,7 @@ class OnboardingWizard(QDialog):
     def _build_controller(self) -> QWidget:
         page, v = self._page_shell("Looking for your controller…")
         self._controller_status = QLabel("Scanning…")
-        self._controller_status.setStyleSheet("color: #c2c6cc;")
+        self._controller_status.setObjectName("OnboardingStatus")
         self._controller_status.setWordWrap(True)
         v.addWidget(self._controller_status)
 
@@ -124,7 +132,7 @@ class OnboardingWizard(QDialog):
             "Works with PS5 DualSense, Xbox, Switch Pro, and most generic "
             "gamepads. USB or Bluetooth — your call."
         )
-        hint.setStyleSheet("color: #8a9099; font-size: 12px;")
+        hint.setObjectName("OnboardingHint")
         hint.setWordWrap(True)
         v.addWidget(hint)
 
@@ -139,7 +147,7 @@ class OnboardingWizard(QDialog):
     def _build_midi(self) -> QWidget:
         page, v = self._page_shell("Opening a virtual MIDI port…")
         self._midi_status = QLabel("Probing the MIDI backend…")
-        self._midi_status.setStyleSheet("color: #c2c6cc;")
+        self._midi_status.setObjectName("OnboardingStatus")
         self._midi_status.setWordWrap(True)
         v.addWidget(self._midi_status)
 
@@ -161,7 +169,7 @@ class OnboardingWizard(QDialog):
             "We'll write a small mapping file into each host's config folder. "
             "You can manage these later from the Connectors tab."
         )
-        sub.setStyleSheet("color: #8a9099;")
+        sub.setObjectName("OnboardingHint")
         sub.setWordWrap(True)
         v.addWidget(sub)
 
@@ -181,27 +189,24 @@ class OnboardingWizard(QDialog):
 
     def _build_connector_row(self, connector) -> QWidget:
         row = QFrame()
-        row.setStyleSheet(
-            "QFrame { background-color: #16181d; border: 1px solid #24262d; "
-            "border-radius: 6px; }"
-        )
+        row.setObjectName("OnboardingConnectorRow")
         h = QHBoxLayout(row)
         h.setContentsMargins(14, 12, 14, 12)
         h.setSpacing(12)
 
         check = QCheckBox(connector.display_name)
-        check.setStyleSheet("color: #f5f7fa; font-weight: 500;")
+        check.setObjectName("OnboardingConnectorCheck")
         h.addWidget(check)
 
         desc = QLabel(connector.description or "")
-        desc.setStyleSheet("color: #8a9099; font-size: 12px;")
+        desc.setObjectName("OnboardingConnectorDesc")
         desc.setWordWrap(True)
         h.addWidget(desc, 1)
 
         install_btn = QPushButton("Install")
         install_btn.setObjectName("PrimaryButton")
         status = QLabel("")
-        status.setStyleSheet("color: #2dd4bf; font-size: 12px;")
+        status.setObjectName("OnboardingConnectorStatus")
         h.addWidget(status)
         h.addWidget(install_btn)
 
@@ -213,7 +218,7 @@ class OnboardingWizard(QDialog):
         if not hosts:
             install_btn.setEnabled(False)
             status.setText("not detected")
-            status.setStyleSheet("color: #8a9099; font-size: 12px;")
+            _set_state(status, "missing")
 
         def do_install() -> None:
             check.setChecked(True)
@@ -232,7 +237,7 @@ class OnboardingWizard(QDialog):
                 send_event("onboarding_connector_installed", connector=connector.slug)
             else:
                 status.setText("failed — see Connectors tab")
-                status.setStyleSheet("color: #f97373; font-size: 12px;")
+                _set_state(status, "error")
 
         install_btn.clicked.connect(do_install)
         return row
@@ -252,7 +257,7 @@ class OnboardingWizard(QDialog):
             "L2 and R2 now have four output modes — pick per-trigger in the "
             "Mapping tab:"
         )
-        intro.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        intro.setObjectName("OnboardingBody")
         intro.setWordWrap(True)
         v.addWidget(intro)
 
@@ -267,21 +272,16 @@ class OnboardingWizard(QDialog):
         ]
         for slug, desc in modes:
             row = QFrame()
-            row.setStyleSheet(
-                "QFrame { background-color: #16181d; border: 1px solid #24262d; "
-                "border-radius: 6px; }"
-            )
+            row.setObjectName("OnboardingTriggerModeRow")
             h = QHBoxLayout(row)
             h.setContentsMargins(12, 8, 12, 8)
             h.setSpacing(10)
             name_lbl = QLabel(slug)
-            name_lbl.setStyleSheet(
-                "color: #2dd4bf; font-size: 12px; font-weight: 600;"
-            )
+            name_lbl.setObjectName("OnboardingTriggerModeName")
             name_lbl.setFixedWidth(64)
             h.addWidget(name_lbl)
             desc_lbl = QLabel(desc)
-            desc_lbl.setStyleSheet("color: #8a9099; font-size: 12px;")
+            desc_lbl.setObjectName("OnboardingTriggerModeDesc")
             desc_lbl.setWordWrap(True)
             h.addWidget(desc_lbl, 1)
             v.addWidget(row)
@@ -289,8 +289,8 @@ class OnboardingWizard(QDialog):
         v.addStretch(1)
         btn_row = QHBoxLayout()
         skip = QPushButton("Skip")
+        skip.setObjectName("OnboardingSkipLink")
         skip.setFlat(True)
-        skip.setStyleSheet("color: #8a9099;")
         skip.clicked.connect(self._go_next)
         btn_row.addWidget(skip)
         btn_row.addStretch(1)
@@ -310,20 +310,20 @@ class OnboardingWizard(QDialog):
             "Enable it under Settings → Haptics → MIDI → Trigger. Works over USB "
             "and Bluetooth. Your DAW plays the notes; your hands feel them."
         )
-        body.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        body.setObjectName("OnboardingBody")
         body.setWordWrap(True)
         v.addWidget(body)
 
         tip = QLabel("Requires a PS5 DualSense controller. Xbox and generic pads receive no haptic signal.")
-        tip.setStyleSheet("color: #8a9099; font-size: 12px;")
+        tip.setObjectName("OnboardingHint")
         tip.setWordWrap(True)
         v.addWidget(tip)
 
         v.addStretch(1)
         btn_row = QHBoxLayout()
         skip = QPushButton("Skip")
+        skip.setObjectName("OnboardingSkipLink")
         skip.setFlat(True)
-        skip.setStyleSheet("color: #8a9099;")
         skip.clicked.connect(self._go_next)
         btn_row.addWidget(skip)
         btn_row.addStretch(1)
@@ -342,7 +342,7 @@ class OnboardingWizard(QDialog):
             "Sweep a filter by rotating the stick; control wet/dry by how far you "
             "push it."
         )
-        body.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        body.setObjectName("OnboardingBody")
         body.setWordWrap(True)
         v.addWidget(body)
 
@@ -351,26 +351,22 @@ class OnboardingWizard(QDialog):
             "  angle  →  CC 1  (0 – 127, full rotation)\n"
             "  magnitude  →  CC 2  (0 = centre, 127 = full push)"
         )
-        diagram.setStyleSheet(
-            "background-color: #16181d; border: 1px solid #24262d; "
-            "border-radius: 6px; padding: 10px; "
-            "color: #2dd4bf; font-family: monospace; font-size: 12px;"
-        )
+        diagram.setObjectName("OnboardingPolarDiagram")
         v.addWidget(diagram)
 
         hint = QLabel(
             "Enable per-stick in Mapping → Axes → Left Stick / Right Stick → "
             "Mode → Polar."
         )
-        hint.setStyleSheet("color: #8a9099; font-size: 12px;")
+        hint.setObjectName("OnboardingHint")
         hint.setWordWrap(True)
         v.addWidget(hint)
 
         v.addStretch(1)
         btn_row = QHBoxLayout()
         skip = QPushButton("Skip")
+        skip.setObjectName("OnboardingSkipLink")
         skip.setFlat(True)
-        skip.setStyleSheet("color: #8a9099;")
         skip.clicked.connect(self._go_next)
         btn_row.addWidget(skip)
         btn_row.addStretch(1)
@@ -388,7 +384,7 @@ class OnboardingWizard(QDialog):
             "Touch top-left, top-right, bottom-left, or bottom-right — each zone "
             "fires its own MIDI note."
         )
-        body.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        body.setObjectName("OnboardingBody")
         body.setWordWrap(True)
         v.addWidget(body)
 
@@ -396,15 +392,15 @@ class OnboardingWizard(QDialog):
             "Tip — load the Drum Pad template and map the zones to ride + "
             "open hi-hat + crash for a hands-free cymbal extension."
         )
-        tip.setStyleSheet("color: #8a9099; font-size: 12px;")
+        tip.setObjectName("OnboardingHint")
         tip.setWordWrap(True)
         v.addWidget(tip)
 
         v.addStretch(1)
         btn_row = QHBoxLayout()
         skip = QPushButton("Skip")
+        skip.setObjectName("OnboardingSkipLink")
         skip.setFlat(True)
-        skip.setStyleSheet("color: #8a9099;")
         skip.clicked.connect(self._go_next)
         btn_row.addWidget(skip)
         btn_row.addStretch(1)
@@ -421,7 +417,7 @@ class OnboardingWizard(QDialog):
             "Hit Start Bridging when you want to perform. Tweak mappings, "
             "browse presets, and add connectors from the main window any time."
         )
-        body.setStyleSheet("color: #c2c6cc;")
+        body.setObjectName("OnboardingBody")
         body.setWordWrap(True)
         v.addWidget(body)
         v.addStretch(1)
@@ -443,16 +439,15 @@ class OnboardingWizard(QDialog):
 
     def _build_footer(self) -> QFrame:
         bar = QFrame()
-        bar.setStyleSheet(
-            "background-color: #16181d; border-top: 1px solid #24262d;"
-        )
+        bar.setObjectName("OnboardingFooter")
+        bar.setAttribute(Qt.WA_StyledBackground, True)
         h = QHBoxLayout(bar)
         h.setContentsMargins(18, 12, 18, 12)
         h.setSpacing(10)
 
         self._skip_btn = QPushButton("Skip setup")
+        self._skip_btn.setObjectName("OnboardingSkipLink")
         self._skip_btn.setFlat(True)
-        self._skip_btn.setStyleSheet("color: #8a9099;")
         self._skip_btn.clicked.connect(self._on_skip)
         h.addWidget(self._skip_btn)
         h.addStretch(1)
@@ -491,14 +486,14 @@ class OnboardingWizard(QDialog):
             self._controller_status.setText(
                 "Plug in your PS5 or Xbox controller and we'll continue."
             )
-            self._controller_status.setStyleSheet("color: #f97373;")
+            _set_state(self._controller_status, "error")
         else:
             self._controller_detected = True
             self._controller_status.setText(
                 f"{info.name} connected. {info.num_axes} axes, "
                 f"{info.num_buttons} buttons."
             )
-            self._controller_status.setStyleSheet("color: #2dd4bf;")
+            _set_state(self._controller_status, "ok")
 
     def _poll_midi(self) -> None:
         # Probe-then-release. On Windows surfaces missing loopMIDI so we can
@@ -513,11 +508,11 @@ class OnboardingWizard(QDialog):
                 f"Virtual MIDI port live: {opened.name}. Anything listening on "
                 "this port now hears your gamepad."
             )
-            self._midi_status.setStyleSheet("color: #2dd4bf;")
+            _set_state(self._midi_status, "ok")
             self._loopmidi_btn.setVisible(False)
         except MidiPortError as e:
             self._midi_status.setText(str(e))
-            self._midi_status.setStyleSheet("color: #f97373;")
+            _set_state(self._midi_status, "error")
             self._loopmidi_btn.setVisible(sys.platform == "win32")
 
     # ============================================================== nav + finish
@@ -619,7 +614,7 @@ class OnboardingWizard(QDialog):
     def _page(self, title: str, body: str) -> QWidget:
         page, v = self._page_shell(title, big=True)
         b = QLabel(body)
-        b.setStyleSheet("color: #c2c6cc; font-size: 13px;")
+        b.setObjectName("OnboardingBody")
         b.setWordWrap(True)
         v.addWidget(b)
         v.addStretch(1)
@@ -632,9 +627,7 @@ class OnboardingWizard(QDialog):
         v.setContentsMargins(36, 36, 36, 36)
         v.setSpacing(14)
         h = QLabel(title)
-        size = "22px" if big else "18px"
-        weight = "700" if big else "600"
-        h.setStyleSheet(f"font-size: {size}; font-weight: {weight}; color: #f5f7fa;")
+        h.setObjectName("OnboardingHeadingBig" if big else "OnboardingHeading")
         h.setWordWrap(True)
         v.addWidget(h)
         return page, v

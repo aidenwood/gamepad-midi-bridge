@@ -261,7 +261,7 @@ class _Top5List(QWidget):
         self._rows: list[QLabel] = []
         for _ in range(5):
             lbl = QLabel("—")
-            lbl.setStyleSheet("color: #8a9099; font-size: 11px;")
+            lbl.setObjectName("UsageHeatmapLabel")
             v.addWidget(lbl)
             self._rows.append(lbl)
 
@@ -308,18 +308,12 @@ class UsageHeatmap(QWidget):
         # Header row: title + reset button
         header = QHBoxLayout()
         title = QLabel("CONTROL USAGE")
-        title.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
-        )
+        title.setObjectName("UsageHeatmapTitle")
         header.addWidget(title)
         header.addStretch()
         reset_btn = QPushButton("Reset stats")
+        reset_btn.setObjectName("UsageHeatmapResetButton")
         reset_btn.setFixedHeight(22)
-        reset_btn.setStyleSheet(
-            "QPushButton { background: #1f232b; color: #8a9099; border: 1px solid #2c3040;"
-            " border-radius: 4px; padding: 0 8px; font-size: 10px; }"
-            "QPushButton:hover { background: #2c3040; color: #f5f7fa; }"
-        )
         reset_btn.clicked.connect(self._reset)
         header.addWidget(reset_btn)
         root.addLayout(header)
@@ -333,9 +327,7 @@ class UsageHeatmap(QWidget):
         right = QVBoxLayout()
         right.setSpacing(4)
         top5_title = QLabel("TOP 5")
-        top5_title.setStyleSheet(
-            "color: #5a606b; font-size: 9px; font-weight: 600;"
-        )
+        top5_title.setObjectName("UsageHeatmapTop5Title")
         right.addWidget(top5_title)
         self._top5 = _Top5List()
         right.addWidget(self._top5)

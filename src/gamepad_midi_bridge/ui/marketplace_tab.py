@@ -454,10 +454,7 @@ class MarketplaceTab(QWidget):
 
     def _preset_card(self, preset: Dict[str, Any]) -> QFrame:
         card = QFrame()
-        card.setStyleSheet(
-            f"QFrame {{ background-color: {CARD_BG}; "
-            f"border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 14px; }}"
-        )
+        card.setObjectName("MarketplaceCard")
         # Emit selection when card is clicked
         card.mousePressEvent = lambda ev, p=preset: self._emit_preset_selection(p)
         h = QHBoxLayout(card)

@@ -21,11 +21,11 @@ class CalibrationDialog(QDialog):
         v.setSpacing(14)
 
         title = QLabel("Keep your hands off the controller")
-        title.setStyleSheet("font-size: 16px; font-weight: 600; color: #f5f7fa;")
+        title.setObjectName("CalibrationDialogTitle")
         v.addWidget(title)
 
         sub = QLabel("Sampling resting position to compensate for stick drift…")
-        sub.setStyleSheet("color: #8a9099;")
+        sub.setObjectName("CalibrationDialogSub")
         sub.setWordWrap(True)
         v.addWidget(sub)
 
@@ -34,8 +34,8 @@ class CalibrationDialog(QDialog):
         v.addWidget(self._bar)
 
         self._result = QLabel("")
+        self._result.setObjectName("CalibrationDialogResult")
         self._result.setWordWrap(True)
-        self._result.setStyleSheet("color: #c2c6cc; padding-top: 8px;")
         v.addWidget(self._result)
 
         self._close_btn = QPushButton("OK")

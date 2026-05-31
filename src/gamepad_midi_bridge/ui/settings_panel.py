@@ -439,11 +439,8 @@ class SettingsPanel(QWidget):
 
         # ── 5. DANGER ZONE ─────────────────────────────────────────────────
         danger_group = QGroupBox("Danger Zone")
+        danger_group.setObjectName("SettingsDangerZone")
         danger_form = QFormLayout(danger_group)
-        danger_group.setStyleSheet(
-            "QGroupBox { border: 1px solid #c0392b; border-radius: 4px; }"
-            "QGroupBox::title { color: #c0392b; }"
-        )
 
         clear_snaps_btn = UIButton("Clear all snapshots", variant="danger")
         clear_snaps_btn.clicked.connect(self._on_clear_snapshots)
@@ -531,27 +528,22 @@ class SettingsPanel(QWidget):
                     self._traverse_widgets(nested, labels)
 
     def _on_search_changed(self, query: str) -> None:
-        """Filter groups by matching label text."""
+        """Filter groups by matching label text. Visual states ("match" /
+        "dim") are driven via the ``searchState`` dynamic property — see the
+        `QGroupBox[searchState=...]` rules in styles.qss."""
         query_lower = query.lower().strip()
         for group in self._groups_in_order:
             labels = self._control_label_cache.get(group, [])
             is_match = any(query_lower in label.lower() for label in labels)
             if query_lower == "":
-                # Empty search: show everything normally
-                group.setStyleSheet("")
+                group.setProperty("searchState", "")
                 group.setGraphicsEffect(None)
             elif is_match:
-                # Highlight matching group
-                group.setStyleSheet(
-                    "QGroupBox { border: 2px solid #1abc9c; border-radius: 4px; }"
-                    "QGroupBox::title { font-weight: bold; color: #1abc9c; }"
-                )
+                group.setProperty("searchState", "match")
             else:
-                # Dim non-matching group
-                group.setStyleSheet(
-                    "QGroupBox { border: 1px solid #bdc3c7; border-radius: 4px; opacity: 0.3; }"
-                    "QGroupBox::title { color: #7f8c8d; }"
-                )
+                group.setProperty("searchState", "dim")
+            group.style().unpolish(group)
+            group.style().polish(group)
 
     # ── combo builders ────────────────────────────────────────────────────────
 

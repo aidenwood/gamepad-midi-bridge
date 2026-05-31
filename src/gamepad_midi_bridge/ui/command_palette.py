@@ -74,16 +74,11 @@ class CommandPalette(QDialog):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # Container card
-        card = QWidget()
+        # Container card — styled via QFrame#CommandPaletteCard in styles.qss.
+        # NOTE: QSS targets QFrame, so we use a QFrame for proper background paint.
+        from PySide6.QtWidgets import QFrame
+        card = QFrame()
         card.setObjectName("CommandPaletteCard")
-        card.setStyleSheet(
-            "QWidget#CommandPaletteCard {"
-            "  background: #16181f;"
-            "  border: 1px solid #2c313b;"
-            "  border-radius: 10px;"
-            "}"
-        )
         outer.addWidget(card)
 
         v = QVBoxLayout(card)
@@ -94,17 +89,6 @@ class CommandPalette(QDialog):
         self._search = QLineEdit()
         self._search.setObjectName("CommandPaletteSearch")
         self._search.setPlaceholderText("Type a command...")
-        self._search.setStyleSheet(
-            "QLineEdit#CommandPaletteSearch {"
-            "  background: transparent;"
-            "  border: none;"
-            "  border-bottom: 1px solid #2c313b;"
-            "  border-radius: 0;"
-            "  color: #f5f7fa;"
-            "  font-size: 15px;"
-            "  padding: 14px 18px;"
-            "}"
-        )
         self._search.textChanged.connect(self._on_text_changed)
         self._search.installEventFilter(self)
         v.addWidget(self._search)
@@ -112,38 +96,12 @@ class CommandPalette(QDialog):
         # Results list
         self._list = QListWidget()
         self._list.setObjectName("CommandPaletteList")
-        self._list.setStyleSheet(
-            "QListWidget#CommandPaletteList {"
-            "  background: transparent;"
-            "  border: none;"
-            "  outline: none;"
-            "  color: #f5f7fa;"
-            "  font-size: 13px;"
-            "  padding: 4px 0;"
-            "}"
-            "QListWidget#CommandPaletteList::item {"
-            "  padding: 8px 18px;"
-            "  border-radius: 6px;"
-            "}"
-            "QListWidget#CommandPaletteList::item:selected {"
-            "  background: #2563eb;"
-            "  color: #ffffff;"
-            "}"
-            "QListWidget#CommandPaletteList::item:hover:!selected {"
-            "  background: #1e2230;"
-            "}"
-            "QScrollBar:vertical { width: 6px; background: transparent; }"
-            "QScrollBar::handle:vertical { background: #2c313b; border-radius: 3px; }"
-        )
         self._list.itemActivated.connect(self._execute_current)
         v.addWidget(self._list, 1)
 
         # Hint footer
         hint = QLabel("Up/Down navigate   Enter run   Esc close")
-        hint.setStyleSheet(
-            "color: #5a606b; font-size: 11px; padding: 8px 18px;"
-            "border-top: 1px solid #1c1e25;"
-        )
+        hint.setObjectName("CommandPaletteHint")
         v.addWidget(hint)
 
     # ------------------------------------------------------------------ filtering

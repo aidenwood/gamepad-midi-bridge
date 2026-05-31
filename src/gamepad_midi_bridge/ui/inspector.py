@@ -69,30 +69,21 @@ class Inspector(QWidget):
         outer.setSpacing(0)
 
         # Header strip — label + close button.
+        # All visual rules in styles.qss → "INSPECTOR PANEL" section.
         header = QFrame()
         header.setObjectName("InspectorHeader")
-        header.setStyleSheet(
-            "QFrame#InspectorHeader { background: #0e0f12; "
-            "border-left: 1px solid #24262d; border-bottom: 1px solid #24262d; }"
-        )
         header.setFixedHeight(36)
         hh = QHBoxLayout(header)
         hh.setContentsMargins(14, 0, 6, 0)
         hh.setSpacing(8)
         self._title = QLabel(label)
-        self._title.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 1.4px;"
-        )
+        self._title.setObjectName("InspectorTitle")
         hh.addWidget(self._title)
         hh.addStretch(1)
         close = QPushButton("×")
+        close.setObjectName("InspectorCloseButton")
         close.setFlat(True)
         close.setFixedSize(28, 28)
-        close.setStyleSheet(
-            "QPushButton { color: #8a9099; font-size: 18px; padding: 0; margin: 0; } "
-            "QPushButton:hover { color: #f5f7fa; }"
-        )
         close.setToolTip("Close inspector")
         close.clicked.connect(self.hide_panel)
         hh.addWidget(close)
@@ -100,13 +91,11 @@ class Inspector(QWidget):
 
         # Scroll area for the body so long inspector content is reachable.
         scroll = QScrollArea()
+        scroll.setObjectName("InspectorScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(
-            "QScrollArea { background: #0a0b0e; border-left: 1px solid #24262d; }"
-        )
         self._body_host = QWidget()
-        self._body_host.setStyleSheet("background: #0a0b0e;")
+        self._body_host.setObjectName("InspectorBodyHost")
         self._body_layout = QVBoxLayout(self._body_host)
         self._body_layout.setContentsMargins(14, 14, 14, 14)
         self._body_layout.setSpacing(10)
@@ -209,13 +198,8 @@ def render_mapping_selection(payload: dict) -> QWidget:
     v.addWidget(title)
 
     kind_chip = QLabel(kind.upper())
+    kind_chip.setObjectName("InspectorKindChip")
     kind_chip.setAlignment(Qt.AlignCenter)
-    kind_chip.setStyleSheet(
-        "color: #5eead4; background: rgba(45, 212, 191, 0.12); "
-        "border: 1px solid rgba(45, 212, 191, 0.3); border-radius: 999px; "
-        "padding: 4px 10px; font-size: 10px; font-weight: 700; "
-        "letter-spacing: 1.4px;"
-    )
     kind_chip.setMaximumWidth(80)
     v.addWidget(kind_chip)
 
@@ -252,12 +236,8 @@ def render_marketplace_selection(payload: dict) -> QWidget:
     v.addWidget(title)
 
     author = QLabel(str(payload.get("author", "Anonymous")))
+    author.setObjectName("InspectorAuthor")
     author.setAlignment(Qt.AlignCenter)
-    author.setStyleSheet(
-        "color: #8a9099; background: rgba(45, 212, 191, 0.08); "
-        "border: 1px solid rgba(45, 212, 191, 0.2); border-radius: 999px; "
-        "padding: 4px 10px; font-size: 10px; font-weight: 600;"
-    )
     author.setMaximumWidth(150)
     v.addWidget(author)
 
@@ -279,7 +259,7 @@ def render_marketplace_selection(payload: dict) -> QWidget:
     # Controller preview diagram
     divider = QFrame()
     divider.setFrameShape(QFrame.HLine)
-    divider.setStyleSheet("color: #24262d;")
+    divider.setObjectName("InspectorDivider")
     v.addWidget(divider)
 
     preview_label = UILabel("MAPPING PREVIEW", variant="caption")
@@ -319,13 +299,9 @@ def render_live_selection(payload: dict) -> QWidget:
 
     kind = str(payload.get("kind", "")).upper()
     kind_chip = QLabel(kind)
+    kind_chip.setObjectName("InspectorKindChip")
+    kind_chip.setProperty("variant", "live")
     kind_chip.setAlignment(Qt.AlignCenter)
-    kind_chip.setStyleSheet(
-        "color: #f5c450; background: rgba(245, 196, 80, 0.12); "
-        "border: 1px solid rgba(245, 196, 80, 0.3); border-radius: 999px; "
-        "padding: 4px 10px; font-size: 10px; font-weight: 700; "
-        "letter-spacing: 1.4px;"
-    )
     kind_chip.setMaximumWidth(100)
     v.addWidget(kind_chip)
 
@@ -380,16 +356,9 @@ def render_connector_selection(payload: dict) -> QWidget:
     installed = payload.get("installed", False)
     status_text = "Installed" if installed else "Not installed"
     status_chip = QLabel(status_text)
+    status_chip.setObjectName("InspectorStatusChip")
+    status_chip.setProperty("state", "installed" if installed else "missing")
     status_chip.setAlignment(Qt.AlignCenter)
-    status_color = "#2dd4bf" if installed else "#8a9099"
-    bg_color = "rgba(45, 212, 191, 0.12)" if installed else "rgba(138, 144, 153, 0.08)"
-    border_color = "rgba(45, 212, 191, 0.3)" if installed else "rgba(138, 144, 153, 0.2)"
-    status_chip.setStyleSheet(
-        f"color: {status_color}; background: {bg_color}; "
-        f"border: 1px solid {border_color}; border-radius: 999px; "
-        "padding: 4px 10px; font-size: 10px; font-weight: 700; "
-        "letter-spacing: 1.4px;"
-    )
     status_chip.setMaximumWidth(120)
     v.addWidget(status_chip)
 

@@ -148,45 +148,31 @@ class LogConsole(QWidget):
     def _build_header(self) -> QFrame:
         bar = QFrame()
         # No border-top — the QSplitter handle above us is the visual divider.
-        bar.setStyleSheet("background-color: #16181d;")
-        # 36 px header — Clear (26) + toggle (26) now actually render at
-        # 26 px because their inline stylesheets reset the global QSS
-        # padding/border, so the slot only needs ~4 px overhead.
+        # Styling lives in styles.qss → "BOTTOM CONSOLE PANEL HEADER".
+        bar.setObjectName("LogConsoleHeader")
+        bar.setAttribute(Qt.WA_StyledBackground, True)
         bar.setFixedHeight(36)
         h = QHBoxLayout(bar)
         h.setContentsMargins(12, 5, 8, 5)
         h.setSpacing(8)
 
         title = QLabel("CONSOLE")
+        title.setObjectName("LogConsoleTitle")
         title.setMinimumHeight(20)
-        title.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 1px;"
-        )
         h.addWidget(title)
         h.addStretch(1)
 
         clear = QPushButton("Clear")
+        clear.setObjectName("LogConsoleClearButton")
         clear.setFlat(True)
         clear.setFixedHeight(26)
-        # Full QPushButton reset — overrides the global QSS padding(8px) +
-        # border(1px) that would otherwise inflate the rendered height past
-        # the fixed 26 px and clip the text.
-        clear.setStyleSheet(
-            "QPushButton { color: #8a9099; font-size: 11px; "
-            "padding: 0 8px; border: none; background: transparent; }"
-            "QPushButton:hover { color: #c2c6cc; }"
-        )
         clear.clicked.connect(self.clear)
         h.addWidget(clear)
 
         self._toggle_btn = QPushButton("▾")
+        self._toggle_btn.setObjectName("LogConsoleToggleButton")
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setFixedSize(28, 26)
-        self._toggle_btn.setStyleSheet(
-            "QPushButton { color: #c2c6cc; font-size: 14px; "
-            "padding: 0; margin: 0; border: none; background: transparent; }"
-        )
         self._toggle_btn.clicked.connect(self.toggle_collapsed)
         h.addWidget(self._toggle_btn)
 
@@ -194,13 +180,10 @@ class LogConsole(QWidget):
 
     def _build_body(self) -> QPlainTextEdit:
         body = QPlainTextEdit()
+        body.setObjectName("LogConsoleBody")
         body.setReadOnly(True)
         body.setMaximumBlockCount(MAX_LINES)
         body.setFrameStyle(QFrame.NoFrame)
-        body.setStyleSheet(
-            "background-color: #0e0f12; color: #c2c6cc; "
-            "selection-background-color: #1f3a36;"
-        )
         font = QFont("SF Mono")
         font.setStyleHint(QFont.Monospace)
         font.setPointSize(11)

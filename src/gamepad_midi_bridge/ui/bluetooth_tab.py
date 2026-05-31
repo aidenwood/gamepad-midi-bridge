@@ -40,7 +40,7 @@ class BluetoothTab(QWidget):
         outer.setSpacing(14)
 
         header = QLabel("Bluetooth controllers")
-        header.setStyleSheet("font-size: 14px; font-weight: 600; color: #f5f7fa;")
+        header.setObjectName("BluetoothHeader")
         outer.addWidget(header)
 
         sub = QLabel(
@@ -52,7 +52,7 @@ class BluetoothTab(QWidget):
             "• Click 'Open system Bluetooth settings' to pair it\n"
             "• Re-scan after pairing to refresh the list"
         )
-        sub.setStyleSheet("color: #8a9099;")
+        sub.setObjectName("BluetoothSubLabel")
         sub.setWordWrap(True)
         outer.addWidget(sub)
 
@@ -63,7 +63,7 @@ class BluetoothTab(QWidget):
         self._refresh = QPushButton("Re-scan")
         self._refresh.clicked.connect(self.refresh)
         self._docs_link = QPushButton("📖 Connection guide")
-        self._docs_link.setStyleSheet("color: #666; text-decoration: underline;")
+        self._docs_link.setObjectName("BluetoothDocsLink")
         self._docs_link.clicked.connect(self._on_docs_link)
         action_row.addWidget(self._open_settings)
         action_row.addWidget(self._refresh)
@@ -121,17 +121,14 @@ class BluetoothTab(QWidget):
 
     def _empty(self, layout: QVBoxLayout, text: str) -> None:
         lbl = QLabel(text)
+        lbl.setObjectName("BluetoothEmptyState")
         lbl.setAlignment(Qt.AlignCenter)
-        lbl.setStyleSheet("color: #8a9099; padding: 40px;")
         lbl.setWordWrap(True)
         layout.addWidget(lbl)
 
     def _device_card(self, d: bt.BluetoothDevice) -> QFrame:
         card = QFrame()
-        card.setStyleSheet(
-            "QFrame { background-color: #16181d; border: 1px solid #24262d; "
-            "border-radius: 8px; }"
-        )
+        card.setObjectName("BluetoothPairedDeviceCard")
         h = QHBoxLayout(card)
         h.setContentsMargins(14, 12, 14, 12)
         h.setSpacing(14)
@@ -139,7 +136,7 @@ class BluetoothTab(QWidget):
         left = QVBoxLayout()
         left.setSpacing(2)
         title = QLabel(d.name + ("  ·  controller" if d.is_controller else ""))
-        title.setStyleSheet("font-size: 14px; font-weight: 600; color: #f5f7fa;")
+        title.setObjectName("BluetoothPairedDeviceTitle")
         left.addWidget(title)
 
         meta_bits: List[str] = []
@@ -151,15 +148,13 @@ class BluetoothTab(QWidget):
             meta_bits.append(f"Battery {d.battery_percent}%")
         if meta_bits:
             meta = QLabel(" · ".join(meta_bits))
-            meta.setStyleSheet("color: #8a9099; font-size: 12px;")
+            meta.setObjectName("BluetoothPairedDeviceMeta")
             left.addWidget(meta)
         h.addLayout(left, 1)
 
         status = QLabel("Connected" if d.connected else "Paired")
-        status.setStyleSheet(
-            "color: #2dd4bf; font-weight: 600;" if d.connected
-            else "color: #8a9099;"
-        )
+        status.setObjectName("BluetoothPairedDeviceStatus")
+        status.setProperty("state", "connected" if d.connected else "paired")
         status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         h.addWidget(status)
 

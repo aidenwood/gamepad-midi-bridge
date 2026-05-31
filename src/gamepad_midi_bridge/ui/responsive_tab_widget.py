@@ -51,23 +51,17 @@ class ResponsiveTabWidget(QWidget):
         # instead of every label getting truncated to "Li..."
         self._tabs.tabBar().setElideMode(_Qt.ElideNone)
         self._tabs.tabBar().setExpanding(False)
-        # Pad tabs to their label size, not a forced minimum width.
-        self._tabs.tabBar().setStyleSheet(
-            "QTabBar::tab { min-width: 0; padding: 8px 14px; }"
-        )
+        # Pad tabs to their label size — apply via objectName so the rule
+        # lives in styles.qss.
+        self._tabs.tabBar().setObjectName("ResponsiveTabBar")
         # Keep the tab widget's own currentChanged wired to the combo so they
         # stay in sync regardless of which control the user interacts with.
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
         # --- compact combo ---
         self._combo = QComboBox()
+        self._combo.setObjectName("ResponsiveTabPickerCombo")
         self._combo.setMinimumHeight(28)
-        self._combo.setStyleSheet(
-            "QComboBox { background: #0e0f12; color: #f5f7fa; "
-            "border: 1px solid #2c313b; border-radius: 4px; "
-            "padding: 4px 8px; font-size: 12px; font-weight: 500; }"
-            "QComboBox::drop-down { border: none; }"
-        )
         self._combo.currentIndexChanged.connect(self._on_combo_changed)
         self._combo.setVisible(False)  # hidden until compact mode activates
 

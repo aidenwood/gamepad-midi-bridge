@@ -69,12 +69,9 @@ class ReconnectOverlay(QWidget):
         self._seconds_left = _TIMEOUT_SECS
 
         # ----- styling -----
+        # All visual rules in styles.qss → "RECONNECT OVERLAY" section.
         self.setObjectName("ReconnectOverlay")
-        self.setStyleSheet(
-            "QWidget#ReconnectOverlay {"
-            "  background: rgba(10, 11, 14, 200);"
-            "}"
-        )
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.hide()
 
@@ -89,17 +86,13 @@ class ReconnectOverlay(QWidget):
         outer.addLayout(inner)
 
         self._title = QLabel("Controller lost")
+        self._title.setObjectName("ReconnectTitle")
         self._title.setAlignment(Qt.AlignCenter)
-        self._title.setStyleSheet(
-            "color: #f5f7fa; font-size: 26px; font-weight: 700;"
-        )
         inner.addWidget(self._title)
 
         self._subtitle = QLabel("")
+        self._subtitle.setObjectName("ReconnectSubtitle")
         self._subtitle.setAlignment(Qt.AlignCenter)
-        self._subtitle.setStyleSheet(
-            "color: #8a9099; font-size: 14px;"
-        )
         inner.addWidget(self._subtitle)
 
         btn_row = QHBoxLayout()
@@ -224,34 +217,32 @@ class ReconnectOverlay(QWidget):
 
     # ---------------------------------------------------------------- UI state
 
+    def _set_title_state(self, state: str) -> None:
+        """Swap title colour via dynamic property — see styles.qss."""
+        self._title.setProperty("state", state)
+        self._title.style().unpolish(self._title)
+        self._title.style().polish(self._title)
+
     def _apply_counting_ui(self) -> None:
         self._title.setText("Controller lost")
-        self._title.setStyleSheet(
-            "color: #f5f7fa; font-size: 26px; font-weight: 700;"
-        )
+        self._set_title_state("counting")
         self._subtitle.setText(f"Retrying in {self._seconds_left}s…")
-        self._subtitle.setStyleSheet("color: #8a9099; font-size: 14px;")
         self._retry_btn.setVisible(False)
         self._cancel_btn.setVisible(True)
 
     def _apply_success_ui(self) -> None:
         self._title.setText("✓  Reconnected")
-        self._title.setStyleSheet(
-            "color: #2dd4bf; font-size: 26px; font-weight: 700;"
-        )
+        self._set_title_state("success")
         self._subtitle.setText("")
         self._retry_btn.setVisible(False)
         self._cancel_btn.setVisible(False)
 
     def _apply_failed_ui(self) -> None:
         self._title.setText("✗  Connection failed")
-        self._title.setStyleSheet(
-            "color: #f59e0b; font-size: 26px; font-weight: 700;"
-        )
+        self._set_title_state("failed")
         self._subtitle.setText(
             "Could not reconnect within 30 seconds."
         )
-        self._subtitle.setStyleSheet("color: #8a9099; font-size: 14px;")
         self._retry_btn.setVisible(True)
         self._cancel_btn.setVisible(True)
 

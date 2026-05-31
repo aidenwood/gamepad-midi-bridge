@@ -71,8 +71,8 @@ class HapticInputDialog(QDialog):
             "incoming MIDI message arrives. Velocity (notes) or value (CCs) "
             "scales how hard you feel it."
         )
+        intro.setObjectName("HapticInputDialogIntro")
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #8a9099;")
         root.addWidget(intro)
 
         # Listen channel filter sits above the table so it's visible without

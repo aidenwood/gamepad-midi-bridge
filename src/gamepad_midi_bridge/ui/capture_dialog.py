@@ -56,16 +56,14 @@ class CaptureDialog(QDialog):
             instruction = "Press any D-pad direction."
 
         instr = QLabel(instruction)
-        instr.setStyleSheet("font-size: 14px; font-weight: 600; color: #f5f7fa;")
+        instr.setObjectName("CaptureDialogInstruction")
         instr.setWordWrap(True)
         instr.setAlignment(Qt.AlignCenter)
         v.addWidget(instr)
 
         # Live preview label.
         self._preview = QLabel("Waiting…")
-        self._preview.setStyleSheet(
-            "font-size: 12px; color: #8a9099; font-family: ui-monospace, Menlo, monospace;"
-        )
+        self._preview.setObjectName("CaptureDialogPreview")
         self._preview.setAlignment(Qt.AlignCenter)
         v.addWidget(self._preview)
 

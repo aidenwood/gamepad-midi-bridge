@@ -56,28 +56,16 @@ DOCS_LINKS = {
 }
 
 
-# Card chrome reused across all sections. Keeping the colours inline (rather
-# than in styles.qss) avoids leaking a generic "Card" object name that other
-# tabs might collide with.
-_CARD_STYLE = (
-    "QFrame#HelpCard {"
-    "  background-color: #16181d;"
-    "  border: 1px solid #24262d;"
-    "  border-radius: 10px;"
-    "}"
-)
-
-
 def _section_title(text: str) -> UILabel:
     """Small uppercase label used as a section heading inside a card."""
     return UILabel(text, variant="caption")
 
 
 def _make_card() -> Tuple[QFrame, QVBoxLayout]:
-    """Build an empty styled card frame and return (frame, inner_layout)."""
+    """Build an empty styled card frame and return (frame, inner_layout).
+    Visual rules live in styles.qss → "HELP TAB" section."""
     card = QFrame()
     card.setObjectName("HelpCard")
-    card.setStyleSheet(_CARD_STYLE)
     layout = QVBoxLayout(card)
     layout.setContentsMargins(20, 18, 20, 18)
     layout.setSpacing(10)
@@ -90,32 +78,23 @@ class _FaqItem(QFrame):
 
     def __init__(self, question: str, answer: str) -> None:
         super().__init__()
-        self.setStyleSheet(
-            "QFrame { background-color: #11131a; border: 1px solid #1f232b;"
-            " border-radius: 8px; }"
-        )
+        # All visual rules in styles.qss → "HELP TAB" section.
+        self.setObjectName("HelpFaqRow")
 
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
 
         self._toggle = QPushButton(self._format_header(question, expanded=False))
+        self._toggle.setObjectName("HelpFaqToggle")
         self._toggle.setFlat(True)
         self._toggle.setCursor(Qt.PointingHandCursor)
-        self._toggle.setStyleSheet(
-            "QPushButton { text-align: left; padding: 12px 14px;"
-            " background: transparent; border: none; color: #e6e8eb;"
-            " font-weight: 500; }"
-            "QPushButton:hover { color: #2dd4bf; }"
-        )
         self._toggle.clicked.connect(self._on_toggle)
         v.addWidget(self._toggle)
 
         self._answer = QLabel(answer)
+        self._answer.setObjectName("HelpFaqAnswer")
         self._answer.setWordWrap(True)
-        self._answer.setStyleSheet(
-            "color: #c2c6cc; padding: 0 14px 14px 14px; font-size: 12px;"
-        )
         self._answer.setVisible(False)
         v.addWidget(self._answer)
 
@@ -192,8 +171,8 @@ class HelpTab(QWidget):
         if _LOGO_3D_AVAILABLE and Logo3DView is not None:
             try:
                 self._logo3d = Logo3DView()
+                self._logo3d.setObjectName("HelpLogo3D")
                 self._logo3d.setFixedSize(220, 200)
-                self._logo3d.setStyleSheet("background: transparent; border: 0;")
                 hero.addWidget(self._logo3d, alignment=Qt.AlignTop | Qt.AlignRight)
             except Exception:
                 # Widget construction can fail on systems where QtWebEngine
@@ -253,17 +232,13 @@ class HelpTab(QWidget):
             row.setSpacing(14)
 
             key_label = QLabel(combo)
-            key_label.setStyleSheet(
-                "color: #2dd4bf; font-family: 'SF Mono', Menlo, Consolas, monospace;"
-                " font-size: 12px; background: #11131a; border: 1px solid #1f232b;"
-                " border-radius: 4px; padding: 4px 8px;"
-            )
+            key_label.setObjectName("HelpShortcutKey")
             key_label.setMinimumWidth(140)
             key_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
             row.addWidget(key_label)
 
             desc = QLabel(action)
-            desc.setStyleSheet("color: #e6e8eb;")
+            desc.setObjectName("HelpShortcutDesc")
             desc.setWordWrap(True)
             row.addWidget(desc, 1)
 
@@ -329,12 +304,12 @@ class HelpTab(QWidget):
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(10)
             dot = QLabel("•")
-            dot.setStyleSheet("color: #2dd4bf; font-size: 14px;")
+            dot.setObjectName("HelpBulletDot")
             dot.setAlignment(Qt.AlignTop)
             row.addWidget(dot)
             body = QLabel(text)
+            body.setObjectName("HelpBulletText")
             body.setWordWrap(True)
-            body.setStyleSheet("color: #c2c6cc; font-size: 12px;")
             row.addWidget(body, 1)
             layout.addLayout(row)
         return card
@@ -347,7 +322,7 @@ class HelpTab(QWidget):
             "Logs and crash reports help us diagnose tricky issues — attach "
             "them when emailing support."
         )
-        note.setStyleSheet("color: #8a9099; font-size: 12px;")
+        note.setObjectName("HelpLinksNote")
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -430,10 +405,10 @@ class HelpTab(QWidget):
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(14)
             lbl = QLabel(label)
-            lbl.setStyleSheet("color: #8a9099; font-weight: 500; min-width: 100px;")
+            lbl.setObjectName("HelpVersionLabel")
             row.addWidget(lbl)
             val = QLabel(value)
-            val.setStyleSheet("color: #e6e8eb; font-family: 'SF Mono', Menlo, Consolas, monospace;")
+            val.setObjectName("HelpVersionValue")
             row.addWidget(val)
             row.addStretch(1)
             layout.addLayout(row)

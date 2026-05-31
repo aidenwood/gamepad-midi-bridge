@@ -257,9 +257,7 @@ class MainWindow(QMainWindow):
             chrome_widget.setObjectName("ChromeWidget")
             chrome_widget.setAutoFillBackground(True)
             chrome_widget.setAttribute(Qt.WA_StyledBackground, True)
-            chrome_widget.setStyleSheet(
-                "QFrame#ChromeWidget { background-color: #0c0d10; }"
-            )
+            # Styled via QFrame#ChromeWidget in styles.qss (GLOBAL BASE STYLES).
             outer = QVBoxLayout(central)
             outer.setContentsMargins(0, 0, 0, 0)
             outer.setSpacing(0)
@@ -679,10 +677,7 @@ class MainWindow(QMainWindow):
         bar.setObjectName("StatusBar")
         bar.setAutoFillBackground(True)
         bar.setAttribute(Qt.WA_StyledBackground, True)
-        bar.setStyleSheet(
-            "QFrame#StatusBar { background-color: #0e0f12; "
-            "border-bottom: 1px solid #1c1e25; }"
-        )
+        # Styling lives in styles.qss → "TOP STATUS BAR" section (QFrame#StatusBar).
         # Initial fixed height is the wide-mode value — adjusted by
         # ``_arrange_status_bar`` if/when the window is narrow.
         bar.setFixedHeight(64)
@@ -710,27 +705,22 @@ class MainWindow(QMainWindow):
         title_col.setSpacing(2)
         self._status_title = QLabel("Idle")
         self._status_title.setObjectName("StatusTitle")
-        self._status_title.setStyleSheet(
-            "color: #f5f7fa; font-size: 13px; font-weight: 600;"
-        )
         self._status_title.setMinimumHeight(18)
         self._status_sub = QLabel("Plug in a controller and click Start.")
         self._status_sub.setObjectName("StatusSub")
-        self._status_sub.setStyleSheet("color: #5a606b; font-size: 11px;")
         self._status_sub.setMinimumHeight(16)
         title_col.addWidget(self._status_title)
         title_col.addWidget(self._status_sub)
 
         self._rate_label = QLabel("")
-        self._rate_label.setStyleSheet(
-            "color: #8a9099; font-size: 10px; font-family: ui-monospace, Menlo, monospace;"
-        )
+        self._rate_label.setObjectName("StatusRateLabel")
         self._rate_label.setMinimumWidth(70)
         self._rate_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self._activity_dot = QLabel("●")
         self._activity_dot.setObjectName("ActivityDot")
-        self._activity_dot.setStyleSheet("color: #2c313b; font-size: 14px;")
+        # Base style in styles.qss; teal/grey live-state swap stays inline below
+        # in _on_midi_sent / _fade_activity because it changes every frame.
 
         self._start_btn = QPushButton("Start")
         self._start_btn.setObjectName("PrimaryButton")
@@ -751,16 +741,14 @@ class MainWindow(QMainWindow):
         self._panic_btn.setFixedHeight(36)
         self._panic_btn.setEnabled(False)
         self._panic_btn.setToolTip("Send all notes off (Ctrl+Shift+P)")
-        self._panic_btn.setStyleSheet(
-            "QPushButton#PanicButton { color: #f97316; font-weight: 700; }"
-        )
+        # Styled via QPushButton#PanicButton in styles.qss.
         self._panic_btn.clicked.connect(self._on_panic)
 
         # Layout toggles — Split (side panel) + Console (bottom pane).
         # Click handlers wired in __init__ once dependent widgets exist.
         self._status_divider1 = QFrame()
         self._status_divider1.setFrameShape(QFrame.VLine)
-        self._status_divider1.setStyleSheet("color: #2c313b;")
+        self._status_divider1.setObjectName("StatusDivider")
 
         self._split_btn = QPushButton("Split")
         self._split_btn.setObjectName("LayoutToggle")
@@ -813,7 +801,7 @@ class MainWindow(QMainWindow):
 
         self._status_divider2 = QFrame()
         self._status_divider2.setFrameShape(QFrame.VLine)
-        self._status_divider2.setStyleSheet("color: #2c313b;")
+        self._status_divider2.setObjectName("StatusDivider")
 
         self._record_btn = QPushButton("● Record")
         self._record_btn.setObjectName("RecordButton")
@@ -824,10 +812,7 @@ class MainWindow(QMainWindow):
         )
         self._record_btn.setMinimumWidth(108)
         self._record_btn.setFixedHeight(36)
-        self._record_btn.setStyleSheet(
-            "QPushButton#RecordButton { color: #8a9099; }"
-            "QPushButton#RecordButton:checked { color: #ef4444; font-weight: 700; }"
-        )
+        # Styled via QPushButton#RecordButton in styles.qss (incl. :checked).
         self._record_btn.clicked.connect(self._on_record_toggled)
 
         # Populate row layouts via the responsive arranger. Initial mode is
@@ -1004,25 +989,25 @@ class MainWindow(QMainWindow):
 
     def _build_update_banner(self) -> QFrame:
         bar = QFrame()
-        bar.setStyleSheet(
-            "background-color: #1f3a36; border-bottom: 1px solid #2dd4bf;"
-        )
+        bar.setObjectName("UpdateBanner")
+        bar.setAutoFillBackground(True)
+        bar.setAttribute(Qt.WA_StyledBackground, True)
         bar.setVisible(False)
         h = QHBoxLayout(bar)
         h.setContentsMargins(18, 8, 18, 8)
         h.setSpacing(10)
 
         self._update_label = QLabel("")
-        self._update_label.setStyleSheet("color: #2dd4bf; font-weight: 500;")
+        self._update_label.setObjectName("UpdateBannerLabel")
         h.addWidget(self._update_label, 1)
 
         self._update_open = QPushButton("Release notes")
-        self._update_open.setStyleSheet("color: #0e0f12; background-color: #2dd4bf;")
+        self._update_open.setObjectName("UpdateBannerOpenButton")
         h.addWidget(self._update_open)
 
         dismiss = QPushButton("Dismiss")
+        dismiss.setObjectName("UpdateBannerDismissButton")
         dismiss.setFlat(True)
-        dismiss.setStyleSheet("color: #2dd4bf;")
         dismiss.clicked.connect(lambda: bar.setVisible(False))
         h.addWidget(dismiss)
         return bar
@@ -1063,21 +1048,13 @@ class MainWindow(QMainWindow):
         picker_row = QHBoxLayout()
         picker_row.setSpacing(8)
         header = QLabel("SPLIT VIEW")
-        header.setStyleSheet(
-            "color: #5a606b; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 1.4px;"
-        )
+        header.setObjectName("SplitViewHeader")
         picker_row.addWidget(header)
         picker_row.addStretch(1)
 
         self._split_view_picker = QComboBox()
+        self._split_view_picker.setObjectName("SplitViewPicker")
         self._split_view_picker.setFixedHeight(28)
-        self._split_view_picker.setStyleSheet(
-            "QComboBox { color: #c2c6cc; background-color: #0e0f12; "
-            "border: 1px solid #2c313b; border-radius: 4px; "
-            "padding: 2px 8px; font-size: 12px; }"
-            "QComboBox::drop-down { border: none; }"
-        )
         picker_row.addWidget(self._split_view_picker)
         v.addLayout(picker_row)
 
@@ -1355,10 +1332,7 @@ class MainWindow(QMainWindow):
             "Pro: a 2nd controller is connected — unlock multi-controller "
             "to use both at once."
         )
-        self._pro_nudge.setStyleSheet(
-            "color: #facc15; background: #2a2410; padding: 8px 12px; "
-            "border-radius: 6px; font-size: 12px;"
-        )
+        self._pro_nudge.setObjectName("ProNudgeLabel")
         self._pro_nudge.setVisible(False)
         live_v.addWidget(self._pro_nudge)
         live_v.addWidget(self._live_splitter, 1)

@@ -26,32 +26,9 @@ from .. import latency_test as _lt
 
 _TARGET_SAMPLES = 10
 
-_STYLE_CARD = (
-    "background-color: #11131a;"
-    " border: 1px solid #1f232b;"
-    " border-radius: 8px;"
-    " padding: 16px 20px;"
-)
-
-_STYLE_RESULT_LABEL = (
-    "color: #e6e8eb;"
-    " font-family: 'SF Mono', Menlo, Consolas, monospace;"
-    " font-size: 13px;"
-    " padding: 4px 0;"
-)
-
-_STYLE_COUNTER = (
-    "color: #2dd4bf;"
-    " font-size: 20px;"
-    " font-weight: 700;"
-)
-
-_STYLE_SECTION = (
-    "color: #8a9099;"
-    " font-size: 10px;"
-    " font-weight: 700;"
-    " letter-spacing: 1px;"
-)
+# Visual rules for every widget in this dialog live in styles.qss under the
+# "LATENCY DIALOG" section. Each widget below is tagged with the matching
+# objectName.
 
 
 class LatencyDialog(QDialog):
@@ -77,20 +54,8 @@ class LatencyDialog(QDialog):
         self._tracker = _lt.tracker()
 
         self.setWindowTitle("Latency self-test")
+        self.setObjectName("LatencyDialog")
         self.setMinimumWidth(380)
-        self.setStyleSheet(
-            "QDialog { background-color: #0d0f14; }"
-            "QPushButton {"
-            "  background-color: #16181d;"
-            "  border: 1px solid #24262d;"
-            "  border-radius: 6px;"
-            "  padding: 8px 16px;"
-            "  color: #e6e8eb;"
-            "  font-size: 12px;"
-            "}"
-            "QPushButton:hover { border-color: #2dd4bf; color: #2dd4bf; }"
-            "QPushButton:pressed { background-color: #1a1d24; }"
-        )
 
         self._build_ui()
         self._start_test()
@@ -105,40 +70,42 @@ class LatencyDialog(QDialog):
 
         # Title
         title = QLabel("Latency self-test")
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #f5f7fa;")
+        title.setObjectName("LatencyDialogTitle")
         root.addWidget(title)
 
         sub = QLabel("Measures controller button -> MIDI output latency.")
-        sub.setStyleSheet("color: #8a9099; font-size: 12px;")
+        sub.setObjectName("LatencyDialogSub")
         sub.setWordWrap(True)
         root.addWidget(sub)
 
         # Instruction card
         self._instruction_card = QWidget()
-        self._instruction_card.setStyleSheet(_STYLE_CARD)
+        self._instruction_card.setObjectName("LatencyDialogCard")
+        self._instruction_card.setAttribute(Qt.WA_StyledBackground, True)
         ic_layout = QVBoxLayout(self._instruction_card)
         ic_layout.setContentsMargins(0, 0, 0, 0)
         ic_layout.setSpacing(10)
 
         prompt = QLabel("Press any mapped button NOW.")
-        prompt.setStyleSheet("color: #e6e8eb; font-size: 14px; font-weight: 600;")
+        prompt.setObjectName("LatencyDialogPrompt")
         ic_layout.addWidget(prompt)
 
         self._counter_label = QLabel(f"Samples: 0 / {_TARGET_SAMPLES}")
-        self._counter_label.setStyleSheet(_STYLE_COUNTER)
+        self._counter_label.setObjectName("LatencyDialogCounter")
         ic_layout.addWidget(self._counter_label)
 
         root.addWidget(self._instruction_card)
 
         # Results card (hidden until complete)
         self._results_card = QWidget()
-        self._results_card.setStyleSheet(_STYLE_CARD)
+        self._results_card.setObjectName("LatencyDialogCard")
+        self._results_card.setAttribute(Qt.WA_StyledBackground, True)
         rc_layout = QVBoxLayout(self._results_card)
         rc_layout.setContentsMargins(0, 0, 0, 0)
         rc_layout.setSpacing(6)
 
         section_lbl = QLabel("RESULTS")
-        section_lbl.setStyleSheet(_STYLE_SECTION)
+        section_lbl.setObjectName("LatencyDialogSectionLabel")
         rc_layout.addWidget(section_lbl)
 
         self._mean_label = QLabel("Mean:    --")
@@ -147,7 +114,7 @@ class LatencyDialog(QDialog):
         self._std_label  = QLabel("Std dev: --")
         for lbl in (self._mean_label, self._min_label,
                     self._max_label, self._std_label):
-            lbl.setStyleSheet(_STYLE_RESULT_LABEL)
+            lbl.setObjectName("LatencyDialogResultLabel")
             rc_layout.addWidget(lbl)
 
         self._results_card.setVisible(False)
