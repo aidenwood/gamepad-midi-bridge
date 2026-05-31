@@ -57,7 +57,7 @@ jobs:
         run: python build.py
 
       # ---- Per-OS packaging ----
-      # macOS: PyInstaller --windowed produces `dist/Gamepad MIDI Bridge.app`
+      # macOS: PyInstaller --windowed produces `dist/Universal Controller MIDI.app`
       # (a directory bundle). We zip the .app directly. `ditto` preserves the
       # bundle's resource forks + symlinks correctly; plain `zip -r` can mangle them.
       #
@@ -74,10 +74,10 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cd dist
-          ditto -c -k --sequesterRsrc --keepParent "Gamepad MIDI Bridge.app" "../gamepad-midi-bridge-${TAG}-macos.zip"
+          ditto -c -k --sequesterRsrc --keepParent "Universal Controller MIDI.app" "../gamepad-midi-bridge-${TAG}-macos.zip"
 
       # Windows: --windowed (without --onefile, which our build.py omits on Windows)
-      # produces a folder `dist/Gamepad MIDI Bridge/` containing the .exe + deps.
+      # produces a folder `dist/Universal Controller MIDI/` containing the .exe + deps.
       # We zip the whole folder so users get a self-contained app directory.
       - name: Zip Windows folder
         if: runner.os == 'Windows'
@@ -85,9 +85,9 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          Compress-Archive -Path "dist/Gamepad MIDI Bridge" -DestinationPath "gamepad-midi-bridge-$env:TAG-windows.zip"
+          Compress-Archive -Path "dist/Universal Controller MIDI" -DestinationPath "gamepad-midi-bridge-$env:TAG-windows.zip"
 
-      # Linux: --onefile produces a single binary `dist/Gamepad MIDI Bridge`.
+      # Linux: --onefile produces a single binary `dist/Universal Controller MIDI`.
       # Zip it so the asset name + extension stay consistent across OSes.
       - name: Zip Linux binary
         if: runner.os == 'Linux'
@@ -95,7 +95,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cd dist
-          zip "../gamepad-midi-bridge-${TAG}-linux.zip" "Gamepad MIDI Bridge"
+          zip "../gamepad-midi-bridge-${TAG}-linux.zip" "Universal Controller MIDI"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
