@@ -6,6 +6,7 @@ WA_TranslucentBackground on ancestor widgets.
 
 Exports:
     UIButton        — QPushButton with variant + size
+    UIChromeFrame   — opaque QFrame for app chrome (translucency-immune)
     UIInput         — QLineEdit
     UISpinBox       — QSpinBox
     UIDoubleSpinBox — QDoubleSpinBox
@@ -15,12 +16,14 @@ Exports:
 
 from gamepad_midi_bridge.ui.primitives.button import UIButton
 from gamepad_midi_bridge.ui.primitives.card import UICard
+from gamepad_midi_bridge.ui.primitives.frame import UIChromeFrame
 from gamepad_midi_bridge.ui.primitives.input import UIDoubleSpinBox, UIInput, UISpinBox
 from gamepad_midi_bridge.ui.primitives.label import UILabel
 
 __all__ = [
     "UIButton",
     "UICard",
+    "UIChromeFrame",
     "UIDoubleSpinBox",
     "UIInput",
     "UILabel",
