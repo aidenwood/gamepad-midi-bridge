@@ -83,13 +83,16 @@ QPushButton#StopButton:hover {
 }
 
 /* Figma-style layout toggles — flat chips in the right side of the header.
-   Sit alongside Start/Stop but feel less primary, more like editor tools. */
+   Sit alongside Start/Stop but feel less primary, more like editor tools.
+   Vertical padding is ZERO because these buttons all use ``setFixedHeight``
+   in Python — non-zero vertical padding overflows the fixed height on
+   macOS Qt 6 and clips the label. Width padding (11 px) is fine. */
 QPushButton#LayoutToggle {
     background-color: transparent;
     color: #8a9099;
     border: 1px solid #24262d;
     border-radius: 6px;
-    padding: 5px 11px;
+    padding: 3px 11px;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.04em;

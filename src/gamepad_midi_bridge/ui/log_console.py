@@ -149,11 +149,12 @@ class LogConsole(QWidget):
         bar = QFrame()
         # No border-top — the QSplitter handle above us is the visual divider.
         bar.setStyleSheet("background-color: #16181d;")
-        # 48 px header — fits 26 px Clear/toggle buttons with 11 px breathing
-        # room. ``setFixedHeight`` so the layout can't squash it.
-        bar.setFixedHeight(48)
+        # 36 px header — Clear (26) + toggle (26) now actually render at
+        # 26 px because their inline stylesheets reset the global QSS
+        # padding/border, so the slot only needs ~4 px overhead.
+        bar.setFixedHeight(36)
         h = QHBoxLayout(bar)
-        h.setContentsMargins(14, 11, 10, 11)
+        h.setContentsMargins(12, 5, 8, 5)
         h.setSpacing(8)
 
         title = QLabel("CONSOLE")
@@ -168,7 +169,14 @@ class LogConsole(QWidget):
         clear = QPushButton("Clear")
         clear.setFlat(True)
         clear.setFixedHeight(26)
-        clear.setStyleSheet("color: #8a9099; font-size: 11px; padding: 2px 8px;")
+        # Full QPushButton reset — overrides the global QSS padding(8px) +
+        # border(1px) that would otherwise inflate the rendered height past
+        # the fixed 26 px and clip the text.
+        clear.setStyleSheet(
+            "QPushButton { color: #8a9099; font-size: 11px; "
+            "padding: 0 8px; border: none; background: transparent; }"
+            "QPushButton:hover { color: #c2c6cc; }"
+        )
         clear.clicked.connect(self.clear)
         h.addWidget(clear)
 
@@ -176,7 +184,8 @@ class LogConsole(QWidget):
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setFixedSize(28, 26)
         self._toggle_btn.setStyleSheet(
-            "color: #c2c6cc; font-size: 14px; padding: 0; margin: 0;"
+            "QPushButton { color: #c2c6cc; font-size: 14px; "
+            "padding: 0; margin: 0; border: none; background: transparent; }"
         )
         self._toggle_btn.clicked.connect(self.toggle_collapsed)
         h.addWidget(self._toggle_btn)

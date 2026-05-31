@@ -93,9 +93,9 @@ class MidiLogPanel(QWidget):
         bar = QFrame()
         # No border-top — QSplitter handle above is the visual divider.
         bar.setStyleSheet("background-color: #16181d;")
-        bar.setFixedHeight(48)
+        bar.setFixedHeight(36)
         h = QHBoxLayout(bar)
-        h.setContentsMargins(14, 11, 10, 11)
+        h.setContentsMargins(12, 5, 8, 5)
         h.setSpacing(8)
 
         title = QLabel("MIDI ACTIVITY")
@@ -110,10 +110,12 @@ class MidiLogPanel(QWidget):
         self._filter_combo = QComboBox()
         self._filter_combo.setMaximumWidth(140)
         self._filter_combo.setFixedHeight(26)
+        # padding 0 vertical so the combo's rendered height matches the
+        # fixed 26 px and the dropdown doesn't clip its baseline.
         self._filter_combo.setStyleSheet(
             "QComboBox { color: #c2c6cc; background-color: #0e0f12; "
             "border: 1px solid #2c313b; border-radius: 3px; "
-            "padding: 1px 6px; font-size: 11px; }"
+            "padding: 0 6px; font-size: 11px; }"
             "QComboBox::drop-down { border: none; }"
         )
         for f in MidiFilter:
@@ -124,8 +126,11 @@ class MidiLogPanel(QWidget):
         clear_btn = QPushButton("Clear")
         clear_btn.setFlat(True)
         clear_btn.setFixedHeight(26)
+        # Reset global QPushButton padding/border so fixed-height matches.
         clear_btn.setStyleSheet(
-            "color: #8a9099; font-size: 11px; padding: 2px 8px;"
+            "QPushButton { color: #8a9099; font-size: 11px; "
+            "padding: 0 8px; border: none; background: transparent; }"
+            "QPushButton:hover { color: #c2c6cc; }"
         )
         clear_btn.clicked.connect(self._clear_all)
         h.addWidget(clear_btn)
@@ -134,7 +139,8 @@ class MidiLogPanel(QWidget):
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setFixedSize(28, 26)
         self._toggle_btn.setStyleSheet(
-            "color: #c2c6cc; font-size: 14px; padding: 0; margin: 0;"
+            "QPushButton { color: #c2c6cc; font-size: 14px; "
+            "padding: 0; margin: 0; border: none; background: transparent; }"
         )
         self._toggle_btn.clicked.connect(self.toggle_collapsed)
         h.addWidget(self._toggle_btn)

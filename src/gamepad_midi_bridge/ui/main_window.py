@@ -283,9 +283,18 @@ class MainWindow(QMainWindow):
         # presets, marketplace, etc). Hidden by default — toggled via the
         # status-bar Split button.
         body_splitter = QSplitter(Qt.Vertical)
-        # 6 px handle — visual styling comes from the global styles.qss
-        # ``QSplitter::handle`` rule so every splitter looks identical.
         body_splitter.setHandleWidth(6)
+        # IMPORTANT: this MUST be a per-widget setStyleSheet, not a global
+        # ``QSplitter::handle`` rule in styles.qss. On macOS Qt 6 a global
+        # rule breaks mouse-event dispatch to the handle (drag stops working
+        # app-wide). Per-widget styling works fine. Cargo-cult cleanup that
+        # removes this call will silently break dragging — leave it alone.
+        body_splitter.setStyleSheet(
+            "QSplitter::handle:vertical { "
+            "background-color: #3a414e; "
+            "} "
+            "QSplitter::handle:vertical:hover { background-color: #4a5260; }"
+        )
         # Children NOT collapsible — dragging the handle should resize,
         # not snap-to-zero. Collapse/expand goes through each panel's
         # toggle button instead (which we wire to setSizes below).
@@ -299,6 +308,14 @@ class MainWindow(QMainWindow):
         # context-properties pane — Figma-style.
         content_splitter = QSplitter(Qt.Horizontal)
         content_splitter.setHandleWidth(6)
+        # See body_splitter above — per-widget styling is mandatory; global
+        # ``QSplitter::handle`` QSS breaks drag on macOS Qt 6.
+        content_splitter.setStyleSheet(
+            "QSplitter::handle:horizontal { "
+            "background-color: #3a414e; "
+            "} "
+            "QSplitter::handle:horizontal:hover { background-color: #4a5260; }"
+        )
         content_splitter.setChildrenCollapsible(False)
 
         # Workspace A — the primary tabs.
@@ -346,12 +363,12 @@ class MainWindow(QMainWindow):
         # Minimum height = header strip only (36 px). Lets the user drag the
         # handle down to "just header visible" but no further. Collapse via
         # toggle button uses the same 36 px.
-        self._log_console.setMinimumHeight(48)
+        self._log_console.setMinimumHeight(36)
         body_splitter.addWidget(self._log_console)
 
         # MIDI Activity Log Panel — scrolling MIDI message feed
         self._midi_log_panel = MidiLogPanel()
-        self._midi_log_panel.setMinimumHeight(48)
+        self._midi_log_panel.setMinimumHeight(36)
         body_splitter.addWidget(self._midi_log_panel)
 
         body_splitter.setStretchFactor(0, 1)
@@ -865,7 +882,7 @@ class MainWindow(QMainWindow):
             # Hide divider1 — it separated start/panic from toggles in wide
             # mode; in compact mode the row break is the separator.
             self._status_divider1.setVisible(False)
-            self._status_bar.setFixedHeight(116)
+            self._status_bar.setFixedHeight(100)
         else:
             # Everything in row 1
             self._status_row1_layout.addWidget(self._title_col_widget, 1)
@@ -1131,7 +1148,7 @@ class MainWindow(QMainWindow):
     # Header strip height when a bottom panel is collapsed. Matches the
     # ``setFixedHeight(36)`` used inside ``LogConsole._build_header`` and
     # ``MidiLogPanel._build_header``.
-    _COLLAPSED_PANEL_PX = 48
+    _COLLAPSED_PANEL_PX = 36
     _OPEN_CONSOLE_PX = 200
     _OPEN_MIDI_PX = 200
 
@@ -1319,6 +1336,13 @@ class MainWindow(QMainWindow):
         self._meter2.setVisible(False)
         self._live_splitter = QSplitter(Qt.Horizontal)
         self._live_splitter.setHandleWidth(6)
+        # Per-widget setStyleSheet — see body_splitter comment.
+        self._live_splitter.setStyleSheet(
+            "QSplitter::handle:horizontal { "
+            "background-color: #3a414e; "
+            "} "
+            "QSplitter::handle:horizontal:hover { background-color: #4a5260; }"
+        )
         self._live_splitter.addWidget(self._meter)
         self._live_splitter.addWidget(self._meter2)
         self._live_splitter.setChildrenCollapsible(False)
