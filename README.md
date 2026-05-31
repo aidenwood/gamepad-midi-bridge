@@ -46,6 +46,46 @@ python build.py                    # builds for the current OS into dist/
 
 CI workflows in `.github/workflows/` build artifacts automatically on every tag push (`v*.*.*`) and attach them to a GitHub Release.
 
+## Release flow
+
+Cutting a release is a single git operation:
+
+```bash
+git tag v2.0.0-alpha.2
+git push --tags
+```
+
+The `build-release.yml` workflow then runs three jobs in parallel:
+
+1. **`build`** — matrix runs PyInstaller on `macos-latest`, `windows-latest`, and `ubuntu-latest`; uploads each per-OS zip as an artifact.
+2. **`release`** — assembles a GitHub Release for the tag with all three zips attached.
+3. **`publish-storefront`** — uploads the same zips into the storefront's Netlify Blobs and writes the `current` manifest. The storefront's `/api/latest-release.json` + `/api/download/<os>` endpoints read from those blobs, so `midi.aidxn.com/downloads` serves the new build automatically (~60 s after the workflow completes, once the edge cache refreshes).
+
+Pre-release detection is automatic: any tag containing `-alpha` / `-beta` / `-rc` gets `prerelease: true` in the storefront manifest, which surfaces the amber `pre-release` badge on the downloads page.
+
+**Required GitHub Actions secret** (set once at <https://github.com/aidenwood/gamepad-midi-bridge/settings/secrets/actions>):
+
+- `NETLIFY_AUTH_TOKEN` — Netlify Personal Access Token with Blobs write scope. Generate at <https://app.netlify.com/user/applications#personal-access-tokens>. Same value lives in `.env` of the storefront repo for the local upload script.
+
+**Optional**:
+
+- `STOREFRONT_SITE_ID` — override the production storefront site id (`cbd6454a-c842-406a-9ff7-93e9730983cc`) for staging deploys.
+
+**Manual fallback** — if you ever need to publish a release without going through CI (backfilling a tag, hotfixing storefront content):
+
+```bash
+# inside the storefront repo
+npm run release:upload -- \
+  --site cbd6454a-c842-406a-9ff7-93e9730983cc \
+  --tag v2.0.0-alpha.2 \
+  --mac /path/to/mac.zip \
+  --win /path/to/win.zip \
+  --linux /path/to/linux.zip \
+  --prerelease --publish
+```
+
+The script merges into the existing manifest, so partial uploads (mac only now, win + linux later) are safe to re-run.
+
 ## CLI
 
 ```

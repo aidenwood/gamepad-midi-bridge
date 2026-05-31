@@ -134,3 +134,48 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Push the same per-OS zips into the storefront's Netlify Blobs so
+  # midi.aidxn.com/downloads serves them automatically. Runs in parallel
+  # with the GitHub Release job (no `needs: release` - they are independent).
+  #
+  # Required repo secret: NETLIFY_AUTH_TOKEN (Personal Access Token with
+  # Blobs write scope). Get one at:
+  #   https://app.netlify.com/user/applications#personal-access-tokens
+  # Optional repo secret: STOREFRONT_SITE_ID (defaults to the production
+  # storefront site id hardcoded in scripts/publish-to-storefront.mjs).
+  #
+  # Safe-input note: every dynamic value (tag name, repo name) reaches the
+  # publish script via env vars, not via shell interpolation in `run:` -
+  # follows GitHub's workflow-injection mitigation guidance.
+  publish-storefront:
+    name: publish to storefront (Netlify Blobs)
+    needs: build
+    runs-on: ubuntu-latest
+    # Skip cleanly when running on a fork / before secrets are wired in.
+    if: ${{ github.repository == 'aidenwood/gamepad-midi-bridge' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Netlify Blobs SDK
+        run: npm install --no-save @netlify/blobs@^10
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish artefacts to storefront Blobs
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          STOREFRONT_SITE_ID: ${{ secrets.STOREFRONT_SITE_ID }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          ARTEFACT_DIR: release-assets
+        run: node scripts/publish-to-storefront.mjs
