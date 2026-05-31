@@ -98,7 +98,7 @@ jobs:
           zip "../gamepad-midi-bridge-${TAG}-linux.zip" "Universal Controller MIDI"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gamepad-midi-bridge-${{ matrix.asset_suffix }}
           path: gamepad-midi-bridge-*-${{ matrix.asset_suffix }}.zip
