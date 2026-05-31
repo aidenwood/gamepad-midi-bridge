@@ -137,6 +137,9 @@ def test_timestamp_in_row_text(panel):
 
 def test_vertical_scrollbar_tracks_user_scroll(panel):
     """Test that _user_scrolled flag reflects manual scrolling."""
+    # Constrain the list so a scrollbar actually exists (production uses a
+    # QSplitter to size this — tests have to do it manually).
+    panel._list.setFixedHeight(120)
     # Add many rows to ensure scrollbar appears
     for i in range(30):
         panel.append_sent(0, f"NOTE#{i:02d}", i, i)

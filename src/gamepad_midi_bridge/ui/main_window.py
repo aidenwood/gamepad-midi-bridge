@@ -279,7 +279,11 @@ class MainWindow(QMainWindow):
         # status-bar Split button.
         body_splitter = QSplitter(Qt.Vertical)
         body_splitter.setHandleWidth(2)
-        body_splitter.setChildrenCollapsible(False)
+        # Children collapsible — both bottom panels can be dragged closed via
+        # the splitter handle. Their own toggle buttons emit
+        # ``collapse_changed`` which is wired to ``_set_bottom_panel_sizes``
+        # so the splitter is the single source of truth for sizing.
+        body_splitter.setChildrenCollapsible(True)
 
         # Figma-style workspace layout:
         #   content_splitter (horizontal): [ inspector_a | workspace_a | workspace_b | inspector_b ]
@@ -342,8 +346,20 @@ class MainWindow(QMainWindow):
         body_splitter.setStretchFactor(0, 1)
         body_splitter.setStretchFactor(1, 0)
         body_splitter.setStretchFactor(2, 0)
-        body_splitter.setSizes([640, 1 if self._log_console.is_collapsed() else 200, 1])
         self._body_splitter = body_splitter
+        # Apply initial splitter sizes from each panel's persisted collapsed
+        # state. ``_set_bottom_panel_sizes`` is the single sizing path used by
+        # toggle buttons too.
+        self._set_bottom_panel_sizes()
+
+        # Each panel's toggle button emits collapse_changed → we recompute
+        # the splitter layout. Splitter handle drags still work independently.
+        self._log_console.collapse_changed.connect(
+            lambda _collapsed: self._set_bottom_panel_sizes()
+        )
+        self._midi_log_panel.collapse_changed.connect(
+            lambda _collapsed: self._set_bottom_panel_sizes()
+        )
         root.addWidget(body_splitter, 1)
 
         # Wire the status-bar toggle buttons (created earlier inside
@@ -856,6 +872,43 @@ class MainWindow(QMainWindow):
         # visible — matches what the in-console toggle does and preserves
         # discoverability (the user can still see CONSOLE | ▾ at the bottom).
         self._log_console.set_collapsed(not want_open)
+
+    # Header strip height when a bottom panel is collapsed. Matches the
+    # ``setFixedHeight(30)`` used inside ``LogConsole._build_header`` and
+    # ``MidiLogPanel._build_header``.
+    _COLLAPSED_PANEL_PX = 30
+    _OPEN_CONSOLE_PX = 200
+    _OPEN_MIDI_PX = 200
+
+    def _set_bottom_panel_sizes(self) -> None:
+        """Recompute QSplitter sizes for the bottom dock.
+
+        Single source of truth for log-console + MIDI-activity sizing. Called
+        on every panel toggle (and once at startup). The splitter itself is
+        the only thing that resizes — panels never self-shrink, which is what
+        used to cause the drag flicker.
+        """
+        if not hasattr(self, "_body_splitter"):
+            return  # not constructed yet
+        console_h = (
+            self._COLLAPSED_PANEL_PX
+            if self._log_console.is_collapsed()
+            else self._OPEN_CONSOLE_PX
+        )
+        midi_h = (
+            self._COLLAPSED_PANEL_PX
+            if self._midi_log_panel.is_collapsed()
+            else self._OPEN_MIDI_PX
+        )
+        # Give the content area whatever's left. setStretchFactor(0, 1) on
+        # the splitter means content auto-grows when the window resizes;
+        # the absolute value here is just a sensible initial allocation.
+        total = max(self._body_splitter.height(), 720)
+        content_h = max(160, total - console_h - midi_h)
+        self._body_splitter.setSizes([content_h, console_h, midi_h])
+        # Keep the status-bar Console toggle in sync with the panel's state.
+        if hasattr(self, "_console_btn"):
+            self._console_btn.setChecked(not self._log_console.is_collapsed())
 
     def _toggle_inspector(self) -> None:
         """Show / hide the right inspector(s). When split is on, both

@@ -75,6 +75,9 @@ class LogConsole(QWidget):
     once `install_root_handler()` has been called.
     """
 
+    # Emitted on collapse/expand. MainWindow recomputes splitter sizes.
+    collapse_changed = Signal(bool)
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._signaller = _LogSignaller()
@@ -128,10 +131,14 @@ class LogConsole(QWidget):
         self._collapsed = not self._collapsed
         self._apply_collapsed()
         _write_open_state(not self._collapsed)
+        self.collapse_changed.emit(self._collapsed)
 
     def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed == self._collapsed:
+            return
         self._collapsed = collapsed
         self._apply_collapsed()
+        self.collapse_changed.emit(self._collapsed)
 
     def is_collapsed(self) -> bool:
         return self._collapsed
@@ -190,14 +197,11 @@ class LogConsole(QWidget):
         return body
 
     def _apply_collapsed(self) -> None:
-        if self._collapsed:
-            self._body.setMaximumHeight(0)
-            self._toggle_btn.setText("▴")
-            self.setMaximumHeight(30)
-        else:
-            self._body.setMaximumHeight(16777215)
-            self._toggle_btn.setText("▾")
-            self.setMaximumHeight(16777215)
+        # NOTE: the parent ``QSplitter`` owns sizing — see
+        # ``MainWindow._set_bottom_panel_sizes``. Self-imposed setMaximumHeight
+        # fights the splitter's drag re-layout and causes flicker.
+        self._toggle_btn.setText("▴" if self._collapsed else "▾")
+        self._body.setVisible(not self._collapsed)
 
     def clear(self) -> None:
         self._body.clear()
