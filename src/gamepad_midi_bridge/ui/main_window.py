@@ -248,12 +248,17 @@ class MainWindow(QMainWindow):
         else:
             # No 3D path: opaque chrome on a plain QVBoxLayout. This kills
             # the ghost-text bug for every descendant widget.
+            # NOTE: a plain QWidget does NOT honour ``background-color`` from
+            # its own stylesheet unless ``WA_StyledBackground`` is set — that's
+            # why the ghost-text bug kept reappearing. QFrame paints its
+            # background from QSS by default, so we use that here.
             self._bg_3d = None
-            chrome_widget = QWidget(central)
+            chrome_widget = QFrame(central)
             chrome_widget.setObjectName("ChromeWidget")
             chrome_widget.setAutoFillBackground(True)
+            chrome_widget.setAttribute(Qt.WA_StyledBackground, True)
             chrome_widget.setStyleSheet(
-                "QWidget#ChromeWidget { background-color: #0c0d10; }"
+                "QFrame#ChromeWidget { background-color: #0c0d10; }"
             )
             outer = QVBoxLayout(central)
             outer.setContentsMargins(0, 0, 0, 0)
@@ -278,7 +283,19 @@ class MainWindow(QMainWindow):
         # presets, marketplace, etc). Hidden by default — toggled via the
         # status-bar Split button.
         body_splitter = QSplitter(Qt.Vertical)
-        body_splitter.setHandleWidth(2)
+        # Wider handle (6 px) so the resize cursor target is reachable. 2 px
+        # was technically draggable but the hit zone was so thin macOS rarely
+        # showed the resize cursor. Subtle border + hover highlight gives
+        # users a visible affordance too.
+        body_splitter.setHandleWidth(6)
+        body_splitter.setStyleSheet(
+            "QSplitter::handle:vertical { "
+            "background-color: #16181d; "
+            "border-top: 1px solid #1c1e25; "
+            "border-bottom: 1px solid #1c1e25; "
+            "} "
+            "QSplitter::handle:vertical:hover { background-color: #2c313b; }"
+        )
         # Children collapsible — both bottom panels can be dragged closed via
         # the splitter handle. Their own toggle buttons emit
         # ``collapse_changed`` which is wired to ``_set_bottom_panel_sizes``
