@@ -1,12 +1,30 @@
 name: lint
 
 # Ruff check + format-verify on every PR. Cheap, single OS, single Python.
+# Docs-only changes are skipped via paths-ignore — no need to spin a runner
+# just to re-check a markdown edit.
 
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "halls/**"
+      - "LICENSE*"
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "halls/**"
+      - "LICENSE*"
+
+# Cancel any in-flight lint run when a newer commit lands on the same ref.
+# Stops a push storm from queueing 4 redundant runs.
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ruff:
