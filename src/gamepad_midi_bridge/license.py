@@ -1,17 +1,12 @@
-"""Free/Pro feature gating with offline-activation hooks.
+"""Free/Pro feature gating via offline Ed25519-signed licences.
 
-V1 ships with `is_pro()` always returning False — Pro panels are visible but
-locked behind an upgrade dialog. The Ed25519 verification path is wired up so
-a purchase flow can drop in later without touching the UI layer.
-
-Issuing keys (issuer-side, kept off the user's machine):
-    1. Generate one keypair with scripts/generate_license.py — embed the
-       PUBLIC key as PUBLIC_KEY_PEM below. NEVER ship the private key.
-    2. For each sale, sign the buyer's email with the private key. Distribute
-       the signed payload as the license.
-
-The signed payload is JSON: {"email": "...", "tier": "pro", "issued_at": "..."}
-followed by an Ed25519 signature.
+Pro panels render an upgrade overlay until `is_pro()` returns True. Activation
+happens when the user pastes a licence blob into the settings panel — that
+blob is the JSON payload `{"email": ..., "tier": "pro", "issued_at": ...}`
+followed by an Ed25519 signature over the payload bytes, base64-url joined
+with a `.`. Verification reads `PUBLIC_KEY_PEM` (embedded below); the matching
+private key lives in the storefront's Netlify env and never touches this
+codebase.
 """
 from __future__ import annotations
 
@@ -23,12 +18,11 @@ from typing import Optional, Set
 
 from .paths import license_path
 
-# TEST public key (matches scripts/public_key.test.pem + private_key.test.pem).
-# Used for dev / local testing of the license-activate flow. Swap for the
-# production public key before tagging v2.0.0 — paste contents of
-# scripts/public_key.pem here.
+# Production Ed25519 public key — matches scripts/public_key.pem. The
+# matching private key lives in the storefront's Netlify env (LICENSE_PRIV_KEY_V1)
+# and never enters this codebase.
 PUBLIC_KEY_PEM: bytes = b"""-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEANE5ihyMUoHerpfxmquOtXLwjrj5d/9V+7dzny4O5krY=
+MCowBQYDK2VwAyEACfeGGd2FvDL7zy5uY87eB9EfAbgzdDC84+p1snjJz8I=
 -----END PUBLIC KEY-----
 """
 
@@ -60,10 +54,7 @@ def state() -> LicenseState:
 
 
 def is_pro() -> bool:
-    # TESTING UNLOCK — all Pro features open during the PS5 controller
-    # bring-up. Revert this line to `return state().is_pro` before any
-    # release build goes out, otherwise the signed-license gate is bypassed.
-    return True
+    return state().is_pro
 
 
 def feature_enabled(feature: str) -> bool:

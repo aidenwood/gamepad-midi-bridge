@@ -32,8 +32,7 @@ Each hall = one domain. Open the hall you're working in; rooms inside are scoped
 - Never `npx` — Python project, use `pip install` / venv.
 - PyInstaller spec: `Universal Controller MIDI.spec` is canonical. `Gamepad MIDI Bridge.spec` is the OLD name and slated for deletion — do not edit it.
 - Supabase migrations live in the **Store repo only** (`PS5-MIDI-Bridge-Store/supabase/migrations/`). Desktop reads with the public anon key — never write schema from here.
-- License `PUBLIC_KEY_PEM` in `src/gamepad_midi_bridge/license.py` is the TEST key. Production key swap is `LAUNCH.md` step 1.0 before tagging v2.0.0.
-- `is_pro()` currently hard-returns `True` for bring-up testing — revert before release builds.
+- License `PUBLIC_KEY_PEM` in `src/gamepad_midi_bridge/license.py` is the PRODUCTION Ed25519 key — matches `scripts/public_key.pem`. The matching private key lives in the storefront's Netlify env (`LICENSE_PRIV_KEY_V1`) and must never enter this repo.
 - Telemetry endpoint `https://midi.aidxn.com/api/telemetry` is hardcoded (`telemetry.py:32`) and is NOT yet live. No env-var override yet — wiring deferred.
 - BridgeWorker poll loop is hot — heavy work goes in slots on the GUI thread, never inside `_loop`.
 - Pure-stdlib analysis modules stay pure: no Qt imports, no hardware reads, caller supplies floats.
