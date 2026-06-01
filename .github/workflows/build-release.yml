@@ -24,6 +24,10 @@ jobs:
   build:
     name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Hard ceiling so a stuck runner can't eat the monthly minute budget.
+    # macOS at 10× the multiplier is the costliest stall — 25 min of wall
+    # time = 250 billable minutes worst case, vs ~150 for a normal run.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -115,6 +119,7 @@ jobs:
     name: publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       # Download all three per-OS artifacts into a single folder. v4 changed
       # behaviour: omitting `name` downloads every artifact, each into its own
@@ -158,6 +163,7 @@ jobs:
     name: publish to storefront (Netlify Blobs)
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Skip cleanly when running on a fork / before secrets are wired in.
     if: ${{ github.repository == 'aidenwood/gamepad-midi-bridge' }}
     steps:
