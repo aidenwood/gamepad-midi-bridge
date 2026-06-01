@@ -48,7 +48,7 @@ voiceover required — text overlays + screen + controller cam.
 - Hard cut to the app icon on a clean dark background
 - Wordmark fade in: **GAMEPAD → MIDI BRIDGE**
 - Beneath: **"$49 one-time. Free tier with no time limit."**
-- URL: **store.aidxn.com**
+- URL: **midi.aidxn.com**
 
 ### 01:25 – 01:30 — Tag
 - 1-second card: **"by Aidxn Design"** (teal on dark)

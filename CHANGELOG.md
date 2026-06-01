@@ -61,7 +61,7 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 - In-app Marketplace tab — browse + install presets shared by other users
 - Supabase schema with RLS, trusted-author auto-approve, full-text search
 - 8 seed presets ready to ingest on day one
-- Astro store site at `store.aidxn.com` — landing, recovery, success,
+- Astro store site at `midi.aidxn.com` — landing, recovery, success,
   privacy, terms, admin dashboard, OG image generator
 - Stripe Checkout → Netlify Function → Ed25519-signed license email via
   Resend; idempotent on webhook retries, enumeration-safe recovery

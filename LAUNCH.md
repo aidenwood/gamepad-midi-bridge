@@ -60,11 +60,11 @@ git push
 2. Copy the **price ID** (`price_...`) — used by the webhook to sanity-check that incoming sessions are for this product.
 3. Stripe Dashboard → Settings → Tax → enable **Stripe Tax**. Add your ABN.
 4. Stripe Dashboard → Payment Links → New → pick the Pro product. In **"After payment"**, choose "Don't show confirmation page" and set the custom URL to:
-   `https://store.aidxn.com/success?session_id={CHECKOUT_SESSION_ID}`
+   `https://midi.aidxn.com/success?session_id={CHECKOUT_SESSION_ID}`
    Copy the resulting `https://buy.stripe.com/...` URL.
 5. Paste the Payment Link URL into the four `https://buy.stripe.com/...` strings in `src/pages/index.astro` + `src/components/Nav.astro` (already wired for the V1 link).
 6. Stripe Dashboard → Developers → API keys → copy the **live secret key** (`sk_live_...`).
-7. Stripe Dashboard → Developers → Webhooks → Add endpoint → URL = `https://store.aidxn.com/api/stripe-webhook` → event = `checkout.session.completed` → copy the **signing secret** (`whsec_...`).
+7. Stripe Dashboard → Developers → Webhooks → Add endpoint → URL = `https://midi.aidxn.com/api/stripe-webhook` → event = `checkout.session.completed` → copy the **signing secret** (`whsec_...`).
 
 ## 3. Resend (5 min)
 
@@ -126,10 +126,10 @@ On the `aidxn.com` DNS zone (Netlify DNS or your registrar):
 
 | Type | Name | Value |
 |---|---|---|
-| `CNAME` | `store` | `gamepad-midi-bridge-store.netlify.app` |
+| `CNAME` | `midi` | `gamepad-midi-bridge-store.netlify.app` |
 | (whatever Resend asked for in step 3.2) | … | … |
 
-Then in Netlify → Domain management → Add custom domain → `store.aidxn.com`. Wait for cert issuance (Netlify does Let's Encrypt automatically).
+Then in Netlify → Domain management → Add custom domain → `midi.aidxn.com`. Wait for cert issuance (Netlify does Let's Encrypt automatically).
 
 ## 8. Seed the marketplace (1 min)
 
@@ -139,7 +139,7 @@ SUPABASE_URL='https://...' SUPABASE_SERVICE_ROLE_KEY='eyJ...' \
     python scripts/load_seed_presets.py
 ```
 
-Refresh `store.aidxn.com/marketplace` — should show 8 presets.
+Refresh `midi.aidxn.com/marketplace` — should show 8 presets.
 
 ## 9. Build + tag the first release (10 min)
 
@@ -155,7 +155,7 @@ GitHub Actions builds zips for mac/win/linux and attaches them to a GitHub Relea
 
 ## 10. End-to-end smoke test
 
-- Visit `store.aidxn.com` → click "Buy Pro $49" → use a Stripe test card (`4242 4242 4242 4242`, any future expiry, any CVC) — or your own card if you're confident.
+- Visit `midi.aidxn.com` → click "Buy Pro $49" → use a Stripe test card (`4242 4242 4242 4242`, any future expiry, any CVC) — or your own card if you're confident.
 - Within 10 seconds, you should receive a license email at the address you used. The body contains the license blob.
 - Download the free `.app` → install → About → "Enter license key" → paste the blob.
 - "Pro unlocked" dialog. All Pro panels' lock overlays disappear.

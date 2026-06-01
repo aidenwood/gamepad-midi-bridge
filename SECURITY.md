@@ -16,7 +16,7 @@ Do NOT open a public GitHub issue for security reports.
 
 In scope:
 - The desktop app (`gamepad-midi-bridge`) on macOS, Windows, Linux
-- The store site at `store.aidxn.com`
+- The store site at `midi.aidxn.com`
 - The Netlify Functions: `stripe-webhook`, `resend-license`, `telemetry`, `presets-list`, `preset-get`
 - The Ed25519 license verifier in `src/gamepad_midi_bridge/license.py`
 
@@ -40,4 +40,4 @@ Reporters credited here once a fix has shipped. (Empty so far — be the first.)
 
 ## Privacy
 
-The desktop app does not transmit any data by default. Telemetry is opt-in, identity-stripped server-side, and never includes mapping or preset contents. Full policy at `store.aidxn.com/privacy`.
+The desktop app does not transmit any data by default. Telemetry is opt-in, identity-stripped server-side, and never includes mapping or preset contents. Full policy at `midi.aidxn.com/privacy`.

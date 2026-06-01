@@ -114,7 +114,7 @@ Full docs in [`docs/`](docs/README.md): user manual, architecture, contributing,
 
 ## Licensing
 
-Pro features verify offline against an Ed25519-signed JSON blob (`src/gamepad_midi_bridge/license.py`). The matching private key lives only in `store.aidxn.com`'s Netlify env vars and is used by the Stripe webhook to sign per-purchase blobs delivered via Resend.
+Pro features verify offline against an Ed25519-signed JSON blob (`src/gamepad_midi_bridge/license.py`). The matching private key lives only in `midi.aidxn.com`'s Netlify env vars and is used by the Stripe webhook to sign per-purchase blobs delivered via Resend.
 
 ## Layout
 
@@ -144,6 +144,6 @@ tests/                 pytest suite (47 tests)
 
 ## Status
 
-V1 ships free + Pro tiers; commerce pipeline live at `store.aidxn.com` (Stripe Checkout → Netlify Function → Ed25519-signed license email via Resend). Marketplace + preset sharing wired into the in-app Marketplace tab.
+V1 ships free + Pro tiers; commerce pipeline live at `midi.aidxn.com` (Stripe Checkout → Netlify Function → Ed25519-signed license email via Resend). Marketplace + preset sharing wired into the in-app Marketplace tab.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full feature list.

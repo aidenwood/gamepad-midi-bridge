@@ -1,6 +1,6 @@
 # PS5 MIDI Bridge — Project Context
 
-PS5 DualSense / Xbox controller → MIDI bridge. Cross-platform desktop app (macOS / Windows / Linux). Free tier + Pro tier (Ed25519-signed offline licence). Sold via `store.aidxn.com` (Stripe → Netlify Function → Resend).
+PS5 DualSense / Xbox controller → MIDI bridge. Cross-platform desktop app (macOS / Windows / Linux). Free tier + Pro tier (Ed25519-signed offline licence). Sold via `midi.aidxn.com` (Stripe → Netlify Function → Resend).
 
 ## Stack one-liner
 

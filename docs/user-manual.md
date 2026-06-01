@@ -257,7 +257,7 @@ The in-app **Help** tab mirrors this list and adds clickable buttons to open you
 
 **Opt-in additions:**
 
-- *Update check* (default on) — a single anonymous request to `store.aidxn.com` at launch to compare versions. No identifying fields. Toggle in **Settings → Updates**.
+- *Update check* (default on) — a single anonymous request to `midi.aidxn.com` at launch to compare versions. No identifying fields. Toggle in **Settings → Updates**.
 - *Anonymous usage stats* (default off) — counts feature usage so we know where to invest. Toggle in **Settings → Privacy**. Server strips identifying fields server-side as belt-and-braces.
 
 Crash reports are **never uploaded**. They land in `<user_data_dir>/crashes/` and stay there unless you attach one to a support email.

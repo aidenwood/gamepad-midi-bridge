@@ -134,7 +134,7 @@ def _patch_macos_plist(app_bundle: Path) -> None:
         data[key] = value
 
     # Custom URL scheme — registers `gmb://` with macOS so deep links from
-    # store.aidxn.com (e.g. ``gmb://activate?key=<license_blob>``) open this
+    # midi.aidxn.com (e.g. ``gmb://activate?key=<license_blob>``) open this
     # app and trigger one-click license activation. The handler lives in
     # ``app.py::_MacOpenUrlFilter`` → ``MainWindow.handle_deep_link``.
     # Also registers ``gamepad-midi-bridge://`` as a long-form alias for

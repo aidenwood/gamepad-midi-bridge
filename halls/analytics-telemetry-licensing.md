@@ -4,7 +4,7 @@ Free vs Pro gating (Ed25519 offline-verified licence), opt-in telemetry, note / 
 
 ### Licensing & Gating
 
-Ed25519-signed JSON blob, verified offline against `PUBLIC_KEY_PEM` in `license.py`. The Stripe webhook on `store.aidxn.com` signs blobs with the matching private key (lives only in that Netlify project's env vars) and delivers them via Resend.
+Ed25519-signed JSON blob, verified offline against `PUBLIC_KEY_PEM` in `license.py`. The Stripe webhook on `midi.aidxn.com` signs blobs with the matching private key (lives only in that Netlify project's env vars) and delivers them via Resend.
 
 ```python
 # license.py — public surface
