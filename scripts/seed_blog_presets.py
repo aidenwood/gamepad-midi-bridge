@@ -745,8 +745,13 @@ def main() -> None:
 
     written = 0
     for name, blob in PRESETS.items():
-        # File name = preset name. Slashes / colons would break paths.
-        safe = name.replace("/", "-").replace(":", "")
+        # File name = preset name. Strip every Windows-reserved char so the
+        # bundled presets unpack cleanly on NTFS — `actions/checkout` aborts
+        # the whole CI build if any tracked path contains <>:"/\|?*.
+        safe = name
+        for bad, repl in (("/", "-"), (":", ""), ("|", "-"), ("\\", "-"),
+                          ("<", ""), (">", ""), ('"', ""), ("?", ""), ("*", "")):
+            safe = safe.replace(bad, repl)
         path = target / f"{safe}.json"
         path.write_text(json.dumps(blob, indent=2) + "\n", encoding="utf-8")
         written += 1
