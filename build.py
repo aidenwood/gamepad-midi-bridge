@@ -99,7 +99,10 @@ def build() -> None:
     if system == "Darwin":
         _patch_macos_plist(dist / f"{APP_NAME}.app")
 
-    print(f"\nBuild complete → {dist}")
+    # ASCII-only: Windows GitHub runners default stdout to cp1252, so a Unicode
+    # arrow here aborts the script (with exit code 1) AFTER PyInstaller has
+    # already produced the bundle - taking the whole release down with it.
+    print(f"\nBuild complete -> {dist}")
 
 
 def _patch_macos_plist(app_bundle: Path) -> None:
