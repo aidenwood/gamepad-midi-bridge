@@ -9,12 +9,25 @@ name: build-release
 #
 # Builds the PyInstaller bundle on each OS, uploads per-OS zips as artifacts,
 # then a final job assembles a GitHub Release with all three zips attached.
+#
+# CI minute budget:
+# - Tag pushes build all three OS (real release).
+# - Manual dispatch defaults to macOS-only — most bug-fix iterations are
+#   mac-specific and Windows runners cost 2× while macOS costs 10× per
+#   minute, so skipping Windows + Linux saves a lot while iterating.
+#   Flip `build_all_os` to "true" on dispatch to build everything (e.g.
+#   when validating a cross-platform change before a real tag).
 
 on:
   push:
     tags:
       - "v*.*.0"
   workflow_dispatch:
+    inputs:
+      build_all_os:
+        description: "Build Windows + Linux too? (default: macOS only)"
+        type: boolean
+        default: false
 
 # GITHUB_TOKEN is provided automatically by Actions; `contents: write` is
 # required for softprops/action-gh-release to create the release + upload assets.
@@ -25,6 +38,13 @@ jobs:
   build:
     name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Skip Windows + Linux on a default workflow_dispatch — most iterations
+    # are mac-only and the matrix `if:` evaluates per-entry, so this fires
+    # only for macOS while the other entries are reported as Skipped.
+    if: |
+      github.event_name == 'push' ||
+      github.event.inputs.build_all_os == 'true' ||
+      matrix.os == 'macos-latest'
     # Hard ceiling so a stuck runner can't eat the monthly minute budget.
     # macOS at 10× the multiplier is the costliest stall — 25 min of wall
     # time = 250 billable minutes worst case, vs ~150 for a normal run.
