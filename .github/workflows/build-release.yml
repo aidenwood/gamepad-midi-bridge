@@ -35,30 +35,38 @@ permissions:
   contents: write
 
 jobs:
+  # Compute the OS matrix dynamically so workflow_dispatch can default to
+  # macOS-only while tag pushes still build all three. GitHub Actions does
+  # not allow `matrix` context in a job-level `if:`, so we have to vary the
+  # matrix itself rather than skip entries.
+  setup:
+    name: pick OS targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          BUILD_ALL: ${{ github.event.inputs.build_all_os }}
+        run: |
+          if [ "$EVENT" = "push" ] || [ "$BUILD_ALL" = "true" ]; then
+            echo 'matrix={"include":[{"os":"macos-latest","asset_suffix":"macos"},{"os":"windows-latest","asset_suffix":"windows"},{"os":"ubuntu-latest","asset_suffix":"linux"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"os":"macos-latest","asset_suffix":"macos"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: build (${{ matrix.os }})
+    needs: setup
     runs-on: ${{ matrix.os }}
-    # Skip Windows + Linux on a default workflow_dispatch — most iterations
-    # are mac-only and the matrix `if:` evaluates per-entry, so this fires
-    # only for macOS while the other entries are reported as Skipped.
-    if: |
-      github.event_name == 'push' ||
-      github.event.inputs.build_all_os == 'true' ||
-      matrix.os == 'macos-latest'
     # Hard ceiling so a stuck runner can't eat the monthly minute budget.
     # macOS at 10× the multiplier is the costliest stall — 25 min of wall
     # time = 250 billable minutes worst case, vs ~150 for a normal run.
     timeout-minutes: 25
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            asset_suffix: macos
-          - os: windows-latest
-            asset_suffix: windows
-          - os: ubuntu-latest
-            asset_suffix: linux
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
       - name: Checkout
