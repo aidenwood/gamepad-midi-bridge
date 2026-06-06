@@ -1,11 +1,11 @@
 name: build-release
 
-# Triggers only on MAJOR-version tags (v2.0.0, v3.0.0, v4.0.0, ...).
-# Intermediate tags (v2.1.0, v2.0.1) are intentionally ignored — we only
-# pay GitHub for full 3-OS builds at proper milestone releases. Local
-# testing covers everything in between.
+# Triggers on MAJOR or MINOR semver tags (v2.0.0, v2.1.0, v3.0.0, ...).
+# Patch releases (v2.0.1, v2.1.3) are skipped — we only pay GitHub for
+# full 3-OS builds at MINOR milestones and above. workflow_dispatch is
+# available to manually fire a build for any tag (e.g. a quick hotfix).
 #
-# Example: `git tag v2.0.0 && git push origin v2.0.0`
+# Example: `git tag v2.1.0 && git push origin v2.1.0`
 #
 # Builds the PyInstaller bundle on each OS, uploads per-OS zips as artifacts,
 # then a final job assembles a GitHub Release with all three zips attached.
@@ -13,7 +13,8 @@ name: build-release
 on:
   push:
     tags:
-      - "v*.0.0"
+      - "v*.*.0"
+  workflow_dispatch:
 
 # GITHUB_TOKEN is provided automatically by Actions; `contents: write` is
 # required for softprops/action-gh-release to create the release + upload assets.

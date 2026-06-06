@@ -6,6 +6,12 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
+## [2.1.0] - 2026-06-06
+
+**Better unzip compatibility.** Refreshed macOS / Windows / Linux release bundles to use a delivery path that survives third-party download proxies and macOS Archive Utility's stricter zip validation. Customers who saw "Error 94 — Bad message" expanding the v2.0.0 macOS zip should re-download from the website.
+
+No behavioural changes to the app itself — pure packaging + distribution fix.
+
 ## [1.0.0] - 2026-05-26
 
 **First public release.** Turn any PS5 or Xbox controller into a cross-platform MIDI controller — calibration, mapping, marketplace, seven DAW/VJ connectors, and adaptive trigger haptics. Free tier covers live bridging end-to-end; Pro tier unlocks the editor, multi-controller, OSC, and the marketplace publisher.
