@@ -82,6 +82,19 @@ def deactivate() -> None:
 # --------------------------------------------------------------------- internals
 
 
+def _b64url_decode(s: str) -> bytes:
+    """urlsafe-base64 decode tolerant of stripped `=` padding.
+
+    The storefront issuer (`src/lib/license.ts`) strips trailing `=` per the
+    URL-safe convention in RFC 4648 §5. Python's `urlsafe_b64decode` requires
+    the padding, so we re-add it before decoding. Without this, every real
+    licence ever issued raises `binascii.Error: Incorrect padding`.
+    """
+    s = s.strip()
+    pad = (-len(s)) % 4
+    return base64.urlsafe_b64decode(s + ("=" * pad))
+
+
 def _load_and_verify() -> LicenseState:
     path = license_path()
     if not path.exists():
@@ -89,8 +102,8 @@ def _load_and_verify() -> LicenseState:
     try:
         blob = path.read_text(encoding="utf-8").strip()
         payload_b64, sig_b64 = blob.split(".")
-        payload_bytes = base64.urlsafe_b64decode(payload_b64.encode("ascii"))
-        sig_bytes = base64.urlsafe_b64decode(sig_b64.encode("ascii"))
+        payload_bytes = _b64url_decode(payload_b64)
+        sig_bytes = _b64url_decode(sig_b64)
         payload = json.loads(payload_bytes.decode("utf-8"))
         if not _verify_signature(payload_bytes, sig_bytes):
             return LicenseState(is_pro=False, reason="Signature invalid")

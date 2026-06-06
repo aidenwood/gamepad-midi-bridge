@@ -35,6 +35,16 @@ _FS: dict[str, int] = {
     "l": FS_L,
 }
 
+# Min height per size — Qt on macOS will otherwise compress QPushButton to the
+# native button height (~16-18px), clipping the rendered text to a horizontal
+# band through the middle of each letter. Pick generously so ascenders +
+# descenders stay inside the pill background.
+_MIN_H: dict[str, int] = {
+    "s": 24,
+    "m": 32,
+    "l": 40,
+}
+
 # Teal accent slightly darkened for hover/pressed
 _TEAL_HOVER   = "#25b8a5"
 _TEAL_PRESSED = "#1e9e8e"
@@ -47,6 +57,7 @@ _CORAL_PRESSED = "#e84848"
 def _build_stylesheet(variant: Variant, size: Size) -> str:
     pv, ph = _PAD[size]
     fs = _FS[size]
+    mh = _MIN_H[size]
 
     if variant == "primary":
         base = f"""
@@ -56,6 +67,7 @@ def _build_stylesheet(variant: Variant, size: Size) -> str:
                 border: none;
                 border-radius: {R_M}px;
                 padding: {pv}px {ph}px;
+                min-height: {mh}px;
                 font-size: {fs}px;
                 font-weight: {FW_MED};
             }}
@@ -85,6 +97,7 @@ def _build_stylesheet(variant: Variant, size: Size) -> str:
                 border: 1px solid {BORDER_SUBTLE};
                 border-radius: {R_M}px;
                 padding: {pv}px {ph}px;
+                min-height: {mh}px;
                 font-size: {fs}px;
                 font-weight: {FW_MED};
             }}
@@ -115,6 +128,7 @@ def _build_stylesheet(variant: Variant, size: Size) -> str:
                 border: none;
                 border-radius: {R_M}px;
                 padding: {pv}px {ph}px;
+                min-height: {mh}px;
                 font-size: {fs}px;
                 font-weight: {FW_MED};
             }}
@@ -144,6 +158,7 @@ def _build_stylesheet(variant: Variant, size: Size) -> str:
                 border: none;
                 border-radius: {R_M}px;
                 padding: {pv}px {ph}px;
+                min-height: {mh}px;
                 font-size: {fs}px;
                 font-weight: {FW_MED};
             }}

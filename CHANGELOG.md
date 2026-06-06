@@ -6,6 +6,13 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
+## [2.1.2] - 2026-06-06
+
+**License activation + About-page button rendering.** Two regressions found while testing v2.1.1 end-to-end:
+
+- **License activation now accepts standard URL-safe base64 keys.** The storefront issuer strips trailing `=` padding per RFC 4648 §5; the desktop decoder required the padding and bailed with `Incorrect padding`. Every real licence ever emailed was undecodeable. Decoder now re-adds padding before decode so both forms work.
+- **About-tab button text no longer clips to a middle band.** Added explicit `min-height` to the UIButton stylesheet — Qt on macOS was otherwise letting QPushButton compress to the native ~16px button height, slicing ascenders + descenders off every label.
+
 ## [2.1.1] - 2026-06-06
 
 **macOS Gatekeeper fix.** PyInstaller's ad-hoc signature was being invalidated by our own Info.plist patch step, which caused macOS to show "this app is damaged and can't be opened" on freshly downloaded builds. The build script now re-signs the bundle after patching, so Gatekeeper sees a valid ad-hoc seal and falls back to the standard "from an unidentified developer" prompt — users right-click → Open and they're in. No behaviour changes to the app itself.
