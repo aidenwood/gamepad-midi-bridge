@@ -6,6 +6,12 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
+## [2.1.5] - 2026-06-06
+
+**Live input now flows on macOS — visualiser, MIDI, and stats update in real time.** Bridge worker polls joystick state from its own QThread, but SDL's HIDAPI backend on macOS hooks IOHIDManager callbacks that only fire on the thread which initialised the video subsystem (the main thread). The worker's `pygame.event.pump()` therefore never serviced HID reports, so `get_axis()` / `get_button()` returned the values captured at controller-attach time forever — controller showed connected but every visualiser stayed frozen at zero and Total MIDI Messages held at 0.
+
+The QApplication entry point now spins a 120 Hz `QTimer` on the main thread that pumps SDL events. Bridge worker behaviour unchanged.
+
 ## [2.1.4] - 2026-06-06
 
 **Bluetooth-connected controllers now detected on macOS.** SDL2 on macOS 12+ silently fails to enumerate Bluetooth-paired DualSense + Xbox controllers under its default IOHID backend — the OS exposes them only via GameController.framework, which SDL's IOHID path doesn't follow. Enabled SDL's bundled HIDAPI backend with `SDL_JOYSTICK_HIDAPI=1` (+ per-controller hints) so pygame sees both USB and Bluetooth transports. cython-hidapi is already a hard dep so no install changes.

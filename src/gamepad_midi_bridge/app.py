@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QTimer
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -71,7 +71,29 @@ def run(argv: Optional[List[str]] = None) -> int:
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
+    # Main-thread SDL event pump — needed for HIDAPI on macOS to actually
+    # deliver HID reports for Bluetooth-paired controllers. SDL's HIDAPI
+    # backend hooks IOHIDManager callbacks, which only fire on the thread
+    # that initialized the video subsystem (the main thread). The bridge
+    # worker calls pygame.event.pump() from its own QThread, but those
+    # calls don't service the main-thread callbacks — so axes + buttons
+    # stay frozen at attach time forever even though the controller shows
+    # as connected. ~120Hz pump on the main thread fixes it.
+    _sdl_pump_timer = QTimer()
+    _sdl_pump_timer.setInterval(8)
+    def _pump_sdl_events() -> None:
+        try:
+            import pygame
+            if pygame.get_init():
+                pygame.event.pump()
+        except Exception:
+            pass
+    _sdl_pump_timer.timeout.connect(_pump_sdl_events)
+    _sdl_pump_timer.start()
+
     win = MainWindow()
+    # Keep the pump timer alive for the lifetime of the window.
+    win._sdl_pump_timer = _sdl_pump_timer
 
     # Check for background/headless mode (feature #12)
     import os
