@@ -6,6 +6,10 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
+## [2.1.4] - 2026-06-06
+
+**Bluetooth-connected controllers now detected on macOS.** SDL2 on macOS 12+ silently fails to enumerate Bluetooth-paired DualSense + Xbox controllers under its default IOHID backend — the OS exposes them only via GameController.framework, which SDL's IOHID path doesn't follow. Enabled SDL's bundled HIDAPI backend with `SDL_JOYSTICK_HIDAPI=1` (+ per-controller hints) so pygame sees both USB and Bluetooth transports. cython-hidapi is already a hard dep so no install changes.
+
 ## [2.1.3] - 2026-06-06
 
 **Help tab no longer crashes on macOS 26.5.** The decorative 3D logo in the Help hero (a `QWebEngineView` instance) was crashing Chromium child-process startup inside `PySide::getWrapperForQObject`, which pygame's signal parachute then turned into an `EXC_BAD_ACCESS` app crash. The 3D logo now respects the same `GMB_ENABLE_3D=1` opt-in env var that the background visualiser already uses — opt-in by default so Help is safe.

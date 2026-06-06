@@ -14,6 +14,18 @@ from typing import List, Optional, Tuple
 # for a display server (Linux servers / CI / packaged apps).
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
+# Force SDL to use its bundled HIDAPI backend for game-controller enumeration.
+# Without these hints, SDL2 on macOS 12+ falls back to IOHID, which silently
+# misses Bluetooth-connected DualSense + Xbox controllers — the OS exposes
+# them only through GameController.framework, and SDL's IOHID path doesn't
+# follow that. With HIDAPI enabled, SDL talks to the controllers directly
+# over USB or Bluetooth HID and sees both transports. cython-hidapi is a
+# hard project dep so the backend is guaranteed available.
+os.environ.setdefault("SDL_JOYSTICK_HIDAPI", "1")
+os.environ.setdefault("SDL_JOYSTICK_HIDAPI_PS5", "1")
+os.environ.setdefault("SDL_JOYSTICK_HIDAPI_PS4", "1")
+os.environ.setdefault("SDL_JOYSTICK_HIDAPI_XBOX", "1")
+
 import pygame  # noqa: E402
 
 
