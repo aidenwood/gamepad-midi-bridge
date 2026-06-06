@@ -6,6 +6,10 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
+## [2.1.3] - 2026-06-06
+
+**Help tab no longer crashes on macOS 26.5.** The decorative 3D logo in the Help hero (a `QWebEngineView` instance) was crashing Chromium child-process startup inside `PySide::getWrapperForQObject`, which pygame's signal parachute then turned into an `EXC_BAD_ACCESS` app crash. The 3D logo now respects the same `GMB_ENABLE_3D=1` opt-in env var that the background visualiser already uses — opt-in by default so Help is safe.
+
 ## [2.1.2] - 2026-06-06
 
 **License activation + About-page button rendering.** Two regressions found while testing v2.1.1 end-to-end:

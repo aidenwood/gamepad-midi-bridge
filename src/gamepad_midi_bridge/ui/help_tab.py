@@ -32,13 +32,26 @@ from ..logger import log_path
 from ..paths import user_data_dir
 from ..updater import UpdateChecker
 
-# 3D logo widget — optional. QtWebEngineWidgets isn't a hard dep on every
-# build platform; wrap the import so a missing module doesn't take the
-# whole Help tab down.
-try:
-    from .logo_view_3d import Logo3DView
-    _LOGO_3D_AVAILABLE = True
-except Exception:
+# 3D logo widget — opt-in via GMB_ENABLE_3D=1, matching the main-window
+# background 3D gate. QWebEngineView on macOS 26.5 was crashing the Help
+# tab with EXC_BAD_ACCESS inside PySide::getWrapperForQObject — the
+# Chromium child process appears to die during construction and pygame's
+# parachute catches the resulting signal. The fault isn't Python-catchable
+# so a try/except around the constructor isn't enough; we have to skip the
+# import path entirely when 3D isn't explicitly enabled.
+import os as _os_3d
+_LOGO_3D_ENABLED = (
+    _os_3d.environ.get("GMB_ENABLE_3D") == "1"
+    and _os_3d.environ.get("GMB_NO_3D") != "1"
+)
+if _LOGO_3D_ENABLED:
+    try:
+        from .logo_view_3d import Logo3DView
+        _LOGO_3D_AVAILABLE = True
+    except Exception:
+        Logo3DView = None  # type: ignore[assignment]
+        _LOGO_3D_AVAILABLE = False
+else:
     Logo3DView = None  # type: ignore[assignment]
     _LOGO_3D_AVAILABLE = False
 

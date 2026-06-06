@@ -1,6 +1,6 @@
 [project]
 name = "gamepad-midi-bridge"
-version = "2.1.2"
+version = "2.1.3"
 description = "PS5 / Xbox controller -> MIDI bridge with stick drift calibration. For VJs, music producers, and live performers."
 authors = [{ name = "Aidxn Design", email = "aiden@rebuildrelief.com.au" }]
 requires-python = ">=3.9"
