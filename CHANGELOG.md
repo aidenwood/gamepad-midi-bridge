@@ -6,6 +6,10 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
+## [2.1.1] - 2026-06-06
+
+**macOS Gatekeeper fix.** PyInstaller's ad-hoc signature was being invalidated by our own Info.plist patch step, which caused macOS to show "this app is damaged and can't be opened" on freshly downloaded builds. The build script now re-signs the bundle after patching, so Gatekeeper sees a valid ad-hoc seal and falls back to the standard "from an unidentified developer" prompt — users right-click → Open and they're in. No behaviour changes to the app itself.
+
 ## [2.1.0] - 2026-06-06
 
 **Better unzip compatibility.** Refreshed macOS / Windows / Linux release bundles to use a delivery path that survives third-party download proxies and macOS Archive Utility's stricter zip validation. Customers who saw "Error 94 — Bad message" expanding the v2.0.0 macOS zip should re-download from the website.

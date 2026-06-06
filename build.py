@@ -98,6 +98,7 @@ def build() -> None:
 
     if system == "Darwin":
         _patch_macos_plist(dist / f"{APP_NAME}.app")
+        _resign_macos_bundle(dist / f"{APP_NAME}.app")
 
     # ASCII-only: Windows GitHub runners default stdout to cp1252, so a Unicode
     # arrow here aborts the script (with exit code 1) AFTER PyInstaller has
@@ -153,6 +154,27 @@ def _patch_macos_plist(app_bundle: Path) -> None:
     with plist_path.open("wb") as fh:
         plistlib.dump(data, fh)
     print(f"  Patched {plist_path.relative_to(ROOT)} with privacy + version + URL scheme keys")
+
+
+def _resign_macos_bundle(app_bundle: Path) -> None:
+    """Re-apply an ad-hoc code signature after Info.plist was patched.
+
+    PyInstaller ad-hoc signs the bundle as its last step. Our plist patch
+    above mutates Info.plist (a sealed file), which invalidates that seal —
+    `spctl --assess` then rejects the app with "invalid Info.plist (plist
+    or signature have been modified)" and macOS shows users "this app is
+    damaged and can't be opened" with no right-click escape. Re-signing
+    now seals the patched bundle so Gatekeeper sees a valid (if unsigned-
+    by-Developer-ID) ad-hoc signature, downgrading the message to the
+    normal "from an unidentified developer" prompt that users can right-
+    click → Open past.
+    """
+    if not app_bundle.exists():
+        print(f"  ! .app bundle not found at {app_bundle}; skipping resign")
+        return
+    cmd = ["codesign", "--force", "--deep", "--sign", "-", str(app_bundle)]
+    subprocess.check_call(cmd)
+    print(f"  Re-signed {app_bundle.name} (ad-hoc) to re-seal patched Info.plist")
 
 
 def _find_icon(system: str) -> Path | None:
