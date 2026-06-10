@@ -154,7 +154,7 @@ jobs:
       # behaviour: omitting `name` downloads every artifact, each into its own
       # subdir. We flatten with `merge-multiple: true`.
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
@@ -208,7 +208,7 @@ jobs:
         run: npm install --no-save @netlify/blobs@^10
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
