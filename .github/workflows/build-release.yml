@@ -166,7 +166,7 @@ jobs:
       # folder. `generate_release_notes: true` makes GitHub auto-build notes
       # from merged PRs since the last tag — saves us writing them manually.
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*.zip
           generate_release_notes: true
