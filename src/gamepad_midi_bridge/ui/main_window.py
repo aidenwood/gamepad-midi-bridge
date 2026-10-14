@@ -1694,9 +1694,10 @@ class MainWindow(QMainWindow):
         self._marketplace.selection_changed.connect(
             lambda p: self.push_inspector_selection("marketplace", p)
         )
-        # Deferred: Marketplace costs ~160 ms to build the first time and is
-        # never the first thing a user opens. Signals are already wired above
-        # (the widget exists, it just isn't parented into the tab yet).
+        # NOT deferred: Marketplace's signals are wired above, so it has to
+        # exist at startup. Its ~160 ms first-build is mostly Qt's one-time
+        # style/icon warm-up, which some widget has to pay regardless — see
+        # LazyTab's docstring before "optimising" this.
         tabs.addTab(self._marketplace, "Marketplace")
 
         self._connectors = ConnectorsTab()
