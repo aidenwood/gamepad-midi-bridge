@@ -11,6 +11,11 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from ..control_labels import (
+    DPAD_ARROWS, DPAD_LABELS, button_glyph, button_label, family_for,
+    has_touchpad, shoulder_label, trigger_label,
+)
+
 
 STICK_BG = QColor("#16181d")
 STICK_BORDER = QColor("#24262d")
@@ -182,11 +187,9 @@ class ControllerMeter(QWidget):
                        "No controller connected.\nPlug in a PS5 or Xbox controller, then click Start.")
             return
 
+        family = family_for(self._controller_name)
         w = self.width()
-        h = self.height()
-        margin = 24
-        stick_size = min((w - margin * 3) / 2, 180)
-        stick_y = margin + 28
+        margin = 20
 
         # Header
         p.setPen(QPen(QColor("#f5f7fa")))
@@ -196,44 +199,149 @@ class ControllerMeter(QWidget):
         p.setFont(f)
         p.drawText(margin, margin + 12, self._controller_name)
 
-        # Top-right battery + transport cluster (only if we have a DualSense handle)
         if self._battery_percent != -1:
             self._draw_status_cluster(p, w - margin, margin)
 
-        # Left stick (axes 0/1) and right stick (axes 2/3)
-        self._draw_stick(p, margin, stick_y, stick_size,
-                         self._axes.get(0, 0.0), self._axes.get(1, 0.0), "L STICK")
-        self._draw_stick(p, w - margin - stick_size, stick_y, stick_size,
-                         self._axes.get(2, 0.0), self._axes.get(3, 0.0), "R STICK")
+        # ---- Three-column layout -------------------------------------
+        # Left rail: shoulder/trigger + D-pad, right rail: shoulder/trigger
+        # + face buttons, centre: the sticks with live numeric readouts.
+        # Mirrors the Max-for-Live "Gamepad Control" layout so every input
+        # has a NAME on screen instead of an anonymous numbered square.
+        top = margin + 34
+        rail_w = max(132, min(190, int((w - margin * 2) * 0.26)))
+        centre_x = margin + rail_w + 20
+        centre_w = max(160, w - (margin + rail_w + 20) * 2)
+        right_x = w - margin - rail_w
 
-        # Triggers (axes 4/5) — horizontal bars under the sticks
-        trigger_y = stick_y + stick_size + 24
-        self._draw_trigger(p, margin, trigger_y, stick_size, self._axes.get(4, -1.0), "L2")
-        self._draw_trigger(p, w - margin - stick_size, trigger_y,
-                           stick_size, self._axes.get(5, -1.0), "R2")
+        row_h = 26
+        row_gap = 6
 
-        # Button row — face/shoulder buttons indexed 0..10
-        button_y = trigger_y + 40
-        button_size = 26
-        gap = 8
-        total = 11
-        total_width = total * button_size + (total - 1) * gap
-        start_x = (w - total_width) // 2
-        for i in range(total):
-            x = start_x + i * (button_size + gap)
-            self._draw_button(p, x, button_y, button_size, self._buttons.get(i, False), str(i))
+        # --- left rail: L1 / L2, then the D-pad rows ---
+        y = top
+        self._draw_control_row(p, margin, y, rail_w, row_h,
+                               shoulder_label("L1", family),
+                               self._buttons.get(4, False), button_index=4)
+        y += row_h + row_gap
+        self._draw_trigger_row(p, margin, y, rail_w, row_h,
+                               trigger_label("L2", family),
+                               self._axes.get(4, -1.0), "L2")
+        y += row_h + row_gap * 2
+        for direction in ("up", "down", "left", "right"):
+            self._draw_control_row(
+                p, margin, y, rail_w, row_h,
+                f"{DPAD_ARROWS[direction]}  {DPAD_LABELS[direction]}",
+                self._hats.get(direction, False), hat=direction)
+            y += row_h + row_gap
+        left_bottom = y
 
-        # D-pad
-        dpad_y = button_y + button_size + 24
-        self._draw_dpad(p, w // 2 - 50, dpad_y)
+        # --- right rail: R1 / R2, then the face buttons ---
+        y = top
+        self._draw_control_row(p, right_x, y, rail_w, row_h,
+                               shoulder_label("R1", family),
+                               self._buttons.get(5, False), button_index=5)
+        y += row_h + row_gap
+        self._draw_trigger_row(p, right_x, y, rail_w, row_h,
+                               trigger_label("R2", family),
+                               self._axes.get(5, -1.0), "R2")
+        y += row_h + row_gap * 2
+        # Top-to-bottom in the same order as the physical diamond.
+        for idx in (3, 2, 1, 0):
+            glyph = button_glyph(idx, family)
+            name = button_label(idx, family)
+            # On Xbox the glyph IS the name ("A"), so don't render "A   A".
+            label = name if glyph == name else f"{glyph}   {name}"
+            self._draw_control_row(p, right_x, y, rail_w, row_h, label,
+                                   self._buttons.get(idx, False),
+                                   button_index=idx)
+            y += row_h + row_gap
+        right_bottom = y
 
-        # Touchpad — horizontal rect (~2:1) centred below the d-pad
-        dpad_height = 24 * 3 + 4 * 2  # three cells + two gaps
-        touch_w = 280
-        touch_h = 90
-        touch_x = (w - touch_w) // 2
-        touch_y = dpad_y + dpad_height + 28
-        self._draw_touchpad(p, touch_x, touch_y, touch_w, touch_h)
+        # --- centre: both sticks side by side with numeric X/Y ---
+        stick_size = min((centre_w - 20) / 2, 150)
+        stick_y = top + 10
+        gap = centre_w - stick_size * 2
+        self._draw_stick(p, centre_x, stick_y, stick_size,
+                         self._axes.get(0, 0.0), self._axes.get(1, 0.0),
+                         "L STICK")
+        self._draw_stick(p, centre_x + stick_size + gap, stick_y, stick_size,
+                         self._axes.get(2, 0.0), self._axes.get(3, 0.0),
+                         "R STICK")
+
+        # L3 / R3 (stick clicks) sit directly under their stick.
+        click_y = stick_y + stick_size + 30
+        self._draw_control_row(p, centre_x, click_y, stick_size, row_h,
+                               button_label(8, family),
+                               self._buttons.get(8, False), button_index=8)
+        self._draw_control_row(p, centre_x + stick_size + gap, click_y,
+                               stick_size, row_h, button_label(9, family),
+                               self._buttons.get(9, False), button_index=9)
+
+        # Select / Start / Home across the centre, below the stick clicks.
+        meta_y = click_y + row_h + row_gap * 2
+        meta_w = (centre_w - row_gap * 2) / 3
+        for i, idx in enumerate((6, 10, 7)):
+            self._draw_control_row(
+                p, centre_x + i * (meta_w + row_gap), meta_y, meta_w, row_h,
+                button_label(idx, family), self._buttons.get(idx, False),
+                button_index=idx)
+        centre_bottom = meta_y + row_h
+
+        # --- touchpad: PlayStation only, full width under everything ---
+        self._touchpad_rect = None
+        if has_touchpad(family):
+            touch_y = max(left_bottom, right_bottom, centre_bottom) + 18
+            touch_w = min(320, w - margin * 2)
+            self._draw_touchpad(p, (w - touch_w) // 2, touch_y, touch_w, 90)
+
+    def _draw_control_row(self, p: QPainter, x: float, y: float,
+                          width: float, height: float, label: str,
+                          active: bool, button_index: Optional[int] = None,
+                          hat: Optional[str] = None) -> None:
+        """A named control pill that lights up while held.
+
+        Replaces the old anonymous numbered squares — "7" told the user
+        nothing, "Menu" tells them exactly which physical button fired.
+        """
+        if button_index is not None:
+            self._button_rects[button_index] = (x, y, height)
+        if hat is not None:
+            self._dpad_rects[hat] = (x, y, height)
+        rect = QRectF(x, y, width, height)
+        p.setPen(QPen(STICK_BORDER, 1))
+        p.setBrush(QBrush(BUTTON_ON if active else BUTTON_OFF))
+        p.drawRoundedRect(rect, 5, 5)
+        p.setPen(QPen(QColor("#0e0f12") if active else TEXT_DIM))
+        f = QFont()
+        f.setPointSize(9)
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(rect.adjusted(10, 0, -10, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                   label)
+
+    def _draw_trigger_row(self, p: QPainter, x: float, y: float,
+                          width: float, height: float, label: str,
+                          raw_value: float, side: str) -> None:
+        """Analogue trigger as a labelled fill bar with a live percentage."""
+        normalized = max(0.0, min(1.0, (raw_value + 1.0) / 2.0))
+        self._trigger_rects[side] = (x, y, width, height)
+        rect = QRectF(x, y, width, height)
+        p.setPen(QPen(STICK_BORDER, 1))
+        p.setBrush(QBrush(STICK_BG))
+        p.drawRoundedRect(rect, 5, 5)
+        if normalized > 0.001:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(STICK_DOT))
+            p.drawRoundedRect(QRectF(x, y, width * normalized, height), 5, 5)
+        # Text sits above the fill so it stays readable at any level.
+        f = QFont()
+        f.setPointSize(9)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QPen(TEXT_DIM if normalized < 0.5 else QColor("#0e0f12")))
+        inner = rect.adjusted(10, 0, -10, 0)
+        p.drawText(inner, Qt.AlignVCenter | Qt.AlignLeft, label)
+        p.drawText(inner, Qt.AlignVCenter | Qt.AlignRight,
+                   f"{int(normalized * 100)}%")
 
     def _draw_stick(self, p: QPainter, x: float, y: float, size: float,
                     x_val: float, y_val: float, label: str) -> None:
@@ -258,13 +366,25 @@ class ControllerMeter(QWidget):
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPointF(dot_x, dot_y), 10, 10)
 
-        # Label
+        # Label above
         p.setPen(QPen(TEXT_DIM))
         f = QFont()
         f.setPointSize(9)
         f.setBold(True)
         p.setFont(f)
         p.drawText(QRectF(x, y - 18, size, 16), Qt.AlignCenter, label)
+
+        # Live numeric X/Y under the box — the reference device shows these
+        # and they matter for calibration: a pad with stick drift reads a
+        # non-zero value at rest, which is invisible on a crosshair alone.
+        f2 = QFont()
+        f2.setPointSize(8)
+        f2.setStyleHint(QFont.Monospace)
+        p.setFont(f2)
+        p.setPen(QPen(TEXT_DIM))
+        readout = QRectF(x, y + size + 2, size, 14)
+        p.drawText(readout, Qt.AlignLeft | Qt.AlignVCenter, f" X {x_val:+.3f}")
+        p.drawText(readout, Qt.AlignRight | Qt.AlignVCenter, f"Y {y_val:+.3f} ")
 
     def _draw_trigger(self, p: QPainter, x: float, y: float, width: float,
                       raw_value: float, label: str) -> None:
