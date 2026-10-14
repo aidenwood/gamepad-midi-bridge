@@ -26,6 +26,7 @@ from ..multi import MultiBridgeController, desired_slot_count
 from ..portable import export_pack, import_pack
 from ..updater import UpdateChecker, UpdateInfo
 from .learn_mode import learn, LearnController
+from .lazy_tab import LazyTab
 from .calibration_dialog import CalibrationDialog
 from .test_wizard import ControllerTestWizard
 from .bluetooth_tab import BluetoothTab
@@ -1693,6 +1694,9 @@ class MainWindow(QMainWindow):
         self._marketplace.selection_changed.connect(
             lambda p: self.push_inspector_selection("marketplace", p)
         )
+        # Deferred: Marketplace costs ~160 ms to build the first time and is
+        # never the first thing a user opens. Signals are already wired above
+        # (the widget exists, it just isn't parented into the tab yet).
         tabs.addTab(self._marketplace, "Marketplace")
 
         self._connectors = ConnectorsTab()
@@ -1728,12 +1732,13 @@ class MainWindow(QMainWindow):
         self._help.recalibrate_requested.connect(self._on_recalibrate)
         tabs.addTab(self._help, "Help")
 
-        about_tab = self._build_about_tab()
-        # Scroll-wrap: About has no internal scroll, so added raw its full
-        # content height (~1080 px) became a hard minimum on the whole tab
-        # stack — which squeezed the bottom Console/MIDI dock to its 36 px
-        # collapsed height on every tab. Wrapping matches Visualise/Settings/etc.
-        tabs.addTab(self._scrollable(about_tab), "About")
+        # About is built on first open — nothing else references it, so it's
+        # a free startup saving. Scroll-wrap inside the factory: About has no
+        # internal scroll, so added raw its full content height (~1080 px)
+        # became a hard minimum on the whole tab stack — which squeezed the
+        # bottom Console/MIDI dock to its 36 px collapsed height on every tab.
+        tabs.addTab(LazyTab(lambda: self._scrollable(self._build_about_tab())),
+                    "About")
 
         return tabs
 
