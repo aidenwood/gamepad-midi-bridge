@@ -6,6 +6,20 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
+## [2.1.6] - 2026-10-15
+
+**First Windows bug-fix pass — console windows, frozen UI, and wrong controller labels.** Everything below came out of a Windows user's screen recording.
+
+- **No more black console windows flashing over your DAW.** The Bluetooth tab polled `powershell.exe` every 6 seconds for the whole session, and nothing passed `CREATE_NO_WINDOW` — so Windows allocated a fresh console each time and it stole foreground focus. Every subprocess call now suppresses its console (new `proc.py`), covering the Bluetooth scan, the `ms-settings:` launcher, the `tasklist` helper check, and the Ableton/REAPER version probes.
+- **The app no longer freezes every 6 seconds.** That same scan ran synchronously on the GUI thread. It now runs on the thread pool, and only while the Bluetooth tab is actually visible. This was also why clicking Mapping or Templates could appear to do nothing — the click sat queued behind a PowerShell cold start.
+- **Bluetooth device count is real now.** `Get-PnpDevice -Class Bluetooth` also returns the radio, the BTHENUM/BTHLE enumerators, and one child node per advertised service, all of which were counted and reported as paired — hence "20 connected, 20 paired" on a laptop with two devices. Filtered to real `BTHENUM\\Dev_*` / `BTHLEDEVICE` peripherals and de-duplicated by MAC.
+- **Latency stat is accurate.** Input timestamps were queued in a FIFO and popped one per MIDI send, but inputs that emit no MIDI (unmapped button, axis inside the deadzone, throttled CC) were never popped. The queue became a permanent backlog and each send paired with a timestamp from minutes earlier — an idle controller read `33053.4 ms`. Now a single overwrite-on-input slot, matching `latency_test.LatencyTracker`.
+- **"CONSOLE" and "MIDI ACTIVITY" headers no longer clip.** Both were `setFixedHeight(36)` while the A+/A- buttons rescale the app font; at 1.4x the header needs 39px. Height is now derived from the title's font metrics.
+- **New "No DAW routing" badge.** On Windows with no loopMIDI port the bridge falls back to the built-in GS Wavetable Synth — audible, but your DAW receives nothing. It said so once in a status line that the next message overwrote. Now a persistent badge with a dialog explaining the loopMIDI fix.
+- **Console button pulses green / amber / red** when an unseen message lands, so an error is visible without the console open.
+- **Xbox controllers are labelled correctly.** The UI hardcoded PlayStation names, so an Xbox One Controller showed Cross / Circle / Square / Triangle / Share / Options / PS — plus a touchpad it doesn't have. New `control_labels.py` owns the names: Xbox gets A/B/X/Y, LB/RB, LT/RT, View/Menu/Guide, and no touchpad.
+- **Live view rebuilt.** Named control pills instead of anonymous numbered squares, a D-pad rail, a face-button rail, and live numeric X/Y under each stick so stick drift is visible at rest.
+
 ## [2.1.5] - 2026-06-06
 
 **Live input now flows on macOS — visualiser, MIDI, and stats update in real time.** Bridge worker polls joystick state from its own QThread, but SDL's HIDAPI backend on macOS hooks IOHIDManager callbacks that only fire on the thread which initialised the video subsystem (the main thread). The worker's `pygame.event.pump()` therefore never serviced HID reports, so `get_axis()` / `get_button()` returned the values captured at controller-attach time forever — controller showed connected but every visualiser stayed frozen at zero and Total MIDI Messages held at 0.
