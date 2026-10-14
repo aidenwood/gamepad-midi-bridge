@@ -15,13 +15,21 @@ The public API mirrors the subset used in main_window.py:
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import (
     QComboBox,
+    QLayout,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
+# Vertical floor the tab area reports to a parent splitter. A QTabWidget's
+# minimumSizeHint is the MAX over ALL pages, so one tall page (e.g. About at
+# ~1080 px) would otherwise force the whole window taller than the screen and
+# squeeze a sibling bottom dock (Console / MIDI activity) to nothing. Cap the
+# floor here; tall pages scroll within their own viewport instead.
+_MIN_CONTENT_HEIGHT = 160
 
 _COMPACT_THRESHOLD = 1100  # pixels — switch below this width. 11 tabs at
 # ~95 px each comfortably fit in ~1050 px; below this width we collapse to a
@@ -69,8 +77,17 @@ class ResponsiveTabWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        # Don't let the layout push our minimumSize up to the inner tabs'
+        # aggregate minimum — minimumSizeHint() below controls our floor.
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         layout.addWidget(self._combo)
         layout.addWidget(self._tabs, 1)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        """Cap the vertical floor so a tall tab page can't squeeze a sibling
+        splitter pane. Keep the inner tabs' width hint; clamp the height."""
+        hint = self._tabs.minimumSizeHint()
+        return QSize(hint.width(), min(hint.height(), _MIN_CONTENT_HEIGHT))
 
     # ------------------------------------------------------------------ public API
 

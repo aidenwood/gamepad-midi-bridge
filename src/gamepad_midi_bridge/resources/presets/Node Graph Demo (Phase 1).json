@@ -1,0 +1,588 @@
+{
+  "name": "Node Graph Demo (Phase 1)",
+  "schema_version": 4,
+  "midi_channel": 0,
+  "deadzone": 0.05,
+  "poll_hz": 100,
+  "buttons": {
+    "0": 60,
+    "1": 62,
+    "2": 64,
+    "3": 65,
+    "4": 67,
+    "5": 69,
+    "6": 71,
+    "7": 72,
+    "8": 74,
+    "9": 76,
+    "10": 77
+  },
+  "axes": {
+    "0": 3,
+    "1": 4,
+    "2": 5,
+    "3": 6,
+    "4": 1,
+    "5": 2
+  },
+  "gesture_enabled": false,
+  "swipe_up_note": 60,
+  "swipe_down_note": 61,
+  "swipe_left_note": 62,
+  "swipe_right_note": 63,
+  "pinch_in_note": 64,
+  "pinch_out_note": 65,
+  "gesture_velocity": 100,
+  "swipe_min_distance": 0.3,
+  "hats": {
+    "up": 78,
+    "down": 79,
+    "left": 80,
+    "right": 81
+  },
+  "button_channels": {},
+  "axis_channels": {},
+  "hat_channels": {},
+  "left_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75,
+    "corner_haptic_feedback": true,
+    "scale_quantize_enabled": false,
+    "scale_root": 60,
+    "scale_name": "major"
+  },
+  "right_stick_corners": {
+    "enabled": false,
+    "n": 8,
+    "notes": [],
+    "r_enter": 0.92,
+    "r_exit": 0.75,
+    "corner_haptic_feedback": true,
+    "scale_quantize_enabled": false,
+    "scale_root": 60,
+    "scale_name": "major"
+  },
+  "touchpad": {
+    "enabled": false,
+    "x_cc": 16,
+    "y_cc": 17,
+    "b_x_cc": 18,
+    "b_y_cc": 19,
+    "two_finger": false,
+    "require_contact": true,
+    "mode": "absolute",
+    "click_to_arm": false,
+    "inner_deadzone": 0.0,
+    "x_curve": "linear",
+    "y_curve": "linear",
+    "x_curve_amount": 0.5,
+    "y_curve_amount": 0.5,
+    "zone_mode": false,
+    "zone_grid": 2,
+    "zone_notes": [
+      36,
+      38,
+      40,
+      42
+    ],
+    "zone_velocity": 100,
+    "gesture_enabled": false,
+    "swipe_up_note": 60,
+    "swipe_down_note": 61,
+    "swipe_left_note": 62,
+    "swipe_right_note": 63,
+    "pinch_in_note": 64,
+    "pinch_out_note": 65,
+    "gesture_velocity": 100,
+    "swipe_min_distance": 0.3
+  },
+  "osc": {
+    "enabled": false,
+    "mode": "alongside",
+    "host": "127.0.0.1",
+    "port": 7000,
+    "button_addresses": {},
+    "axis_addresses": {},
+    "listen_enabled": false,
+    "listen_port": 7001,
+    "listen_bindings": []
+  },
+  "l2_haptic_effect": null,
+  "r2_haptic_effect": null,
+  "l2_trigger": {
+    "mode": "linear",
+    "ceiling": 127,
+    "latch_threshold": 0.5,
+    "gate_button": null,
+    "gate_release_value": 0,
+    "tactile_click": true,
+    "aftertouch": {
+      "enabled": false,
+      "threshold": 0.85,
+      "channel_override": -1
+    },
+    "bow_mode": false,
+    "bow_cc": 11,
+    "bow_velocity_scale": 1.0,
+    "bow_min_velocity": 0.5,
+    "crossfade_enabled": false,
+    "crossfade_cc_b": 0,
+    "crossfade_channel_b": null,
+    "crossfade_curve": 1.0
+  },
+  "r2_trigger": {
+    "mode": "linear",
+    "ceiling": 127,
+    "latch_threshold": 0.5,
+    "gate_button": null,
+    "gate_release_value": 0,
+    "tactile_click": true,
+    "aftertouch": {
+      "enabled": false,
+      "threshold": 0.85,
+      "channel_override": -1
+    },
+    "bow_mode": false,
+    "bow_cc": 11,
+    "bow_velocity_scale": 1.0,
+    "bow_min_velocity": 0.5,
+    "crossfade_enabled": false,
+    "crossfade_cc_b": 0,
+    "crossfade_channel_b": null,
+    "crossfade_curve": 1.0
+  },
+  "button_configs": {},
+  "left_stick": {
+    "inner_deadzone": 0.05,
+    "outer_clamp": 0.0,
+    "curve": "linear",
+    "curve_amount": 0.5,
+    "polar_mode": false,
+    "polar_angle_cc": 7,
+    "polar_mag_cc": 8,
+    "cc_smoothing_ms": 0,
+    "flick": {
+      "enabled": false,
+      "note_pos_x": 64,
+      "note_neg_x": 65,
+      "note_pos_y": 66,
+      "note_neg_y": 67,
+      "velocity_min": 30,
+      "velocity_max": 127,
+      "speed_threshold": 4.0
+    },
+    "random_mod_enabled": false,
+    "random_mod_cc": 16,
+    "random_mod_rate_hz": 2.0,
+    "random_mod_smoothing_ms": 200,
+    "lfo": {
+      "enabled": false,
+      "waveform": "sine",
+      "rate_hz": 0.5,
+      "depth": 0.5,
+      "phase_lock_to_bpm": false,
+      "blend_mode": "add"
+    },
+    "pitch_bend_enabled": false,
+    "pitch_bend_axis": "x",
+    "pitch_bend_range_semis": 2,
+    "chord_enabled": false,
+    "chord_threshold": 0.5,
+    "chord_north": [],
+    "chord_east": [],
+    "chord_south": [],
+    "chord_west": [],
+    "chord_velocity": 100,
+    "chord_channel": null
+  },
+  "right_stick": {
+    "inner_deadzone": 0.05,
+    "outer_clamp": 0.0,
+    "curve": "linear",
+    "curve_amount": 0.5,
+    "polar_mode": false,
+    "polar_angle_cc": 7,
+    "polar_mag_cc": 8,
+    "cc_smoothing_ms": 0,
+    "flick": {
+      "enabled": false,
+      "note_pos_x": 64,
+      "note_neg_x": 65,
+      "note_pos_y": 66,
+      "note_neg_y": 67,
+      "velocity_min": 30,
+      "velocity_max": 127,
+      "speed_threshold": 4.0
+    },
+    "random_mod_enabled": false,
+    "random_mod_cc": 16,
+    "random_mod_rate_hz": 2.0,
+    "random_mod_smoothing_ms": 200,
+    "lfo": {
+      "enabled": false,
+      "waveform": "sine",
+      "rate_hz": 0.5,
+      "depth": 0.5,
+      "phase_lock_to_bpm": false,
+      "blend_mode": "add"
+    },
+    "pitch_bend_enabled": false,
+    "pitch_bend_axis": "x",
+    "pitch_bend_range_semis": 2,
+    "chord_enabled": false,
+    "chord_threshold": 0.5,
+    "chord_north": [],
+    "chord_east": [],
+    "chord_south": [],
+    "chord_west": [],
+    "chord_velocity": 100,
+    "chord_channel": null
+  },
+  "haptic_input": {
+    "enabled": false,
+    "listen_channel": -1,
+    "guard_feedback_loop": true,
+    "bindings": [
+      {
+        "trigger": "L2",
+        "source": "note",
+        "midi_id": 36,
+        "effect": "vibration",
+        "intensity_scale": 1.0
+      },
+      {
+        "trigger": "R2",
+        "source": "note",
+        "midi_id": 38,
+        "effect": "vibration",
+        "intensity_scale": 1.0
+      },
+      {
+        "trigger": "L2",
+        "source": "cc",
+        "midi_id": 71,
+        "effect": "feedback",
+        "intensity_scale": 1.0
+      },
+      {
+        "trigger": "R2",
+        "source": "cc",
+        "midi_id": 74,
+        "effect": "feedback",
+        "intensity_scale": 1.0
+      }
+    ]
+  },
+  "battery_alert": {
+    "enabled": false,
+    "threshold_percent": 15,
+    "note": 60,
+    "velocity": 100,
+    "channel_override": null
+  },
+  "auto_reconnect_enabled": true,
+  "shift_layer": {
+    "enabled": false,
+    "shift_button": -1,
+    "buttons": {},
+    "axes": {},
+    "hats": {}
+  },
+  "ab_compare_enabled": false,
+  "ab_compare_button": -1,
+  "ab_b_preset_slug": null,
+  "always_background_on_launch": false,
+  "port_name_override": null,
+  "program_change": {
+    "enabled": false,
+    "listen_channel": -1,
+    "bindings": {}
+  },
+  "midi_clock": {
+    "enabled": false,
+    "bpm": 120.0,
+    "send_start_stop": true,
+    "tap_button": -1,
+    "start_button": -1,
+    "stop_button": -1
+  },
+  "theme": "system",
+  "macros": [],
+  "macro_bindings": {},
+  "setlist": {
+    "enabled": false,
+    "name": "Setlist",
+    "presets": [],
+    "next_button": -1,
+    "prev_button": -1,
+    "wrap": true
+  },
+  "passthrough": {
+    "enabled": false,
+    "input_port_name": "",
+    "transpose_semitones": 0,
+    "channel_remap": -1,
+    "pass_cc": true,
+    "pass_notes": true,
+    "pass_other": false
+  },
+  "rtp_midi": {
+    "enabled": false,
+    "peer_host": "127.0.0.1",
+    "peer_port": 5004,
+    "session_name": "UCM Bridge"
+  },
+  "quantize": {
+    "enabled": false,
+    "grid": "1/16",
+    "swing_pct": 0,
+    "quantize_buttons": true,
+    "quantize_cc": false
+  },
+  "color_tag": "none",
+  "favourite": false,
+  "midi2": {
+    "enabled": false,
+    "group": 0,
+    "fallback_to_midi1": true
+  },
+  "pattern_recorder": {
+    "enabled": false,
+    "record_button": -1,
+    "overdub_button": -1,
+    "cancel_button": -1,
+    "loop_length_bars": 1,
+    "quantize_to_grid": true
+  },
+  "midi_learn": {
+    "bindings": []
+  },
+  "lightbar_enabled": false,
+  "lightbar_red": 0,
+  "lightbar_green": 0,
+  "lightbar_blue": 0,
+  "player_led_bitmask": 0,
+  "node_graph": {
+    "nodes": {
+      "n_polar": {
+        "id": "n_polar",
+        "kind": "polar",
+        "params": {},
+        "position": [
+          260,
+          120
+        ]
+      },
+      "n_remap_mag": {
+        "id": "n_remap_mag",
+        "kind": "range_remap",
+        "params": {
+          "in_min": 0.0,
+          "in_max": 1.0,
+          "out_min": 0.0,
+          "out_max": 127.0
+        },
+        "position": [
+          460,
+          90
+        ]
+      },
+      "n_remap_angle": {
+        "id": "n_remap_angle",
+        "kind": "range_remap",
+        "params": {
+          "in_min": 0.0,
+          "in_max": 1.0,
+          "out_min": 20.0,
+          "out_max": 110.0
+        },
+        "position": [
+          460,
+          170
+        ]
+      },
+      "n_tap_hold": {
+        "id": "n_tap_hold",
+        "kind": "tap_vs_hold",
+        "params": {
+          "threshold_ms": 220
+        },
+        "position": [
+          260,
+          320
+        ]
+      },
+      "n_lfo": {
+        "id": "n_lfo",
+        "kind": "lfo",
+        "params": {
+          "rate_hz": 0.5,
+          "shape": "sine",
+          "duty": 0.5
+        },
+        "position": [
+          60,
+          480
+        ]
+      },
+      "n_remap_lfo": {
+        "id": "n_remap_lfo",
+        "kind": "range_remap",
+        "params": {
+          "in_min": 0.0,
+          "in_max": 1.0,
+          "out_min": 40.0,
+          "out_max": 100.0
+        },
+        "position": [
+          260,
+          480
+        ]
+      }
+    },
+    "connections": [
+      {
+        "from_node": "src_lstick",
+        "from_pin": "out",
+        "to_node": "n_polar",
+        "to_pin": "xy",
+        "inline_transform": null
+      },
+      {
+        "from_node": "n_polar",
+        "from_pin": "magnitude",
+        "to_node": "n_remap_mag",
+        "to_pin": "in",
+        "inline_transform": null
+      },
+      {
+        "from_node": "n_polar",
+        "from_pin": "angle",
+        "to_node": "n_remap_angle",
+        "to_pin": "in",
+        "inline_transform": null
+      },
+      {
+        "from_node": "n_remap_mag",
+        "from_pin": "out",
+        "to_node": "sink_mod",
+        "to_pin": "in",
+        "inline_transform": null
+      },
+      {
+        "from_node": "n_remap_angle",
+        "from_pin": "out",
+        "to_node": "sink_res",
+        "to_pin": "in",
+        "inline_transform": null
+      },
+      {
+        "from_node": "src_r1",
+        "from_pin": "out",
+        "to_node": "n_tap_hold",
+        "to_pin": "in",
+        "inline_transform": null
+      },
+      {
+        "from_node": "n_tap_hold",
+        "from_pin": "tap",
+        "to_node": "sink_tap",
+        "to_pin": "in",
+        "inline_transform": null
+      },
+      {
+        "from_node": "n_tap_hold",
+        "from_pin": "hold",
+        "to_node": "sink_hold",
+        "to_pin": "in",
+        "inline_transform": null
+      },
+      {
+        "from_node": "n_lfo",
+        "from_pin": "out",
+        "to_node": "n_remap_lfo",
+        "to_pin": "in",
+        "inline_transform": null
+      },
+      {
+        "from_node": "n_remap_lfo",
+        "from_pin": "out",
+        "to_node": "sink_expr",
+        "to_pin": "in",
+        "inline_transform": null
+      }
+    ],
+    "sources": {
+      "src_lstick": {
+        "id": "src_lstick",
+        "kind": "stick_xy",
+        "index": 0,
+        "label": "L Stick",
+        "position": [
+          60,
+          120
+        ]
+      },
+      "src_r1": {
+        "id": "src_r1",
+        "kind": "button",
+        "index": 5,
+        "label": "R1",
+        "position": [
+          60,
+          320
+        ]
+      }
+    },
+    "sinks": {
+      "sink_mod": {
+        "id": "sink_mod",
+        "symbol": "midi.cc:1@ch:1",
+        "label": "CC 1 Mod Wheel",
+        "position": [
+          680,
+          90
+        ]
+      },
+      "sink_res": {
+        "id": "sink_res",
+        "symbol": "midi.cc:71@ch:1",
+        "label": "CC 71 Resonance",
+        "position": [
+          680,
+          170
+        ]
+      },
+      "sink_tap": {
+        "id": "sink_tap",
+        "symbol": "midi.note:60@ch:1",
+        "label": "Note 60 (tap)",
+        "position": [
+          480,
+          290
+        ]
+      },
+      "sink_hold": {
+        "id": "sink_hold",
+        "symbol": "midi.cc:64@ch:1",
+        "label": "CC 64 Sustain (hold)",
+        "position": [
+          480,
+          360
+        ]
+      },
+      "sink_expr": {
+        "id": "sink_expr",
+        "symbol": "midi.cc:11@ch:1",
+        "label": "CC 11 Expression (LFO)",
+        "position": [
+          480,
+          480
+        ]
+      }
+    }
+  }
+}

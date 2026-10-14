@@ -173,3 +173,48 @@ def _has_qapp() -> bool:
         return True
     except ImportError:
         return False
+
+
+class TestLatencyStat:
+    """Regression: the Latency stat must measure the input that caused the
+    MIDI, not one from minutes ago.
+
+    The old implementation queued every input timestamp in a FIFO and popped
+    one per MIDI send. Inputs that emit no MIDI (unmapped button, axis inside
+    the deadzone, throttled CC) were never popped, so the queue became a
+    permanent backlog and later sends paired with ancient timestamps. A
+    Windows user's idle controller reported "33053.4 ms".
+    """
+
+    @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+    def test_unmapped_inputs_do_not_poison_later_samples(self):
+        """100 MIDI-less inputs, then one real press → sane latency."""
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance() or QApplication([])
+        tab = VisualiseTab()
+
+        # Inputs that produce no MIDI at all.
+        for i in range(100):
+            tab._on_button(0, bool(i % 2))
+        assert not tab._latency_samples
+
+        # Now a press that DOES emit MIDI.
+        tab._on_button(1, True)
+        tab._on_midi_sent()
+
+        assert len(tab._latency_samples) == 1
+        # Microseconds in a test; assert it's nowhere near the old backlog.
+        assert tab._latency_samples[0] < 1.0
+
+    @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+    def test_pending_timestamp_consumed_once(self):
+        """A second midi_sent with no new input records no extra sample."""
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance() or QApplication([])
+        tab = VisualiseTab()
+
+        tab._on_button(0, True)
+        tab._on_midi_sent()
+        tab._on_midi_sent()          # chord/second note, no fresh input
+        assert len(tab._latency_samples) == 1
+        assert tab._pending_input_ts is None

@@ -21,7 +21,13 @@ from PySide6.QtCore import (
     QMetaObject, QObject, QThread, QTimer, Q_ARG, Qt, Signal, Slot,
 )
 
+import logging
+import os as _os_node_graph
 from . import dualsense as ds
+from .nodes import default_registry as _node_default_registry
+from .nodes import evaluate as _node_evaluate
+from .nodes.sinks import resolve as _node_sink_resolve
+from .nodes.sinks import value_to_midi as _node_value_to_midi
 from .calibration import calibrate
 from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
@@ -76,6 +82,14 @@ class BridgeWorker(QObject):
     # --- Engine status
     status = Signal(str)                              # human-readable status
     started = Signal(str, str)                        # controller_name, midi_port_name
+    # Windows-only: we landed on a downstream port (built-in GS synth / some
+    # hardware) because no loopMIDI port existed. Audible, but NOT routable
+    # into a DAW. Carries the port name we fell back to; empty string means
+    # "routing is fine, clear any warning". This is a SIGNAL rather than just
+    # a status string because the condition persists for the whole session —
+    # a transient status line gets overwritten and the user never learns why
+    # their DAW is silent.
+    midi_fallback = Signal(str)                       # port_name, or "" when OK
     stopped = Signal()
     error = Signal(str)
     controller_info = Signal(object)                  # ControllerInfo | None
@@ -189,6 +203,10 @@ class BridgeWorker(QObject):
         self._prev_touchpad_zone: Optional[int] = None  # zone index for hysteresis
         self._touchpad_zone_bias: Dict[int, float] = {}  # hysteresis bias per zone
         self._prev_battery: Optional[tuple] = None
+        # Cached touchpad XY for _poll_node_graph — populated by _cache_touchpad
+        # connected to the touchpad_xy signal below. Default centred + no contact.
+        self._last_touchpad_xy: tuple = (0.0, 0.0)
+        self.touchpad_xy.connect(self._cache_touchpad)
         # CC smoothing state: keyed by (axis_idx, cc_num), value = (current_val, target_val, start_ms)
         self._cc_smooth_state: Dict[tuple, tuple] = {}  # (current, target, started_at_ms)
         # Gesture tracking — per-finger touch start position + two-finger distance
@@ -196,8 +214,11 @@ class BridgeWorker(QObject):
         self._touch_last_xy: Optional[Tuple[float, float]] = None  # last recorded touch position
         self._touch_start_two_finger_distance: Optional[float] = None  # initial 2-finger separation
         self._battery_alert_fired: bool = False  # track if alert has fired for current low state
-        # Telemetry throttle — emit GUI updates at ~30Hz max even at 100Hz polling
-        self._last_telemetry: float = 0.0
+        # Telemetry throttle — emit GUI updates at ~30Hz max even at 100Hz polling.
+        # Per-axis: a single shared timestamp let whichever axis polled first each
+        # tick starve all the others (axes 1..5 never emitted), freezing the
+        # visualiser. Key by axis index so every axis throttles independently.
+        self._last_telemetry: Dict[int, float] = {}
         self._telemetry_interval = 1.0 / 30.0
         # Battery + touchpad poll less often — they don't need 100Hz
         self._last_battery_poll: float = 0.0
@@ -263,6 +284,9 @@ class BridgeWorker(QObject):
         # MIDI 2.0 / UMP state — probed once per port open.
         # True = port accepted the UMP probe; False = fell back to MIDI 1.0.
         self._midi2_supported: bool = False
+        # Cached UMP-active flag — recomputed only when the port probe or the
+        # mapping changes, so the hot send path never re-derives it per message.
+        self._midi2_active: bool = False
         self._midi2_warned: bool = False  # suppress repeated "no UMP" log spam
 
     # ---------------------------------------------------------------- public API
@@ -283,6 +307,9 @@ class BridgeWorker(QObject):
 
     def set_mapping(self, mapping: Mapping) -> None:
         self._state.mapping = mapping
+        # Keep the cached UMP-active flag in step with the new mapping (the
+        # MIDI 2.0 toggle can flip without re-opening the port).
+        self._refresh_midi2_active()
         # Check if port_name_override changed; if running, restart with new name
         if self._running and self._midi:
             old_name = self._midi_port_name
@@ -297,6 +324,61 @@ class BridgeWorker(QObject):
         self._sync_passthrough()
         self._sync_midi_clock()
         self._sync_rtp_sender()
+
+    @Slot()
+    def redetect(self) -> None:
+        """Re-probe the joystick subsystem and re-attach to slot 0.
+
+        Called from the UI's Bluetooth tab Re-scan button. Lets a freshly-
+        paired controller get picked up without a Stop/Start cycle (which
+        would otherwise drop the MIDI port and lose live state). Safe to
+        call when no bridge is running — it just probes pygame and emits
+        the result so the UI can update.
+
+        Cross-thread safety: invoked via Qt::QueuedConnection from the GUI
+        thread, so the body runs on the worker thread and `_reader.detect()`
+        — which calls `pygame.joystick.quit() + init()` — is colocated
+        with the polling loop that owns the joystick handle.
+        """
+        try:
+            if self._reader is None:
+                # No active bridge yet — build a transient reader just to
+                # see what's plugged in, then drop it.
+                probe = ControllerReader(slot_index=self._slot_index)
+                info = probe.detect()
+                probe.close()
+                self.controller_info.emit(info)
+                if info is None:
+                    self.status.emit("Re-scan: no controller detected")
+                else:
+                    self.status.emit(f"Re-scan: found {info.name}")
+                return
+            # Live bridge — refresh in place.
+            info = self._reader.detect()
+            self.controller_info.emit(info)
+            if info is None:
+                self.status.emit("Re-scan: lost controller (none attached)")
+            else:
+                self.status.emit(f"Re-scan: attached {info.name}")
+        except Exception as e:
+            logging.getLogger("gamepad_midi_bridge.bridge").exception("redetect crashed")
+            self.error.emit(f"Re-scan failed: {e}")
+
+    def _launch_ds4windows(self) -> bool:
+        """Read the opt-in ``launch_ds4windows`` flag from config.json.
+
+        Default False: DS4Windows masks the raw HID device dualsense.py needs for
+        adaptive triggers/touchpad/gyro, so it's off unless the user asks for it.
+        """
+        try:
+            import json
+            from .paths import config_path
+            path = config_path()
+            if not path.exists():
+                return False
+            return bool(json.loads(path.read_text(encoding="utf-8")).get("launch_ds4windows", False))
+        except Exception:
+            return False
 
     @Slot()
     def start(self) -> None:
@@ -314,6 +396,19 @@ class BridgeWorker(QObject):
         if info is None:
             self.error.emit("No controller detected. Plug one in and click Start.")
             return
+
+        # Windows: make sure the helper apps the pipeline leans on are running
+        # (loopMIDI always; DS4Windows only if the user opted in). Best-effort —
+        # mirrors the original prototype's auto-launch. No-op off Windows.
+        if sys.platform == "win32":
+            try:
+                from .windows_sidecar import ensure_helpers_running
+                for status in ensure_helpers_running(launch_ds4=self._launch_ds4windows()):
+                    self.status.emit(status)
+            except Exception:
+                logging.getLogger("gamepad_midi_bridge.bridge").exception(
+                    "windows helper auto-launch crashed (non-fatal)"
+                )
 
         try:
             self._midi = open_port(self._midi_port_name)
@@ -334,7 +429,15 @@ class BridgeWorker(QObject):
         self._run_calibration()
 
         self.started.emit(info.name, self._midi.name)
-        self.status.emit(f"Bridging {info.name} → {self._midi.name}")
+        if getattr(self._midi, "fallback", False):
+            self.midi_fallback.emit(self._midi.name)
+            self.status.emit(
+                f"Bridging {info.name} → {self._midi.name} (built-in synth — "
+                "install loopMIDI to route into a DAW)"
+            )
+        else:
+            self.midi_fallback.emit("")
+            self.status.emit(f"Bridging {info.name} → {self._midi.name}")
         self._running = True
         self._loop()
 
@@ -511,6 +614,7 @@ class BridgeWorker(QObject):
         m2 = self._state.mapping.midi2
         if not m2.enabled:
             self._midi2_supported = False
+            self._refresh_midi2_active()
             return
         _midi2.clear_probe_cache()
         self._midi2_supported = _midi2.is_supported(self._midi.port)
@@ -519,16 +623,18 @@ class BridgeWorker(QObject):
             self.status.emit(
                 "MIDI 2.0 UMP not accepted by this port — using MIDI 1.0 fallback"
             )
+        self._refresh_midi2_active()
+
+    def _refresh_midi2_active(self) -> None:
+        """Recompute the cached UMP-active flag. UMP is active only when the
+        mapping enables it AND the open port accepts UMP. Call after a port
+        probe or any mapping change — never on the per-message hot path."""
+        self._midi2_active = bool(self._state.mapping.midi2.enabled and self._midi2_supported)
 
     def _use_midi2(self) -> bool:
-        """Return True when UMP emission is active for the current mapping."""
-        m2 = self._state.mapping.midi2
-        if not m2.enabled:
-            return False
-        if self._midi2_supported:
-            return True
-        # Port doesn't support UMP — fall back if configured, else skip send entirely.
-        return False
+        """Return True when UMP emission is active for the current mapping.
+        Reads the cached flag — see _refresh_midi2_active."""
+        return self._midi2_active
 
     def _send_note_on(self, midi, status_1: int, note: int, velocity: int) -> None:
         """Send a Note On using MIDI 2.0 UMP or MIDI 1.0 depending on config.
@@ -1076,6 +1182,129 @@ class BridgeWorker(QObject):
         ts_ms = time.time() * 1000.0
         self._recent_outbound_cc.append((channel, cc_number, value, ts_ms))
 
+    @Slot(bool, float, float)
+    def _cache_touchpad(self, contact: bool, x: float, y: float) -> None:
+        """Stash latest touchpad XY for node-graph polling.
+
+        The signal already fires on every meaningful event in _poll_dualsense
+        — we just shadow it into a single attribute so _poll_node_graph can
+        read it cheaply without re-parsing the DualSense HID buffer. Contact
+        state is folded in: when no finger touches, the cache stays at the
+        centre (0, 0) — what a node consuming "touchpad" would expect.
+        """
+        self._last_touchpad_xy = (float(x), float(y)) if contact else (0.0, 0.0)
+
+    def _poll_node_graph(self, reader, mapping: "Mapping") -> None:
+        """Per-tick driver for the node-graph input layer.
+
+        Runs whenever ``mapping.node_graph`` is non-empty. The experimental
+        ``GMB_NODE_GRAPH=1`` opt-in flag was retired in Phase 2 once the
+        canvas + auto-save made the graph a first-class user-facing
+        feature — now anything the user builds in Nodes drives MIDI as
+        soon as it has at least one connection. Set ``GMB_NODE_GRAPH=0``
+        to force-disable if a user hits trouble and wants to fall back to
+        the legacy flag-based path only.
+
+        Defensive: wrapped in try/except so any node-graph bug never
+        crashes the existing flag-based path that's been running on stage
+        for years.
+        """
+        if mapping.node_graph is None or mapping.node_graph.is_empty():
+            return
+        # Explicit opt-out for the rare case where the graph misbehaves
+        # and a user wants to keep the canvas while disabling its output.
+        if _os_node_graph.environ.get("GMB_NODE_GRAPH") == "0":
+            return
+        try:
+            registry = getattr(self, "_node_registry", None)
+            if registry is None:
+                registry = _node_default_registry()
+                if not registry.all():
+                    registry.load_builtins()
+                self._node_registry = registry
+
+            # Build a snapshot of every source the graph declares. Each
+            # SourceKind maps to one reader call (or one cached attribute
+            # on `self` for DualSense-only state like touchpad / battery,
+            # which aren't exposed through the pygame reader).
+            snapshot: Dict[str, object] = {}
+            for src_id, src in mapping.node_graph.sources.items():
+                if src.kind == "stick_xy":
+                    base = 0 if src.index == 0 else 2  # 0 = left, 1 = right
+                    x = reader.get_axis(base) or 0.0
+                    y = reader.get_axis(base + 1) or 0.0
+                    snapshot[src_id] = (float(x), float(y))
+                elif src.kind == "axis":
+                    snapshot[src_id] = float(reader.get_axis(src.index) or 0.0)
+                elif src.kind == "trigger":
+                    # Triggers are axes 4 (L2) and 5 (R2)
+                    snapshot[src_id] = float(reader.get_axis(4 + src.index) or 0.0)
+                elif src.kind == "button":
+                    snapshot[src_id] = bool(reader.get_button(src.index))
+                elif src.kind == "dpad":
+                    # D-pad is hat 0 — pygame returns (x, y) ∈ {-1, 0, 1}².
+                    # We emit the raw vec2 so downstream nodes treat it like a
+                    # discrete-step stick.
+                    hx, hy = reader.get_hat(0)
+                    snapshot[src_id] = (float(hx), float(hy))
+                elif src.kind == "touchpad":
+                    # Cached on `self` by _poll_dualsense; defaults to (0,0)
+                    # when no DualSense is attached or the user isn't touching.
+                    snapshot[src_id] = getattr(self, "_last_touchpad_xy", (0.0, 0.0))
+                elif src.kind == "battery":
+                    # _prev_battery is a 3-tuple (level, charging, wired) when
+                    # populated; we want a single 0..1 scalar for the graph.
+                    bat = getattr(self, "_prev_battery", None)
+                    snapshot[src_id] = float(bat[0]) if bat else None
+                else:
+                    snapshot[src_id] = None
+
+            # Persist node state across ticks so stateful nodes
+            # (tap_vs_hold, etc.) see their previous tick's writes.
+            store = getattr(self, "_node_state_store", None)
+            if store is None:
+                store = {}
+                self._node_state_store = store
+
+            sends = _node_evaluate(mapping.node_graph, registry, snapshot, store)
+            if not sends:
+                return
+
+            # Phase-1 emission: raw `midi.cc:N@ch:C` and `midi.note:N@ch:C`
+            # symbols go straight out the MIDI port via the existing handle.
+            # Anything else (Resolume / Ableton symbolic destinations) stays
+            # log-only until the Phase-2 connector resolver lands.
+            unresolved = []
+            for send in sends:
+                binding = _node_sink_resolve(send.symbol)
+                if binding is None:
+                    unresolved.append(send)
+                    continue
+                msg = _node_value_to_midi(binding, send.value)
+                if msg is None:
+                    continue
+                try:
+                    self._midi.send_message(list(msg))
+                except Exception:
+                    logging.getLogger("gamepad_midi_bridge.bridge").exception(
+                        "node-graph raw MIDI send failed for %s", send.symbol
+                    )
+
+            # Throttle logging for unresolved (symbolic) sinks so the UI
+            # status bar doesn't spam at the bridge's poll rate.
+            if unresolved:
+                now = time.perf_counter()
+                last = getattr(self, "_last_node_graph_log", 0.0)
+                if now - last >= 0.2:  # 5 Hz max
+                    self._last_node_graph_log = now
+                    summary = ", ".join(f"{s.symbol}={s.value}" for s in unresolved[:3])
+                    more = "" if len(unresolved) <= 3 else f" (+{len(unresolved) - 3} more)"
+                    self.status.emit(f"node graph (unresolved) → {summary}{more}")
+        except Exception:
+            logging.getLogger("gamepad_midi_bridge.bridge").exception(
+                "node-graph poll crashed; existing path unaffected"
+            )
+
     def _get_poly_at_pressure(self, reader, pressure_source: str) -> float:
         """Get normalized pressure (0..1) from the configured source.
 
@@ -1236,6 +1465,7 @@ class BridgeWorker(QObject):
                     self._poll_hat(reader, mapping, midi, note_on, note_off)
                 if self._ds_handle is not None:
                     self._poll_dualsense(mapping, midi, cc, t0)
+                self._poll_node_graph(reader, mapping)
 
                 # Sleep the remainder of the interval — keeps CPU usage low
                 elapsed = time.perf_counter() - t0
@@ -3121,9 +3351,9 @@ class BridgeWorker(QObject):
 
     def _emit_axis(self, idx: int, value: float) -> None:
         now = time.perf_counter()
-        if now - self._last_telemetry >= self._telemetry_interval:
+        if now - self._last_telemetry.get(idx, 0.0) >= self._telemetry_interval:
             self.axis_value.emit(idx, value)
-            self._last_telemetry = now
+            self._last_telemetry[idx] = now
 
 
 class BridgeController(QObject):

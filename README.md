@@ -4,6 +4,24 @@ Turn a PS5 DualSense or Xbox controller into a MIDI controller. Cross-platform d
 
 ![Live tab](docs/screenshots/tab-live.png)
 
+<!-- toc:start -->
+<details open>
+<summary><strong>Contents</strong></summary>
+
+- [Features](#features)
+- [Run from source](#run-from-source)
+- [Build a distributable](#build-a-distributable)
+- [Release flow](#release-flow)
+- [CLI](#cli)
+- [Architecture (in two lines)](#architecture-in-two-lines)
+- [Licensing](#licensing)
+- [Layout](#layout)
+- [Status](#status)
+
+</details>
+<!-- toc:end -->
+
+
 ## Features
 
 **Free**

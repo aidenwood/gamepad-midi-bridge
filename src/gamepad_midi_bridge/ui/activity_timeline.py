@@ -96,7 +96,7 @@ class ActivityTimeline(QWidget):
 
         self._clear_btn = QPushButton("Clear log")
         self._clear_btn.setObjectName("ActivityTimelineClearButton")
-        self._clear_btn.setFixedHeight(24)
+        self._clear_btn.setFixedHeight(26)
         self._clear_btn.clicked.connect(self._on_clear)
         header.addWidget(self._clear_btn)
         root.addLayout(header)

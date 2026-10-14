@@ -26,7 +26,7 @@ dev = [
 ]
 
 [project.scripts]
-gamepad-midi-bridge = "gamepad_midi_bridge.__main__:main"
+gamepad-midi-bridge = "gamepad_midi_bridge.__main__:console_entry"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

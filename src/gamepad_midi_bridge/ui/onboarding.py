@@ -8,6 +8,7 @@ can drop from hot paths, keeps main_window focused on steady-state UX.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import webbrowser
 from typing import List, Optional
@@ -22,7 +23,7 @@ from .. import APP_NAME
 from ..connectors import all_connectors
 from ..controller import ControllerReader
 from ..midi_backend import MidiPortError, close_port, open_port
-from ..paths import config_path
+from ..paths import config_path, resource_path
 from ..telemetry import send_event
 
 
@@ -151,12 +152,21 @@ class OnboardingWizard(QDialog):
         self._midi_status.setWordWrap(True)
         v.addWidget(self._midi_status)
 
-        self._loopmidi_btn = QPushButton("Download loopMIDI")
+        # Windows-only one-click setup: runs the bundled PowerShell assistant in
+        # its own window (installs loopMIDI + creates the routing port), so less
+        # technical users never touch a terminal by hand.
+        self._setup_btn = QPushButton("Set up Windows MIDI for me")
+        self._setup_btn.setObjectName("OnboardingPrimary")
+        self._setup_btn.clicked.connect(self._run_windows_setup)
+        self._setup_btn.setVisible(False)
+        v.addWidget(self._setup_btn, alignment=Qt.AlignLeft)
+
+        self._loopmidi_btn = QPushButton("Download loopMIDI manually")
         self._loopmidi_btn.clicked.connect(lambda: webbrowser.open(LOOPMIDI_URL))
         self._loopmidi_btn.setVisible(False)
         v.addWidget(self._loopmidi_btn, alignment=Qt.AlignLeft)
 
-        retry = QPushButton("Try again")
+        retry = QPushButton("Re-check")
         retry.clicked.connect(self._poll_midi)
         v.addWidget(retry, alignment=Qt.AlignLeft)
         v.addStretch(1)
@@ -501,19 +511,76 @@ class OnboardingWizard(QDialog):
         if self._test_port is not None:
             close_port(self._test_port)
             self._test_port = None
+        is_win = sys.platform == "win32"
         try:
             opened = open_port()
             self._test_port = opened
-            self._midi_status.setText(
-                f"Virtual MIDI port live: {opened.name}. Anything listening on "
-                "this port now hears your gamepad."
-            )
-            _set_state(self._midi_status, "ok")
-            self._loopmidi_btn.setVisible(False)
+            if opened.fallback:
+                # Windows with no loopMIDI yet — we grabbed the built-in synth so
+                # notes are audible right now. Offer one-click setup (and the
+                # manual download) to unlock real DAW routing.
+                self._midi_status.setText(
+                    f"Playing through {opened.name} — press a button and you'll "
+                    "hear it now, no setup needed. To route into a DAW, let us set "
+                    "up loopMIDI for you."
+                )
+                _set_state(self._midi_status, "ok")
+                self._setup_btn.setVisible(is_win)
+                self._loopmidi_btn.setVisible(is_win)
+            else:
+                self._midi_status.setText(
+                    f"Virtual MIDI port live: {opened.name}. Anything listening on "
+                    "this port now hears your gamepad."
+                )
+                _set_state(self._midi_status, "ok")
+                self._setup_btn.setVisible(False)
+                self._loopmidi_btn.setVisible(False)
         except MidiPortError as e:
             self._midi_status.setText(str(e))
             _set_state(self._midi_status, "error")
-            self._loopmidi_btn.setVisible(sys.platform == "win32")
+            self._setup_btn.setVisible(is_win)
+            self._loopmidi_btn.setVisible(is_win)
+
+    def _run_windows_setup(self) -> None:
+        """Launch the bundled PowerShell setup assistant in its own window.
+
+        Installs loopMIDI + creates the routing port so non-technical users get
+        DAW routing without a terminal. Windows-only; re-checks MIDI when the
+        user closes the setup window so the status updates.
+        """
+        if sys.platform != "win32":
+            return
+        script = resource_path("windows", "setup-midi.ps1")
+        if not script.exists():
+            self._midi_status.setText(
+                "Setup script missing from this build. Use 'Download loopMIDI "
+                "manually' instead."
+            )
+            _set_state(self._midi_status, "error")
+            return
+        send_event("windows_midi_setup_launched")
+        try:
+            # CREATE_NEW_CONSOLE (0x10) gives the script its own visible window so
+            # the user sees progress and the PASS/FAIL report.
+            subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-ExecutionPolicy", "Bypass",
+                    "-NoProfile",
+                    "-File", str(script),
+                ],
+                creationflags=0x00000010,
+            )
+            self._midi_status.setText(
+                "Setup is running in a separate window. Follow it through (you'll "
+                "see a UAC prompt), then click Re-check here."
+            )
+            _set_state(self._midi_status, "ok")
+        except Exception as e:  # noqa: BLE001 — surface any launch failure to the user
+            self._midi_status.setText(
+                f"Couldn't launch setup ({e}). Use 'Download loopMIDI manually'."
+            )
+            _set_state(self._midi_status, "error")
 
     # ============================================================== nav + finish
 

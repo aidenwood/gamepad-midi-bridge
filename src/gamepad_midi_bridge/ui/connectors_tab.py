@@ -91,6 +91,10 @@ class ConnectorsTab(QWidget):
         action_row.addStretch(1)
         refresh = UIButton("Re-scan for hosts", variant="secondary")
         refresh.clicked.connect(self.refresh)
+        from .learn_mode import learn
+        learn(refresh, "Re-scan for hosts",
+              "Look again for installed apps (Resolume, Ableton, TouchDesigner…). "
+              "Run this if you just installed or opened one.")
         action_row.addWidget(refresh)
         outer.addLayout(action_row)
 
@@ -256,9 +260,12 @@ class ConnectorsTab(QWidget):
         left.addWidget(path)
         h.addLayout(left, 1)
 
-        # Right column — status + actions
+        # Right column — status + actions. Centre the group vertically so the
+        # status doesn't hug the card's top edge while the (taller) left column
+        # runs title/description/path — they read as misaligned otherwise.
         right = QVBoxLayout()
         right.setSpacing(6)
+        right.addStretch(1)
         status = UILabel("Installed ✓" if installed else "Not installed", variant="caption")
         # State-dependent override of UILabel's self-styled caption colour
         # (UILabel sets its own stylesheet for cascade-defense — see
@@ -274,9 +281,12 @@ class ConnectorsTab(QWidget):
         button_row.setSpacing(6)
 
         # Verify button + inline status chip
+        from .learn_mode import learn
         verify_btn = UIButton("Verify", variant="secondary")
         verify_btn.setMinimumWidth(60)
         verify_btn.setToolTip("Run a quick install self-test for this connector")
+        learn(verify_btn, "Verify connector",
+              "Checks the MIDI map is correctly installed in this app's config — a quick health check, changes nothing.")
         verify_chip = UILabel("", variant="caption")
         verify_chip.setVisible(False)
         # Keep bespoke: dynamic background-color + border-radius set by _done() callback
@@ -291,16 +301,21 @@ class ConnectorsTab(QWidget):
         test_btn.setMinimumWidth(60)
         test_btn.setToolTip("Send a test MIDI note to verify DAW connectivity")
         test_btn.clicked.connect(lambda: self._on_test(connector, host))
+        learn(test_btn, "Test connection",
+              "Fires a test MIDI note at this app so you can confirm it's listening before a show.")
         button_row.addWidget(test_btn)
         install_btn = UIButton("Reinstall" if installed else "Install", variant="primary")
         install_btn.setObjectName("PrimaryButton")
         install_btn.clicked.connect(lambda: self._on_install(connector, host))
+        learn(install_btn, "Install connector",
+              "Writes a ready-made MIDI map into this app's config folder, so your gamepad controls land on named parameters automatically.")
         button_row.addWidget(install_btn)
         if installed:
             remove_btn = UIButton("Remove", variant="secondary")
             remove_btn.clicked.connect(lambda: self._on_uninstall(connector, host))
             button_row.addWidget(remove_btn)
         right.addLayout(button_row)
+        right.addStretch(1)
         h.addLayout(right)
 
         return card

@@ -8,7 +8,7 @@ Single source of truth for going from "code exists" to "users can buy and use it
 - [ ] You have admin on `aidenthomasgodbywood@gmail.com` Netlify Builds team
 - [ ] You own the `aidxn.com` domain
 - [ ] You have a Stripe account (sole trader OK)
-- [ ] You can receive email on `support@aidxn.com` (alias or mailbox)
+- [ ] You can receive email on `hi@aidxn.com` (alias or mailbox)
 
 ## 1. Generate the license keypair (once, ever)
 

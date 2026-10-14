@@ -40,3 +40,12 @@ def config_path() -> Path:
 def last_mapping_path() -> Path:
     """Where the in-memory mapping is persisted between launches."""
     return user_data_dir() / "last_mapping.json"
+
+
+def resource_path(*parts: str) -> Path:
+    """Locate a file bundled under ``gamepad_midi_bridge/resources/``.
+
+    Works in dev and frozen — PyInstaller drops the resources tree alongside the
+    package, so ``__file__``-relative resolution holds in both.
+    """
+    return Path(__file__).parent / "resources" / Path(*parts)

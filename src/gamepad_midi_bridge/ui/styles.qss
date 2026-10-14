@@ -249,6 +249,20 @@ QPushButton#RecordButton:checked {
     font-weight: 700;
 }
 
+/* Update-available corner badge — accent-filled so it reads as a call to
+ * action, not a passive toggle. Hidden until UpdateChecker fires. */
+QPushButton#UpdateBadge {
+    background-color: #2dd4bf;
+    color: #0b0d10;
+    border: none;
+    border-radius: 6px;
+    font-weight: 700;
+    padding: 0 12px;
+}
+QPushButton#UpdateBadge:hover {
+    background-color: #34e3cd;
+}
+
 /* Status-bar dividers (vertical hairlines between groups). */
 QFrame#StatusDivider {
     color: #2c313b;
@@ -1009,7 +1023,9 @@ QFrame#ConnectorsHostCard {
     background-color: #16181d;
     border: 1px solid #24262d;
     border-radius: 8px;
-    padding: 14px;
+    /* No `padding` here — the card's QHBoxLayout sets contentsMargins(14,12,14,12).
+       QSS padding stacks on top of layout margins (double padding) and the
+       padded border box also mis-renders inside the rounded frame. */
 }
 
 QFrame#ConnectorsTemplateCard {
@@ -1593,3 +1609,54 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
  * via per-widget setStyleSheet calls in Python. Don't add a global
  * QSplitter::handle rule here — it will silently break dragging.
  * =================================================================== */
+
+
+/* ===================================================================
+ * RADIX-STYLE DROPDOWN MENU
+ * File: ui/primitives/dropdown.py — UIDropdownMenu wraps QMenu and
+ * sets objectName="UIDropdownMenu" so the styling here applies WITHOUT
+ * leaking into any native QMenu we don't own (e.g. macOS application
+ * menu, system tray right-click menu). Matches Radix DropdownMenu /
+ * ContextMenu visual language: dark elevated surface, rounded card,
+ * subtle hover bg, small uppercase labels, thin separators.
+ * =================================================================== */
+
+QMenu#UIDropdownMenu {
+    background-color: #1d2028;
+    border: 1px solid #24262d;
+    border-radius: 8px;
+    padding: 4px;
+    color: #f5f7fa;
+    font-size: 12px;
+}
+QMenu#UIDropdownMenu::item {
+    background-color: transparent;
+    padding: 7px 14px;
+    margin: 1px 2px;
+    border-radius: 4px;
+}
+QMenu#UIDropdownMenu::item:selected {
+    background-color: #22242c;
+    color: #f5f7fa;
+}
+QMenu#UIDropdownMenu::item:disabled {
+    color: #5b6068;
+}
+/* Section headers from add_label() — small, uppercase, muted. */
+QMenu#UIDropdownMenu::separator {
+    height: 1px;
+    background-color: #24262d;
+    margin: 4px 8px;
+}
+/* Submenu indicator arrow on the right. */
+QMenu#UIDropdownMenu::right-arrow {
+    width: 10px;
+    height: 10px;
+    image: none;          /* Qt's default arrow draws fine — colour follows item state */
+}
+/* Checkable item indicator on the left. */
+QMenu#UIDropdownMenu::indicator {
+    width: 14px;
+    height: 14px;
+    margin-left: 4px;
+}

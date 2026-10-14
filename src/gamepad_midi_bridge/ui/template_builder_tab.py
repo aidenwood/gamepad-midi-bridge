@@ -438,14 +438,18 @@ class TemplateBuilderTab(QWidget):
         desc_lbl = QLabel(desc)
         desc_lbl.setObjectName("TemplateCardDesc")
         desc_lbl.setWordWrap(True)
-        desc_lbl.setFixedHeight(30)
+        # Min 30px keeps cards uniform when text fits on one line; max 48px
+        # caps the card at ~2 lines so a long description doesn't blow out
+        # the grid. `setFixedHeight(30)` would clip the second line outright.
+        desc_lbl.setMinimumHeight(30)
+        desc_lbl.setMaximumHeight(48)
         cl.addWidget(desc_lbl)
 
         apply_btn = QPushButton("Apply")
-        apply_btn.setFixedHeight(22)
+        apply_btn.setFixedHeight(26)
         apply_btn.setStyleSheet(
             f"background:{accent}; color:#0e0f12; font-size:10px; "
-            f"font-weight:700; border-radius:4px; padding:0 6px;"
+            f"font-weight:700; border-radius:4px; padding:2px 8px;"
         )
         apply_btn.setToolTip(tmpl.description)
         # Capture tmpl in the lambda via default arg to avoid late-binding.

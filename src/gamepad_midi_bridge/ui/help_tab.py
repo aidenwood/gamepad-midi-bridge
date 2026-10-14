@@ -58,7 +58,7 @@ else:
 
 CHANGELOG_URL = "https://midi.aidxn.com/changelog"
 ISSUES_URL = "https://github.com/aidenwood/gamepad-midi-bridge/issues"
-SUPPORT_EMAIL = "support@aidxn.com"
+SUPPORT_EMAIL = "hi@aidxn.com"
 
 DOCS_LINKS = {
     "Getting started": "https://midi.aidxn.com/docs/getting-started",
@@ -266,8 +266,9 @@ class HelpTab(QWidget):
             (
                 "Where does the virtual MIDI port appear?",
                 "On macOS and Linux, anything subscribing to the IAC/ALSA bus "
-                "sees it instantly. On Windows you'll need loopMIDI installed "
-                "once; the bridge will detect it.",
+                "sees it instantly. On Windows the bridge plays through the "
+                "built-in GS Wavetable synth out of the box, so you'll hear "
+                "notes immediately — install loopMIDI once to route into a DAW.",
             ),
             (
                 "Why are some features greyed out?",

@@ -135,7 +135,7 @@ class AboutTab(QWidget):
         links_layout.addSpacing(8)
         links_layout.addWidget(link_button("Twitter/X", "https://twitter.com/aidxn"))
         links_layout.addSpacing(8)
-        links_layout.addWidget(link_button("Email", "mailto:support@aidxn.com"))
+        links_layout.addWidget(link_button("Email", "mailto:hi@aidxn.com"))
 
         links_layout.addStretch(1)
         v.addLayout(links_layout)

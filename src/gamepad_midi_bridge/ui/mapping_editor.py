@@ -603,6 +603,10 @@ class MappingEditor(QWidget):
                 btn.setObjectName("MappingCaptureButton")
                 btn.setToolTip("Press a controller input to assign this row")
                 btn.setFixedSize(28, 22)
+                from .learn_mode import learn
+                learn(btn, "Capture (press to assign)",
+                      "Click this, then press a button or move a stick on your controller — "
+                      "that input gets bound to this row. The fastest way to map.")
                 btn.clicked.connect(
                     lambda _checked, row=r, kind=capture_kind, tbl=table:
                     self._on_capture_clicked(tbl, row, kind)

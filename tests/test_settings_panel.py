@@ -318,9 +318,12 @@ class TestSearchFiltering:
         # Find appearance group
         appearance_group = panel._groups_in_order[0]
         assert appearance_group.title() == "Appearance"
-        # Check that stylesheet indicates highlight
-        ss = appearance_group.styleSheet()
-        assert "1abc9c" in ss or "#1abc9c" in ss
+        # Highlight is driven by the dynamic `searchState` property + the
+        # QGroupBox[searchState="match"] rule in styles.qss (not inline CSS).
+        assert appearance_group.property("searchState") == "match"
+        # A non-matching group should be dimmed.
+        non_matching = [g for g in panel._groups_in_order if g.property("searchState") == "dim"]
+        assert non_matching, "expected at least one dimmed group when searching 'theme'"
 
     def test_empty_search_restores_normal_styling(self, tmp_user_data) -> None:
         _qapp()
@@ -328,6 +331,7 @@ class TestSearchFiltering:
         panel = SettingsPanel(Mapping())
         panel._search_input.setText("theme")
         panel._search_input.setText("")
-        # All groups should have empty stylesheet (normal)
+        # Clearing search resets every group's searchState property to neutral.
         for group in panel._groups_in_order:
             assert group.styleSheet() == ""
+            assert group.property("searchState") in ("", None)

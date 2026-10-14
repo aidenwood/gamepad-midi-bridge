@@ -12,6 +12,8 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
 
 from .midi_learn import MidiLearnConfig
+from .nodes import NodeGraph
+from .nodes.serialise import graph_from_dict as _node_graph_from_dict
 
 
 SCHEMA_VERSION = 4
@@ -896,6 +898,12 @@ class Mapping:
     lightbar_blue: int = 0      # clamp 0..255
     player_led_bitmask: int = 0 # clamp 0..31; 5 LEDs, bit 0 = leftmost
 
+    # Node-graph input layer (Phase 1 backend). None = use the existing
+    # flag-based input path; non-None = the bridge MAY route some controls
+    # through the graph instead (controlled by GMB_NODE_GRAPH=1 for now while
+    # the feature is opt-in). Old presets serialise without this key.
+    node_graph: Optional["NodeGraph"] = None
+
     # ----------------------------------------------------- serialisation
 
     def to_dict(self) -> dict:
@@ -915,6 +923,12 @@ class Mapping:
         # Serialize midi_learn config
         d["midi_learn"] = self.midi_learn.to_dict()
         # Lightbar fields are included via asdict (additive-only)
+        # node_graph: omit the key entirely when unset OR empty so old-shape
+        # presets round-trip byte-identical even after the Visualise tab
+        # eagerly installs a fresh empty NodeGraph on first display. The key
+        # only appears when the user has actually built something.
+        if self.node_graph is None or self.node_graph.is_empty():
+            d.pop("node_graph", None)
         return d
 
     @classmethod
@@ -974,6 +988,7 @@ class Mapping:
             lightbar_green=max(0, min(255, int(data.get("lightbar_green", 0)))),
             lightbar_blue=max(0, min(255, int(data.get("lightbar_blue", 0)))),
             player_led_bitmask=max(0, min(31, int(data.get("player_led_bitmask", 0)))),
+            node_graph=_node_graph_from_dict(data.get("node_graph")),
         )
 
 

@@ -353,10 +353,18 @@ class VisualiseTab(QWidget):
         super().__init__(parent)
         self._build_ui()
 
-        # Latency: each input signal pushes a timestamp; midi_sent pops one
-        # and records the delta. They fire roughly simultaneously inside the
-        # bridge so this measures Qt signal-dispatch overhead.
-        self._pending_input_ts: Deque[float] = deque(maxlen=LATENCY_WINDOW * 4)
+        # Latency: the most recent input timestamp, consumed by the next
+        # midi_sent. They fire roughly simultaneously inside the bridge so
+        # this measures Qt signal-dispatch overhead.
+        #
+        # Single slot, NOT a queue — matching latency_test.LatencyTracker.
+        # A FIFO backlog is wrong here because plenty of input events emit
+        # no MIDI at all (unmapped button, axis inside the deadzone, a
+        # throttled CC). Those timestamps were never popped, so the queue
+        # grew into a permanent backlog and every later midi_sent paired
+        # itself with a timestamp from minutes earlier — which is how the
+        # stat read "33053.4 ms" on an idle controller.
+        self._pending_input_ts: Optional[float] = None
         self._latency_samples: Deque[float] = deque(maxlen=LATENCY_WINDOW)
         self._midi_count = 0
         self._midi_total = 0
@@ -496,6 +504,8 @@ class VisualiseTab(QWidget):
         # === Timeline Tab: session activity log ===
         self._activity_timeline = ActivityTimeline()
         self._tabs.addTab(self._activity_timeline, "Timeline")
+        # Note: Nodes used to live as a sub-tab here in Phase 2.0; it is now
+        # a peer top-level tab in MainWindow so the canvas gets full width.
 
     @staticmethod
     def _panel_frame() -> QFrame:
@@ -540,6 +550,13 @@ class VisualiseTab(QWidget):
         """Persist the current tab selection."""
         self._settings.setValue("visualise/last_tab", index)
 
+    def set_mapping(self, mapping) -> None:
+        """Stub — Nodes used to live as a sub-tab here in Phase 2.0; it is
+        now a top-level peer tab (``NodesTab``) so the canvas has full
+        screen width. Kept as a no-op so MainWindow's wiring keeps working
+        if Visualise gains new mapping-aware views in future."""
+        pass
+
     def attach_bridge_signals(self, worker) -> None:
         """Hook the BridgeWorker. Called by MainWindow during _wire_signals."""
         worker.axis_value.connect(self._on_axis)
@@ -566,17 +583,17 @@ class VisualiseTab(QWidget):
         scope = self._oscilloscopes.get(idx)
         if scope is not None:
             scope.add_sample(value)
-        self._pending_input_ts.append(time.perf_counter())
+        self._pending_input_ts = time.perf_counter()
 
     def _on_button(self, idx: int, pressed: bool) -> None:
         self._diagram.on_button(idx, pressed)
         self._heatmap.flash(idx, pressed)
-        self._pending_input_ts.append(time.perf_counter())
+        self._pending_input_ts = time.perf_counter()
 
     def _on_hat(self, direction: str, pressed: bool) -> None:
         self._diagram.on_hat(direction, pressed)
         self._heatmap.flash(direction, pressed)
-        self._pending_input_ts.append(time.perf_counter())
+        self._pending_input_ts = time.perf_counter()
 
     def _on_battery(self, percent: int, charging: bool, _full: bool) -> None:
         self._battery_pct = percent; self._battery_charging = charging
@@ -588,9 +605,10 @@ class VisualiseTab(QWidget):
     def _on_midi_sent(self) -> None:
         self._midi_count += 1; self._midi_total += 1
         self._midi_out_counter += 1
-        if self._pending_input_ts:
-            ts = self._pending_input_ts.popleft()
-            self._latency_samples.append(time.perf_counter() - ts)
+        if self._pending_input_ts is not None:
+            self._latency_samples.append(
+                time.perf_counter() - self._pending_input_ts)
+            self._pending_input_ts = None
 
     def _on_midi_message(self, direction: str, channel: int, status: int, data1: int, data2: int, label: str) -> None:
         """Track incoming MIDI for throughput counting."""

@@ -23,6 +23,8 @@ import sys
 from dataclasses import dataclass
 from typing import List, Optional
 
+from .proc import no_window_kwargs
+
 
 @dataclass
 class BluetoothDevice:
@@ -112,16 +114,28 @@ def _mac_open_settings() -> bool:
 
 
 def _win_list_devices() -> List[BluetoothDevice]:
-    """PowerShell + Get-PnpDevice — surface every BTHENUM device + status."""
+    """PowerShell + Get-PnpDevice — surface paired remote devices + status.
+
+    `Get-PnpDevice -Class Bluetooth` returns far more than paired peripherals:
+    the radio itself, the BTHENUM/BTHLE *enumerators*, and one child node per
+    advertised service (A2DP, HFP, HID, GATT). Counting those is how a laptop
+    with two paired devices reports "20 connected, 20 paired".
+
+    A real paired remote device is a `BTHENUM\\Dev_<MAC>` or `BTHLEDEVICE`
+    instance, so we keep those and drop everything else. We also de-duplicate
+    by MAC, because a single controller can still expose more than one
+    `Dev_` node (classic HID + LE) and the user thinks of it as one gamepad.
+    """
     ps = shutil.which("powershell.exe") or shutil.which("powershell")
     if ps is None:
         return []
     try:
         result = subprocess.run(
-            [ps, "-NoProfile", "-Command",
-             "Get-PnpDevice -Class Bluetooth | "
+            [ps, "-NoProfile", "-NonInteractive", "-Command",
+             "Get-PnpDevice -Class Bluetooth -PresentOnly | "
              "Select-Object FriendlyName,Status,InstanceId | ConvertTo-Json"],
             capture_output=True, text=True, timeout=10,
+            **no_window_kwargs(),
         )
     except Exception:
         return []
@@ -134,17 +148,20 @@ def _win_list_devices() -> List[BluetoothDevice]:
         return []
     if isinstance(data, dict):
         data = [data]
+
     devices: List[BluetoothDevice] = []
+    seen: set[str] = set()
     for entry in data:
+        instance = str(entry.get("InstanceId") or "")
+        if not _is_win_remote_device(instance):
+            continue
+        address = _win_address_from_instance(instance)
+        if address and address in seen:
+            continue
+        if address:
+            seen.add(address)
         name = str(entry.get("FriendlyName") or "Unknown")
         status = str(entry.get("Status") or "").lower()
-        instance = str(entry.get("InstanceId") or "")
-        # InstanceId looks like BTHENUM\Dev_AABBCCDDEEFF... — pull the MAC.
-        address = ""
-        for token in instance.replace("\\", "_").split("_"):
-            if len(token) == 12 and all(c in "0123456789abcdefABCDEF" for c in token):
-                address = ":".join(token.lower()[i:i+2] for i in range(0, 12, 2))
-                break
         devices.append(BluetoothDevice(
             name=name,
             address=address,
@@ -155,9 +172,35 @@ def _win_list_devices() -> List[BluetoothDevice]:
     return devices
 
 
+def _is_win_remote_device(instance: str) -> bool:
+    """True for a paired peripheral, False for radios/enumerators/service nodes.
+
+    Keeps  BTHENUM\\Dev_AABBCCDDEEFF\\...   and  BTHLEDEVICE\\...
+    Drops  BTHENUM\\{0000110b-...}\\...  (per-service child nodes),
+           BTHENUM itself, BTHLE, BTH\\MS_BTHBRB, USB\\VID_... radios.
+    """
+    upper = instance.upper()
+    if upper.startswith("BTHLEDEVICE\\"):
+        return True
+    if not upper.startswith("BTHENUM\\"):
+        return False
+    return upper.split("\\")[1].startswith("DEV_")
+
+
+def _win_address_from_instance(instance: str) -> str:
+    """Pull the canonical MAC out of a BTHENUM/BTHLEDEVICE InstanceId."""
+    for token in instance.replace("\\", "_").split("_"):
+        if len(token) == 12 and all(c in "0123456789abcdefABCDEF" for c in token):
+            return ":".join(token.lower()[i:i + 2] for i in range(0, 12, 2))
+    return ""
+
+
 def _win_open_settings() -> bool:
     try:
-        subprocess.Popen(["cmd", "/c", "start", "ms-settings:bluetooth"])
+        subprocess.Popen(
+            ["cmd", "/c", "start", "ms-settings:bluetooth"],
+            **no_window_kwargs(),
+        )
         return True
     except Exception:
         return False

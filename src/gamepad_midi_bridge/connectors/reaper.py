@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from ..proc import no_window_kwargs
 from .base import Connector, HostInstallation, InstallResult
 
 
@@ -196,6 +197,7 @@ def _powershell_file_version(exe: Path) -> Optional[str]:
             capture_output=True,
             text=True,
             timeout=10,
+            **no_window_kwargs(),
         )
         version = result.stdout.strip()
         return version or None

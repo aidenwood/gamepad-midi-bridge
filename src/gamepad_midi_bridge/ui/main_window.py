@@ -6,7 +6,7 @@ import logging
 import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl, QMetaObject
 from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence, QShortcut, QAction
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox,
@@ -25,6 +25,7 @@ from ..mapping import Mapping
 from ..multi import MultiBridgeController, desired_slot_count
 from ..portable import export_pack, import_pack
 from ..updater import UpdateChecker, UpdateInfo
+from .learn_mode import learn, LearnController
 from .calibration_dialog import CalibrationDialog
 from .test_wizard import ControllerTestWizard
 from .bluetooth_tab import BluetoothTab
@@ -281,17 +282,17 @@ class MainWindow(QMainWindow):
         # presets, marketplace, etc). Hidden by default — toggled via the
         # status-bar Split button.
         body_splitter = QSplitter(Qt.Vertical)
-        body_splitter.setHandleWidth(6)
+        body_splitter.setHandleWidth(8)
         # IMPORTANT: this MUST be a per-widget setStyleSheet, not a global
         # ``QSplitter::handle`` rule in styles.qss. On macOS Qt 6 a global
         # rule breaks mouse-event dispatch to the handle (drag stops working
         # app-wide). Per-widget styling works fine. Cargo-cult cleanup that
         # removes this call will silently break dragging — leave it alone.
+        # 8 px + a visible default colour reads as a grabbable divider (a near-
+        # invisible hairline reads as decoration and users never try to drag it).
         body_splitter.setStyleSheet(
-            "QSplitter::handle:vertical { "
-            "background-color: #3a414e; "
-            "} "
-            "QSplitter::handle:vertical:hover { background-color: #4a5260; }"
+            "QSplitter::handle:vertical { background-color: #3f4754; } "
+            "QSplitter::handle:vertical:hover { background-color: #5a6478; }"
         )
         # Children NOT collapsible — dragging the handle should resize,
         # not snap-to-zero. Collapse/expand goes through each panel's
@@ -305,14 +306,12 @@ class MainWindow(QMainWindow):
         # auto-opens it). This lets each side of a split keep its own
         # context-properties pane — Figma-style.
         content_splitter = QSplitter(Qt.Horizontal)
-        content_splitter.setHandleWidth(6)
+        content_splitter.setHandleWidth(8)
         # See body_splitter above — per-widget styling is mandatory; global
         # ``QSplitter::handle`` QSS breaks drag on macOS Qt 6.
         content_splitter.setStyleSheet(
-            "QSplitter::handle:horizontal { "
-            "background-color: #3a414e; "
-            "} "
-            "QSplitter::handle:horizontal:hover { background-color: #4a5260; }"
+            "QSplitter::handle:horizontal { background-color: #3f4754; } "
+            "QSplitter::handle:horizontal:hover { background-color: #5a6478; }"
         )
         content_splitter.setChildrenCollapsible(False)
 
@@ -386,6 +385,11 @@ class MainWindow(QMainWindow):
         self._midi_log_panel.collapse_changed.connect(
             lambda _collapsed: self._set_bottom_panel_sizes()
         )
+        # Dragging the handle past a panel's collapsed height should REOPEN it
+        # (and dragging it down to the header should collapse it). Without this,
+        # a drag resizes the pane but the body stays hidden — you get an empty
+        # centred header. Sync silently so the drag size isn't snapped away.
+        body_splitter.splitterMoved.connect(self._on_body_splitter_moved)
         root.addWidget(body_splitter, 1)
 
         # Wire the status-bar toggle buttons (created earlier inside
@@ -395,11 +399,18 @@ class MainWindow(QMainWindow):
         self._split_btn.clicked.connect(self._toggle_split_view)
         self._console_btn.setChecked(not self._log_console.is_collapsed())
         self._console_btn.clicked.connect(self._toggle_console)
+        self._midi_log_btn.setChecked(not self._midi_log_panel.is_collapsed())
+        self._midi_log_btn.clicked.connect(self._toggle_midi_log)
         self._inspect_btn.setChecked(False)
         self._inspect_btn.clicked.connect(self._toggle_inspector)
         # Two-way binding: closing an inspector via its X reflects in the toggle.
         self._inspector_a.visibility_changed.connect(self._on_inspector_visibility)
         self._inspector_b.visibility_changed.connect(self._on_inspector_visibility)
+
+        # Learn mode — hover-to-learn overlay, toggled from the toolbar.
+        self._learn = LearnController(self)
+        self._learn_btn.toggled.connect(self._learn.set_active)
+        self._register_toolbar_learn()
 
         # 3D background toggle — persisted, default OFF.
         _bg3d_on = _read_bg3d_state()
@@ -415,6 +426,11 @@ class MainWindow(QMainWindow):
                 self._bg_3d.setVisible(False)
 
         # Stream stdlib logging + bridge activity into the console.
+        self._log_console.activity.connect(self._on_console_activity)
+        # Clicking the console's own header arrow counts as reading it too.
+        self._log_console.collapse_changed.connect(
+            lambda collapsed: None if collapsed else self._clear_console_attention()
+        )
         self._log_console.install_root_handler()
 
         self._wire_signals()
@@ -764,6 +780,13 @@ class MainWindow(QMainWindow):
         self._console_btn.setMinimumWidth(92)
         self._console_btn.setFixedHeight(32)
 
+        self._midi_log_btn = QPushButton("MIDI")
+        self._midi_log_btn.setObjectName("LayoutToggle")
+        self._midi_log_btn.setCheckable(True)
+        self._midi_log_btn.setToolTip("Show or hide the MIDI activity panel at the bottom of the window")
+        self._midi_log_btn.setMinimumWidth(72)
+        self._midi_log_btn.setFixedHeight(32)
+
         self._inspect_btn = QPushButton("Inspect")
         self._inspect_btn.setObjectName("LayoutToggle")
         self._inspect_btn.setCheckable(True)
@@ -772,6 +795,15 @@ class MainWindow(QMainWindow):
         )
         self._inspect_btn.setMinimumWidth(88)
         self._inspect_btn.setFixedHeight(32)
+
+        self._learn_btn = QPushButton("Learn")
+        self._learn_btn.setObjectName("LayoutToggle")
+        self._learn_btn.setCheckable(True)
+        self._learn_btn.setToolTip(
+            "Learn mode — hover any control to see what it does. Toggle off for normal use."
+        )
+        self._learn_btn.setMinimumWidth(72)
+        self._learn_btn.setFixedHeight(32)
 
         self._3d_btn = QPushButton("3D")
         self._3d_btn.setObjectName("LayoutToggle")
@@ -815,6 +847,30 @@ class MainWindow(QMainWindow):
         # Styled via QPushButton#RecordButton in styles.qss (incl. :checked).
         self._record_btn.clicked.connect(self._on_record_toggled)
 
+        # Update-available corner badge — hidden until UpdateChecker fires.
+        # Small, accent-coloured; click downloads the new version (the user's
+        # licence carries over automatically — license.key lives in user-data,
+        # which a reinstall never touches).
+        self._update_btn = QPushButton("⬆ Update")
+        self._update_btn.setObjectName("UpdateBadge")
+        self._update_btn.setFixedHeight(32)
+        self._update_btn.setCursor(Qt.PointingHandCursor)
+        self._update_btn.setVisible(False)
+        self._update_btn.clicked.connect(self._download_update)
+        self._update_info: Optional[UpdateInfo] = None
+
+        # "No DAW routing" badge — Windows only in practice. Shown when the
+        # MIDI backend fell back to the built-in GS synth because no loopMIDI
+        # port exists. Persistent on purpose: the bridge says so once in the
+        # status line, but any other status message overwrites it within
+        # seconds and the user is left wondering why their DAW hears nothing.
+        self._midi_fallback_btn = QPushButton("⚠ No DAW routing")
+        self._midi_fallback_btn.setObjectName("UpdateBadge")
+        self._midi_fallback_btn.setFixedHeight(32)
+        self._midi_fallback_btn.setCursor(Qt.PointingHandCursor)
+        self._midi_fallback_btn.setVisible(False)
+        self._midi_fallback_btn.clicked.connect(self._show_midi_fallback_help)
+
         # Populate row layouts via the responsive arranger. Initial mode is
         # decided once the window has been sized — call once with current
         # width so we don't start empty.
@@ -857,12 +913,16 @@ class MainWindow(QMainWindow):
             self._status_row2_layout.addStretch(1)
             self._status_row2_layout.addWidget(self._split_btn)
             self._status_row2_layout.addWidget(self._console_btn)
+            self._status_row2_layout.addWidget(self._midi_log_btn)
             self._status_row2_layout.addWidget(self._inspect_btn)
+            self._status_row2_layout.addWidget(self._learn_btn)
             self._status_row2_layout.addWidget(self._3d_btn)
             self._status_row2_layout.addWidget(self._font_smaller_btn)
             self._status_row2_layout.addWidget(self._font_larger_btn)
             self._status_row2_layout.addWidget(self._status_divider2)
             self._status_row2_layout.addWidget(self._record_btn)
+            self._status_row2_layout.addWidget(self._update_btn)
+            self._status_row2_layout.addWidget(self._midi_fallback_btn)
             self._status_row2_widget.setVisible(True)
             # Hide divider1 — it separated start/panic from toggles in wide
             # mode; in compact mode the row break is the separator.
@@ -880,12 +940,16 @@ class MainWindow(QMainWindow):
             self._status_row1_layout.addWidget(self._status_divider1)
             self._status_row1_layout.addWidget(self._split_btn)
             self._status_row1_layout.addWidget(self._console_btn)
+            self._status_row1_layout.addWidget(self._midi_log_btn)
             self._status_row1_layout.addWidget(self._inspect_btn)
+            self._status_row1_layout.addWidget(self._learn_btn)
             self._status_row1_layout.addWidget(self._3d_btn)
             self._status_row1_layout.addWidget(self._font_smaller_btn)
             self._status_row1_layout.addWidget(self._font_larger_btn)
             self._status_row1_layout.addWidget(self._status_divider2)
             self._status_row1_layout.addWidget(self._record_btn)
+            self._status_row1_layout.addWidget(self._update_btn)
+            self._status_row1_layout.addWidget(self._midi_fallback_btn)
             self._status_row2_widget.setVisible(False)
             self._status_bar.setFixedHeight(64)
 
@@ -962,6 +1026,13 @@ class MainWindow(QMainWindow):
         # ``font-size: Npx`` we find — same regex, but only on widgets that
         # have ever called setStyleSheet themselves.
         self._patch_inline_font_sizes(scale)
+        # The bottom-dock headers are sized from their title label, so they
+        # have to be re-measured after the font changes or they clip.
+        for panel in (getattr(self, "_log_console", None),
+                      getattr(self, "_midi_log_panel", None)):
+            if panel is not None:
+                panel.refresh_header_height()
+        self._set_bottom_panel_sizes()
 
     def _patch_inline_font_sizes(self, scale: float) -> None:
         """Walk every descendant widget and rescale any inline-stylesheet
@@ -1013,10 +1084,18 @@ class MainWindow(QMainWindow):
         return bar
 
     def _on_update_available(self, info: UpdateInfo) -> None:
+        self._update_info = info
+        # Corner badge — the persistent, unobtrusive "update found" indicator.
+        self._update_btn.setToolTip(
+            f"Universal Controller MIDI v{info.latest} is available "
+            f"(you're on v{__version__}). Click to download — your licence "
+            "carries over automatically."
+        )
+        self._update_btn.setVisible(True)
+        # Keep the detailed banner too (release notes + dismiss).
         self._update_label.setText(
             f"v{info.latest} is available — you're on v{__version__}."
         )
-        # Re-wire the open button to this specific release's URL.
         try:
             self._update_open.clicked.disconnect()
         except Exception:
@@ -1024,6 +1103,66 @@ class MainWindow(QMainWindow):
         url = info.notes_url or info.download_url or UPGRADE_URL
         self._update_open.clicked.connect(lambda: webbrowser.open(url))
         self._update_banner.setVisible(True)
+
+    def _on_midi_fallback(self, port_name: str) -> None:
+        """Show / hide the persistent 'no DAW routing' badge.
+
+        Empty ``port_name`` means routing is fine — clear the warning.
+        """
+        self._midi_fallback_port = port_name
+        if not port_name:
+            self._midi_fallback_btn.setVisible(False)
+            return
+        self._midi_fallback_btn.setToolTip(
+            f"MIDI is going to \u201c{port_name}\u201d, not to a DAW.\n"
+            "No loopMIDI port was found, so we fell back to a downstream "
+            "port \u2014 you'll hear notes, but your DAW receives nothing.\n"
+            "Click for how to fix it."
+        )
+        self._midi_fallback_btn.setVisible(True)
+
+    def _show_midi_fallback_help(self) -> None:
+        """Explain the Windows loopMIDI requirement and link the download."""
+        port = getattr(self, "_midi_fallback_port", "") or "a built-in synth"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("MIDI isn't reaching your DAW")
+        box.setText(f"MIDI is currently going to \u201c{port}\u201d.")
+        box.setInformativeText(
+            "Windows has no built-in way to create a virtual MIDI port, so "
+            "the bridge fell back to a downstream port. You'll hear notes, "
+            "but Pro Tools / Ableton / Resolume receive nothing.\n\n"
+            "To route into a DAW:\n"
+            "1. Install loopMIDI (free).\n"
+            "2. Create one port in it (the default name is fine).\n"
+            "3. Back here, click Stop then Start.\n"
+            "4. Select that port as the MIDI input in your DAW."
+        )
+        open_btn = box.addButton("Get loopMIDI", QMessageBox.AcceptRole)
+        box.addButton("Close", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            webbrowser.open(
+                "https://www.tobias-erichsen.de/software/loopmidi.html"
+            )
+
+    def _download_update(self) -> None:
+        """Open the new version's download. The user's licence carries over with
+        no re-entry: the Ed25519 licence blob lives in ``license.key`` under the
+        per-user data dir, which an in-place reinstall never touches — so the
+        updated app reads the same key and stays Pro. (We deliberately do NOT put
+        the key in the download URL — it would leak into browser/server logs.)"""
+        info = self._update_info
+        url = (info.download_url if info else "") or UPGRADE_URL
+        try:
+            from ..license import is_pro as _is_pro
+            if _is_pro():
+                logging.getLogger("gamepad_midi_bridge.main_window").info(
+                    "Update download opened; existing Pro licence will carry over."
+                )
+        except Exception:
+            pass
+        webbrowser.open(url)
 
     def _build_side_panel(self) -> QWidget:
         """Side panel — secondary view docked to the right of the tabs, with
@@ -1112,6 +1251,86 @@ class MainWindow(QMainWindow):
             self._inspector_b.hide_panel()
         self._rebalance_content_splitter()
 
+    # Status-bar Console button attention colours. Green = something happened
+    # and it was fine, amber = warning, red = error. Customers were sending
+    # screen recordings of a frozen-looking app because nothing on screen
+    # said "there is an error in the console" — this is that signal.
+    _CONSOLE_SEVERITY_COLOURS = {
+        "info": "#2dd4bf",     # teal/green — matches the app accent
+        "warning": "#f0b429",  # amber
+        "error": "#ef4444",    # red
+    }
+    # How many on/off flashes a new message gets. Deliberately finite: a
+    # forever-pulsing button becomes wallpaper and stops being a signal.
+    _CONSOLE_PULSE_FLASHES = 6
+    _CONSOLE_PULSE_MS = 420
+
+    def _on_console_activity(self, severity: str) -> None:
+        """Colour + pulse the Console button when a line lands unseen."""
+        if not hasattr(self, "_console_btn"):
+            return
+        # Console already open — the user can see the line, don't nag.
+        if not self._log_console.is_collapsed():
+            self._clear_console_attention()
+            return
+        worst = self._log_console.highest_unseen_severity() or severity
+        # Only (re)start the pulse when severity escalates, so a chatty INFO
+        # stream can't downgrade or restart an error pulse.
+        if worst == getattr(self, "_console_attention", None):
+            return
+        self._console_attention = worst
+        self._start_console_pulse(worst)
+
+    def _start_console_pulse(self, severity: str) -> None:
+        colour = self._CONSOLE_SEVERITY_COLOURS.get(severity)
+        if colour is None:
+            return
+        self._console_pulse_colour = colour
+        self._console_pulse_left = self._CONSOLE_PULSE_FLASHES
+        self._console_pulse_on = False
+        timer = getattr(self, "_console_pulse_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.timeout.connect(self._tick_console_pulse)
+            self._console_pulse_timer = timer
+        timer.start(self._CONSOLE_PULSE_MS)
+        self._tick_console_pulse()
+
+    def _tick_console_pulse(self) -> None:
+        """One on/off flash. Settles on the solid colour, not on 'off', so the
+        state stays visible after the animation finishes."""
+        self._console_pulse_on = not getattr(self, "_console_pulse_on", False)
+        colour = getattr(self, "_console_pulse_colour", None)
+        if colour is None:
+            return
+        if self._console_pulse_on:
+            self._console_btn.setStyleSheet(
+                f"QPushButton#LayoutToggle {{ color: {colour};"
+                f" border: 1px solid {colour}; }}"
+            )
+        else:
+            self._console_btn.setStyleSheet(
+                f"QPushButton#LayoutToggle {{ color: {colour}; }}"
+            )
+        self._console_pulse_left -= 1
+        if self._console_pulse_left <= 0:
+            self._console_pulse_timer.stop()
+            # Rest on the solid tinted state — persistent, not blinking.
+            self._console_btn.setStyleSheet(
+                f"QPushButton#LayoutToggle {{ color: {colour};"
+                f" border: 1px solid {colour}; }}"
+            )
+
+    def _clear_console_attention(self) -> None:
+        """Drop the tint + stop any pulse — the console has been read."""
+        self._console_attention = None
+        timer = getattr(self, "_console_pulse_timer", None)
+        if timer is not None:
+            timer.stop()
+        if hasattr(self, "_console_btn"):
+            self._console_btn.setStyleSheet("")
+        self._log_console.clear_unseen()
+
     def _toggle_console(self) -> None:
         """Show / hide the bottom log console. Mirrors the console's own
         internal toggle (header arrow) so either control reflects the same
@@ -1121,11 +1340,32 @@ class MainWindow(QMainWindow):
         # visible — matches what the in-console toggle does and preserves
         # discoverability (the user can still see CONSOLE | ▾ at the bottom).
         self._log_console.set_collapsed(not want_open)
+        if want_open:
+            self._clear_console_attention()
 
-    # Header strip height when a bottom panel is collapsed. Matches the
-    # ``setFixedHeight(36)`` used inside ``LogConsole._build_header`` and
-    # ``MidiLogPanel._build_header``.
-    _COLLAPSED_PANEL_PX = 36
+    def _toggle_midi_log(self) -> None:
+        """Show / hide the bottom MIDI activity panel. Mirrors the panel's
+        own header toggle so either control reflects the same state."""
+        want_open = self._midi_log_btn.isChecked()
+        self._midi_log_panel.set_collapsed(not want_open)
+
+    def _on_bluetooth_rescan(self) -> None:
+        """Bluetooth Re-scan click → ask the bridge worker to re-detect.
+
+        Marshal across to the worker thread via QueuedConnection so the
+        pygame.joystick.quit() + init() that detect() performs runs on
+        the same thread that owns the live joystick handle. Safe to call
+        when the bridge isn't running — the worker's redetect() probes
+        with a transient reader.
+        """
+        worker = getattr(self._bridge, "worker", None) if self._bridge else None
+        if worker is None:
+            return
+        QMetaObject.invokeMethod(worker, "redetect", Qt.QueuedConnection)
+
+    # Collapsed height is no longer a constant here — ask the panel via
+    # ``header_height()``. It grows with the app font scale, so a duplicated
+    # literal would drift out of sync and clip the header.
     _OPEN_CONSOLE_PX = 200
     _OPEN_MIDI_PX = 200
 
@@ -1140,20 +1380,78 @@ class MainWindow(QMainWindow):
         """
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._apply_bottom_panel_sizes)
-        # Keep the status-bar Console toggle in sync immediately.
+        # Keep the status-bar toggles in sync immediately so either path
+        # (header click, status-bar button click, programmatic set) leaves
+        # the UI in a consistent state.
         if hasattr(self, "_console_btn"):
             self._console_btn.setChecked(not self._log_console.is_collapsed())
+        if hasattr(self, "_midi_log_btn"):
+            self._midi_log_btn.setChecked(not self._midi_log_panel.is_collapsed())
+
+    def _register_toolbar_learn(self) -> None:
+        """First batch of the hover-to-learn sweep: the top toolbar. Add more
+        ``learn(widget, title, text)`` calls per tab as the phase continues."""
+        pairs = [
+            (self._start_btn, "Start", "Begins bridging your controller to MIDI. Notes and CCs start flowing to your DAW / VJ app."),
+            (self._stop_btn, "Stop", "Stops the bridge. The MIDI port stays open; no events are sent until you Start again."),
+            (self._panic_btn, "Panic", "Emergency all-notes-off + all-sound-off on every channel. Use if a note gets stuck on."),
+            (self._split_btn, "Split view", "Show a second workspace beside the first — each side keeps its own tab + inspector."),
+            (self._console_btn, "Console", "Toggle the bottom log console — app + bridge messages, errors, and status."),
+            (self._midi_log_btn, "MIDI activity", "Toggle the live feed of every MIDI message sent, with a filter (notes / CCs / all)."),
+            (self._inspect_btn, "Inspect", "Open the right-hand inspector — properties for whatever row or card you click."),
+            (self._learn_btn, "Learn mode", "You're using it! Hover any control for a plain-English explanation. Toggle off for normal use."),
+            (self._3d_btn, "3D background", "Show a rotating 3D controller behind the UI. Pure eye-candy — safe to leave off."),
+            (self._font_smaller_btn, "Smaller text", "Shrink the whole UI's text. Persists across launches."),
+            (self._font_larger_btn, "Larger text", "Enlarge the whole UI's text. Persists across launches."),
+            (self._record_btn, "Record macro", "Capture every MIDI message you send into a re-playable macro. Click again to stop + name it."),
+            (self._update_btn, "Update available", "A newer version is out. Click to download — your licence carries over automatically, no re-entry."),
+            (self._midi_fallback_btn, "No DAW routing", "MIDI is going to a built-in synth, not your DAW. Windows needs loopMIDI to route between apps — click the badge for the fix."),
+        ]
+        for widget, title, text in pairs:
+            if widget is not None:
+                learn(widget, title, text)
+
+    def _on_body_splitter_moved(self, _pos: int, _index: int) -> None:
+        """Keep each bottom panel's collapse state in sync with a handle drag.
+
+        Body splitter children are [content, log_console, midi_log_panel]. If the
+        user drags a collapsed panel taller than its header, expand it (show the
+        body); if they drag an open panel down to the header, collapse it. Uses
+        the *silent* setter so we don't re-snap and fight the live drag.
+        """
+        if not hasattr(self, "_body_splitter"):
+            return
+        sizes = self._body_splitter.sizes()
+        if len(sizes) < 3:
+            return
+        for panel, size, btn in (
+            (self._log_console, sizes[1], self._console_btn),
+            (self._midi_log_panel, sizes[2], self._midi_log_btn),
+        ):
+            # A little above THIS panel's collapsed header height so a few
+            # stray drag pixels don't flip the state. Per-panel rather than a
+            # shared 36 — the header grows with the font scale, and a fixed
+            # threshold would spuriously "expand" a collapsed panel.
+            threshold = panel.header_height() + 12
+            if size > threshold and panel.is_collapsed():
+                panel.set_collapsed_silent(False)
+                btn.setChecked(True)
+            elif size <= threshold and not panel.is_collapsed():
+                panel.set_collapsed_silent(True)
+                btn.setChecked(False)
 
     def _apply_bottom_panel_sizes(self) -> None:
         if not hasattr(self, "_body_splitter"):
             return
+        # Collapsed height comes from each panel's real header height, not a
+        # hardcoded 36 — at a larger font scale a frozen 36 clips the title.
         console_h = (
-            self._COLLAPSED_PANEL_PX
+            self._log_console.header_height()
             if self._log_console.is_collapsed()
             else self._OPEN_CONSOLE_PX
         )
         midi_h = (
-            self._COLLAPSED_PANEL_PX
+            self._midi_log_panel.header_height()
             if self._midi_log_panel.is_collapsed()
             else self._OPEN_MIDI_PX
         )
@@ -1342,7 +1640,21 @@ class MainWindow(QMainWindow):
         # Sits between Live (minimal) and Mapping (configuration) so the
         # natural left-to-right reading order is observe → analyse → configure.
         self._visualise = VisualiseTab()
+        # Initial canvas render — falls back gracefully if the startup mapping
+        # has no node_graph (most don't yet — Phase 2.0 just rendered).
+        self._visualise.set_mapping(self._mapping)
         tabs.addTab(self._scrollable(self._visualise), "Visualise")
+
+        # === Nodes tab — top-level peer of Visualise. Owns the canvas, seeds
+        # default ControllerSources, lazy-installs an empty graph if missing.
+        from .nodes_tab import NodesTab
+        self._nodes_tab = NodesTab()
+        self._nodes_tab.set_mapping(self._mapping)
+        # Auto-save: any canvas edit fires mapping_changed; persist + push
+        # the new mapping through the same path as settings-panel edits so
+        # multi-controller slots see the update too.
+        self._nodes_tab.mapping_changed.connect(self._on_settings_changed)
+        tabs.addTab(self._nodes_tab, "Nodes")
 
         self._mapping_editor = MappingEditor(self._mapping)
         self._mapping_editor.set_worker(self._bridge.worker)
@@ -1393,6 +1705,10 @@ class MainWindow(QMainWindow):
 
         self._bluetooth = BluetoothTab()
         self._bluetooth.status_message.connect(self._on_status)
+        # Re-scan button: refresh the OS device list (already wired in
+        # BluetoothTab) AND ask the bridge to re-detect its joystick handle
+        # so newly-paired controllers attach without a Stop/Start cycle.
+        self._bluetooth.rescan_requested.connect(self._on_bluetooth_rescan)
         tabs.addTab(self._bluetooth, "Bluetooth")
 
         self._settings = SettingsPanel(self._mapping)
@@ -1413,7 +1729,11 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._help, "Help")
 
         about_tab = self._build_about_tab()
-        tabs.addTab(about_tab, "About")
+        # Scroll-wrap: About has no internal scroll, so added raw its full
+        # content height (~1080 px) became a hard minimum on the whole tab
+        # stack — which squeezed the bottom Console/MIDI dock to its 36 px
+        # collapsed height on every tab. Wrapping matches Visualise/Settings/etc.
+        tabs.addTab(self._scrollable(about_tab), "About")
 
         return tabs
 
@@ -1505,6 +1825,10 @@ class MainWindow(QMainWindow):
         self._log_console.attach_bridge_signals(self._bridge.worker)
         # Feed the Visualise tab from the same primary worker.
         self._visualise.attach_bridge_signals(self._bridge.worker)
+        # Feed the Nodes tab so the canvas can light up wires downstream of
+        # whichever controller surface the user is currently touching.
+        if hasattr(self, "_nodes_tab"):
+            self._nodes_tab.attach_bridge_signals(self._bridge.worker)
         # Wire MIDI message details to the activity log panel
         self._bridge.worker.midi_message.connect(self._on_midi_message)
 
@@ -1516,6 +1840,7 @@ class MainWindow(QMainWindow):
         if primary:
             w.status.connect(self._on_status)
             w.started.connect(self._on_started)
+            w.midi_fallback.connect(self._on_midi_fallback)
             w.stopped.connect(self._on_stopped)
             w.error.connect(self._on_error)
             w.calibration_progress.connect(self._on_calibration_progress)
@@ -1675,6 +2000,7 @@ class MainWindow(QMainWindow):
             self._calibration_dialog = None
 
     def _on_stopped(self) -> None:
+        self._midi_fallback_btn.setVisible(False)
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._panic_btn.setEnabled(False)
@@ -1706,9 +2032,11 @@ class MainWindow(QMainWindow):
                 self._reconnect_retry_timer.stop()
                 self._reconnect_overlay.notify_success()
             
-            # Test wizard on first-time controller connect
-            if (not self._mapping.config.get("controller_test_wizard_disabled", False)
-                    and info.name not in seen_controllers()):
+            # Test wizard on first-time controller connect. `Mapping` has no
+            # `config` dict — earlier code tried `mapping.config.get(...)` and
+            # crashed every connect with AttributeError. Gate on the seen-
+            # controllers history alone, which is what we actually wanted.
+            if info.name not in seen_controllers():
                 QTimer.singleShot(800, lambda: self._run_test_wizard(info.name))
 
     def _on_calibration_progress(self, fraction: float) -> None:
@@ -1778,6 +2106,11 @@ class MainWindow(QMainWindow):
         self._mapping = mapping
         self._multi.apply_mapping(mapping)
         self._mapping_editor.set_mapping(mapping)
+        # Refresh both the Visualise tab (legacy hook, no-op now) and the
+        # top-level Nodes tab so the canvas reflects the loaded mapping's graph.
+        self._visualise.set_mapping(mapping)
+        if hasattr(self, "_nodes_tab"):
+            self._nodes_tab.set_mapping(mapping)
         _save_last_mapping(mapping)
         QMessageBox.information(self, "Preset loaded", f"Loaded '{mapping.name}'.")
         if self._hud is not None:

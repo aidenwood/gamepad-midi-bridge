@@ -111,3 +111,63 @@ else:
 - Headless mode honours `--demo`, `--keyboard`, `--mouse` and installs the right Qt event filter on the `QCoreApplication`.
 - The keyboard/mouse buses are singletons (`keyboard_bus.KeyboardBus`, `mouse_bus.MouseBus`). They register a Qt event filter and broadcast key/mouse state — readers read from the bus, never directly from Qt events.
 - Don't add hardware-specific behaviour to the demo readers. They exist to validate mappings; any DualSense-specific feature (battery, touchpad, haptics) must degrade gracefully when the reader isn't `ControllerReader`.
+
+### Qt Lifetime, Teardown & Layout Traps
+
+Hard-won PySide6/Qt6 rules. These caused real macOS crashes/bugs (2026-06-17) — don't relearn them.
+
+- **Hard-exit at the event-loop boundary. Never let PySide6 tear widgets down.**
+  When the Qt event loop returns, `app.run()` performs an immediate hard process
+  exit (`os` low-level exit, value = rc) — no widget deleteLater, no
+  processEvents, no gc collect, no Python finaliser. Reason: Shiboken's
+  `destructionVisitor` segfaults (`EXC_BAD_ACCESS` in `QObject` destructor) while
+  sweeping any live Qt wrapper (QSlider, QDoubleSpinBox, …) whose C++ side is
+  being deleted. closeEvent + `autobackup.mark_clean_shutdown` already ran inside
+  the loop, so nothing is left to flush; the OS reclaims memory. Every entry
+  point must funnel here: `console_entry` (hard-exits in a `finally`),
+  `python -m`, the PyInstaller `scripts/app_entry.py` (→ `console_entry`), and
+  direct `run()`. Don't add a "tidy teardown" — it reintroduces the segfault.
+- **Ctrl-C → `SIGINT` set to `SIG_DFL` in `run()`.** Qt swallows SIGINT, and when
+  it surfaces it unwinds into Python's finaliser → the same teardown segfault.
+  Restoring the default handler makes the OS terminate the process directly.
+- **A `QSplitter` honours each child's `minimumSizeHint` as a hard floor.** A
+  `QTabWidget`'s `minimumSizeHint` is the MAX over ALL pages, so one tall
+  unscrolled page (e.g. About at ~1080 px) forces the whole content area taller
+  than the window and squeezes sibling panes (the bottom Console/MIDI dock) to
+  their minimum — they look "stuck collapsed". Fixes: scroll-wrap tall tab pages
+  (`_scrollable()` in main_window) AND `ResponsiveTabWidget.minimumSizeHint`
+  caps its height so no page can break a sibling pane.
+- Verify splitter behaviour by reading `splitter.sizes()` after a `singleShot(0)`
+  settle — not by visibility (always reports hidden until the top-level window is
+  shown; check `not w.isHidden()`).
+
+### Learn mode (hover-to-learn) — `ui/learn_mode.py`
+
+Toolbar-toggled discoverability layer. When the **Learn** toggle is on, hovering
+any tagged widget pops a card near the cursor explaining it; off = silent. This
+is a **deep, ongoing sweep** — the whole app should be covered over time.
+
+- **To make a control learnable:** `from .learn_mode import learn` then
+  `learn(widget, "Short title", "One or two plain-English sentences — what it
+  does + why you'd use it.")`. Tag the most meaningful container (e.g. a card),
+  not every child — the resolver walks up to 6 parents to find the nearest tag.
+- **Architecture:** `learn()` stores dynamic properties; `LearnController` polls
+  `QApplication.widgetAt(QCursor.pos())` at ~11 Hz *only while active* (mouse
+  tracking / `WA_Hover` aren't universal, so polling is the reliable path). The
+  overlay is `WA_TransparentForMouseEvents` so it never steals hover.
+- **Coverage tracker:** done — top toolbar (`_register_toolbar_learn`). TODO —
+  Mapping, Live, Connectors, Presets, Settings, Bluetooth, Nodes, Marketplace,
+  Templates, Visualise, Help/About. Add a `_register_*_learn()` per tab and call
+  it once the tab is built.
+- Voice: plain English, audience = a VJ/Ableton user who isn't a MIDI expert.
+  No jargon without a gloss. Keep to ~1–2 sentences (the card wraps at 300 px).
+
+### Qt/PySide6 tooling — use it, don't guess from memory
+
+Training data is unreliable on Qt 6.x APIs. For any Qt/PySide6 API question
+(signals, slots, defaults, since-version, lifetime, layout behaviour) consult a
+live source BEFORE answering:
+
+- **qt-docs MCP** (`qt_documentation_search` / `qt_documentation_read`) — official Qt 6 docs; applies to PySide6 (same API).
+- **context7** — `resolve-library-id` → `/websites/doc_qt_io_qtforpython-6` (official Qt for Python, 100k+ snippets) or `/erriez/pyside6-getting-started`; `/pytest-dev/pytest-qt` for tests.
+- **`pyside6-ui-engineer`** skill (user-level) — Widgets-surface selection, layout/hierarchy, model/view, threading, UX passes. Our app is PySide6 **Widgets** (not QML/C++), so the official `qt-cpp-*` / `qt-qml-*` skills are off-stack here.

@@ -313,7 +313,7 @@ class UsageHeatmap(QWidget):
         header.addStretch()
         reset_btn = QPushButton("Reset stats")
         reset_btn.setObjectName("UsageHeatmapResetButton")
-        reset_btn.setFixedHeight(22)
+        reset_btn.setFixedHeight(26)
         reset_btn.clicked.connect(self._reset)
         header.addWidget(reset_btn)
         root.addLayout(header)

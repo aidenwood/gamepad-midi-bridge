@@ -118,11 +118,14 @@ class TestOpenSystemSettings:
     @patch("gamepad_midi_bridge.bluetooth.sys.platform", "win32")
     @patch("gamepad_midi_bridge.bluetooth.subprocess.Popen")
     def test_windows_opens_settings(self, mock_popen):
-        """Windows opens ms-settings:bluetooth URI."""
+        """Windows opens ms-settings:bluetooth URI with no console window."""
         bt.open_system_settings()
-        mock_popen.assert_called_once_with(
-            ["cmd", "/c", "start", "ms-settings:bluetooth"]
-        )
+        assert mock_popen.call_count == 1
+        args, kwargs = mock_popen.call_args
+        assert args[0] == ["cmd", "/c", "start", "ms-settings:bluetooth"]
+        # CREATE_NO_WINDOW — without it `cmd` flashes a black console over
+        # whatever the user is doing. See proc.no_window_kwargs().
+        assert kwargs["creationflags"] & 0x08000000
 
     @patch("gamepad_midi_bridge.bluetooth.sys.platform", "win32")
     @patch("gamepad_midi_bridge.bluetooth.subprocess.Popen")
@@ -276,8 +279,121 @@ class TestBluetoothTabUI:
 
         tab.status_message.connect(capture_signal)
         tab.refresh()
-        # Signal should fire with a status message
+        # refresh() now scans on the thread pool, so drain it before asserting.
+        from PySide6.QtCore import QThreadPool
+        QThreadPool.globalInstance().waitForDone(5000)
+        app.processEvents()
         assert len(signal_fired) > 0 or not tab._supported
+
+
+class TestWindowsConsoleSuppression:
+    """Regression: a windowed Windows build must never spawn a visible console.
+
+    The app shells out to powershell/cmd/tasklist. Without CREATE_NO_WINDOW,
+    Windows allocates a console for each call and flashes it over the user's
+    DAW — every 6 seconds, because the Bluetooth tab polls.
+    """
+
+    def test_no_window_kwargs_empty_off_windows(self):
+        """POSIX gets {} so call sites can splat unconditionally."""
+        from gamepad_midi_bridge import proc
+        with patch("gamepad_midi_bridge.proc.sys.platform", "darwin"):
+            assert proc.no_window_kwargs() == {}
+
+    def test_no_window_kwargs_sets_create_no_window(self):
+        """Windows gets CREATE_NO_WINDOW."""
+        from gamepad_midi_bridge import proc
+        with patch("gamepad_midi_bridge.proc.sys.platform", "win32"):
+            kwargs = proc.no_window_kwargs()
+        assert kwargs["creationflags"] & proc.CREATE_NO_WINDOW
+
+    @patch("gamepad_midi_bridge.bluetooth.sys.platform", "win32")
+    @patch("gamepad_midi_bridge.bluetooth.shutil.which")
+    @patch("gamepad_midi_bridge.bluetooth.subprocess.run")
+    def test_win_list_devices_hides_console(self, mock_run, mock_which):
+        """The 6-second Bluetooth poll must not flash a PowerShell window."""
+        mock_which.return_value = "powershell.exe"
+        mock_run.return_value = MagicMock(returncode=0, stdout="[]")
+        bt.list_devices()
+        _, kwargs = mock_run.call_args
+        assert kwargs.get("creationflags", 0) & 0x08000000
+
+
+class TestWindowsDeviceFiltering:
+    """Regression: only paired remote devices count, not every PnP node.
+
+    `Get-PnpDevice -Class Bluetooth` also returns the radio, the BTHENUM/
+    BTHLE enumerators and one child node per advertised service. Counting
+    those is how a laptop with two controllers reported "20 connected,
+    20 paired".
+    """
+
+    PNP_SAMPLE = [
+        # Real paired peripherals — keep.
+        {"FriendlyName": "Xbox Wireless Controller",
+         "Status": "OK",
+         "InstanceId": r"BTHENUM\DEV_AABBCCDDEEFF\7&1234&0&AABBCCDDEEFF_C00000000"},
+        {"FriendlyName": "Bose SoundLink",
+         "Status": "Unknown",
+         "InstanceId": r"BTHENUM\DEV_112233445566\7&1234&0&112233445566_C00000000"},
+        # Per-service child nodes of the SAME controller — drop.
+        {"FriendlyName": "Bluetooth Device (Personal Area Network)",
+         "Status": "OK",
+         "InstanceId": r"BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_LOCALMFG&0000\7&1&0"},
+        {"FriendlyName": "Bluetooth Device (RFCOMM Protocol TDI)",
+         "Status": "OK",
+         "InstanceId": r"BTHENUM\{00001101-0000-1000-8000-00805f9b34fb}_VID&0001_PID&0001\8&1"},
+        # The radio and the enumerators themselves — drop.
+        {"FriendlyName": "Intel(R) Wireless Bluetooth(R)",
+         "Status": "OK",
+         "InstanceId": r"USB\VID_8087&PID_0026\5&1"},
+        {"FriendlyName": "Microsoft Bluetooth Enumerator",
+         "Status": "OK",
+         "InstanceId": r"BTH\MS_BTHBRB\7&1&0"},
+    ]
+
+    def _run(self):
+        import json
+        with patch("gamepad_midi_bridge.bluetooth.sys.platform", "win32"), \
+             patch("gamepad_midi_bridge.bluetooth.shutil.which",
+                   return_value="powershell.exe"), \
+             patch("gamepad_midi_bridge.bluetooth.subprocess.run",
+                   return_value=MagicMock(
+                       returncode=0,
+                       stdout=json.dumps(self.PNP_SAMPLE))):
+            return bt.list_devices()
+
+    def test_drops_radios_enumerators_and_service_nodes(self):
+        """Six PnP rows collapse to the two actual paired peripherals."""
+        devices = self._run()
+        assert [d.name for d in devices] == [
+            "Xbox Wireless Controller", "Bose SoundLink",
+        ]
+
+    def test_parses_mac_and_connected_state(self):
+        """MAC comes off the InstanceId; Status drives `connected`."""
+        pad, speaker = self._run()
+        assert pad.address == "aa:bb:cc:dd:ee:ff"
+        assert pad.connected is True
+        assert pad.is_controller is True
+        assert speaker.connected is False
+        assert speaker.is_controller is False
+
+    def test_deduplicates_same_mac(self):
+        """A controller exposing both a classic and an LE node counts once."""
+        import json
+        dupe = self.PNP_SAMPLE[:1] + [{
+            "FriendlyName": "Xbox Wireless Controller",
+            "Status": "OK",
+            "InstanceId": r"BTHLEDEVICE\DEV_AABBCCDDEEFF\9&1",
+        }]
+        with patch("gamepad_midi_bridge.bluetooth.sys.platform", "win32"), \
+             patch("gamepad_midi_bridge.bluetooth.shutil.which",
+                   return_value="powershell.exe"), \
+             patch("gamepad_midi_bridge.bluetooth.subprocess.run",
+                   return_value=MagicMock(returncode=0, stdout=json.dumps(dupe))):
+            devices = bt.list_devices()
+        assert len(devices) == 1
 
 
 def _has_qapp() -> bool:

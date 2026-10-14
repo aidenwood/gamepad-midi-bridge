@@ -27,7 +27,23 @@ from PySide6.QtWidgets import (
 
 from ..paths import config_path
 
+from .panel_metrics import HEADER_MIN_PX, header_height_for
+
 CONFIG_KEY = "midi_panel_open"
+
+
+class _ClickableFrame(QFrame):
+    """QFrame that emits ``clicked`` on bare-surface mouse-release.
+
+    Doubles the toggle target so users don't have to hunt for the ▾ arrow.
+    Child widgets (Clear, filter combo, ▾) consume their own clicks first.
+    """
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
 
 class MidiFilter(Enum):
@@ -84,18 +100,33 @@ class MidiLogPanel(QWidget):
         self._apply_collapsed()
         self.collapse_changed.emit(self._collapsed)
 
+    def set_collapsed_silent(self, collapsed: bool) -> None:
+        """Match collapse state to a live splitter drag WITHOUT emitting
+        collapse_changed (which would snap-resize and undo the drag). Mirrors
+        LogConsole.set_collapsed_silent — shows/hides the body to track the drag."""
+        if collapsed == self._collapsed:
+            return
+        self._collapsed = collapsed
+        self._apply_collapsed()
+        _write_open_state(not self._collapsed)
+
     def is_collapsed(self) -> bool:
         return self._collapsed
 
     # ============================================================== layout
 
     def _build_header(self) -> QFrame:
-        bar = QFrame()
+        bar = _ClickableFrame()
         # No border-top — QSplitter handle above is the visual divider.
         # Styling lives in styles.qss → "MIDI ACTIVITY LOG PANEL".
         bar.setObjectName("MidiLogPanelHeader")
         bar.setAttribute(Qt.WA_StyledBackground, True)
-        bar.setFixedHeight(36)
+        # Height is set at the END of this method from the populated
+        # layout's own sizeHint — a hardcoded 36 clips the title once the
+        # A+/A- buttons scale the app font. See panel_metrics.
+        self._header_bar = bar
+        bar.setCursor(Qt.PointingHandCursor)
+        bar.clicked.connect(self.toggle_collapsed)
         h = QHBoxLayout(bar)
         h.setContentsMargins(12, 5, 8, 5)
         h.setSpacing(8)
@@ -103,6 +134,7 @@ class MidiLogPanel(QWidget):
         title = QLabel("MIDI ACTIVITY")
         title.setObjectName("MidiLogPanelTitle")
         title.setMinimumHeight(20)
+        self._header_title = title
         h.addWidget(title)
         h.addStretch(1)
 
@@ -129,6 +161,7 @@ class MidiLogPanel(QWidget):
         self._toggle_btn.clicked.connect(self.toggle_collapsed)
         h.addWidget(self._toggle_btn)
 
+        bar.setFixedHeight(header_height_for(title, h))
         return bar
 
     def _build_body(self) -> QWidget:
@@ -150,6 +183,23 @@ class MidiLogPanel(QWidget):
 
         self._body = container
         return container
+
+    def header_height(self) -> int:
+        """Current header height in px — the collapsed height of this panel.
+
+        MainWindow sizes the bottom splitter from this instead of a hardcoded
+        36 so the header can never be clipped at a larger font scale.
+        """
+        bar = getattr(self, "_header_bar", None)
+        return bar.height() if bar is not None else HEADER_MIN_PX
+
+    def refresh_header_height(self) -> None:
+        """Re-measure after a font-scale change so the header still fits."""
+        bar = getattr(self, "_header_bar", None)
+        title = getattr(self, "_header_title", None)
+        if bar is not None and title is not None:
+            bar.setFixedHeight(header_height_for(title, bar.layout()))
+        self.setMinimumHeight(self.header_height())
 
     def _apply_collapsed(self) -> None:
         # NOTE: do NOT self-impose ``setMaximumHeight`` here. The parent

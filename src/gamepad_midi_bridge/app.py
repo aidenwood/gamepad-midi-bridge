@@ -54,6 +54,17 @@ def run(argv: Optional[List[str]] = None) -> int:
 
     app = QApplication(argv)
 
+    # Ctrl-C from a terminal launch: Qt's event loop otherwise swallows SIGINT,
+    # and when it does surface, KeyboardInterrupt unwinds into Python's finaliser
+    # — which segfaults sweeping live Qt wrappers (QSlider/QDoubleSpinBox) in
+    # Shiboken. Restore the OS default handler so Ctrl-C terminates the process
+    # immediately, before any finalisation runs. Belt to console_entry's braces.
+    import signal
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+    except (ValueError, OSError):
+        pass  # not the main thread / unsupported platform — non-fatal
+
     # Load the default theme (system). Will be overridden by MainWindow
     # after loading the current preset's theme preference.
     apply_theme(app, "system")
@@ -125,16 +136,19 @@ def run(argv: Optional[List[str]] = None) -> int:
     run_loop = getattr(app, "exec")
     rc = run_loop()
 
-    # Explicit teardown order to avoid PySide6/Shiboken shutdown segfault.
-    # Qt was crashing during interpreter exit because Shiboken's
-    # destructionVisitor was sweeping a stale QDoubleSpinBoxWrapper
-    # (and likely other widget wrappers) AFTER MainWindow.closeEvent had
-    # already run shutdown(). Force deterministic cleanup here:
-    try:
-        win.deleteLater()
-        app.processEvents()
-    except Exception:
-        pass
-    import gc as _gc_shutdown
-    _gc_shutdown.collect()
-    return rc
+    # Hard-exit the INSTANT the event loop ends — do NOT tear anything down.
+    #
+    # Every crash we've seen is Shiboken's destructionVisitor sweeping a Qt
+    # wrapper (QSlider, QDoubleSpinBox, …) whose C++ side is being deleted —
+    # a SIGSEGV in QObject::~QObject. ANY teardown triggers it: the old
+    # ``win.deleteLater() + processEvents() + gc.collect()`` dance here did it
+    # in-process, BEFORE the os._exit guards downstream could run; and letting
+    # Python finalise does it too. MainWindow.closeEvent + autobackup's
+    # mark_clean_shutdown already ran inside the loop, so nothing is left to
+    # flush. A hard process exit skips all widget/wrapper destruction and
+    # Python finalisers; the OS reclaims memory cleanly. This is the single
+    # chokepoint every launch path funnels through, so it kills the whole class.
+    import os as _os
+    sys.stdout.flush()
+    sys.stderr.flush()
+    _os._exit(rc if rc is not None else 0)

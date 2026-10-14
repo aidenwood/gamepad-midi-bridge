@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import List
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
@@ -26,10 +26,49 @@ from .. import bluetooth as bt
 REFRESH_INTERVAL_MS = 6000   # background poll cadence
 
 
+class _ScanSignals(QObject):
+    """Signal carrier for _ScanTask. Lives on the GUI thread, so the
+    connection to the tab is automatically queued back onto it."""
+
+    finished = Signal(list)
+
+
+class _ScanTask(QRunnable):
+    """Runs bt.list_devices() off the GUI thread.
+
+    The OS device query is a blocking shell-out on Windows and Linux
+    (powershell / bluetoothctl) and takes over a second on a cold
+    PowerShell start. Calling it from the GUI thread froze the event loop
+    on every poll, which showed up as multi-second MIDI latency.
+
+    QRunnable on the global pool rather than a long-lived QThread: there's
+    no thread object to own, so a tab that gets garbage-collected without
+    an explicit close can't abort the process on teardown.
+    """
+
+    def __init__(self, signals: _ScanSignals) -> None:
+        super().__init__()
+        self._signals = signals
+
+    def run(self) -> None:  # noqa: D102 — Qt override
+        try:
+            devices = bt.list_devices()
+        except Exception:
+            devices = []
+        try:
+            self._signals.finished.emit(devices)
+        except RuntimeError:
+            # Tab was destroyed while the scan was in flight. Nothing to do.
+            pass
+
+
 class BluetoothTab(QWidget):
     """Surface OS-paired Bluetooth devices, with a deep-link to system settings."""
 
     status_message = Signal(str)
+    # Re-scan button clicked. MainWindow forwards this to BridgeWorker.redetect()
+    # so a newly-paired controller gets attached without a Stop/Start cycle.
+    rescan_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -62,6 +101,10 @@ class BluetoothTab(QWidget):
         self._open_settings.clicked.connect(self._on_open_settings)
         self._refresh = QPushButton("Re-scan")
         self._refresh.clicked.connect(self.refresh)
+        # The OS device list refresh is local UI; ALSO ask the bridge to
+        # re-detect its joystick handle so newly-paired controllers get
+        # picked up without a Stop/Start cycle.
+        self._refresh.clicked.connect(self.rescan_requested.emit)
         self._docs_link = QPushButton("📖 Connection guide")
         self._docs_link.setObjectName("BluetoothDocsLink")
         self._docs_link.clicked.connect(self._on_docs_link)
@@ -76,19 +119,51 @@ class BluetoothTab(QWidget):
         self._scroll.setFrameShape(QFrame.NoFrame)
         outer.addWidget(self._scroll, 1)
 
+        self._scan_in_flight = False
+        self._scan_signals = _ScanSignals(self)
+        self._scan_signals.finished.connect(self._on_scan_finished)
+
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(REFRESH_INTERVAL_MS)
         self._poll_timer.timeout.connect(self.refresh)
 
-        # Initial paint + start polling. The 250 ms delay gives the GUI thread
-        # a moment to lay out the rest of the window before our first OS call.
-        QTimer.singleShot(250, self.refresh)
-        self._poll_timer.start()
+        # Paint the empty state now; the first real scan runs when the tab is
+        # actually shown. Polling the OS for Bluetooth devices while the user
+        # is on another tab costs them a shell-out every 6 seconds and buys
+        # nothing — nobody can see the result.
+        self._render([])
 
     # ------------------------------------------------------------------ public
 
     def refresh(self) -> None:
-        devices = bt.list_devices() if self._supported else []
+        """Kick off a device scan on the worker thread (no-op if one is running)."""
+        if not self._supported:
+            self._render([])
+            return
+        if self._scan_in_flight:
+            return
+        self._scan_in_flight = True
+        QThreadPool.globalInstance().start(_ScanTask(self._scan_signals))
+
+    # ------------------------------------------------------------- lifecycle
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt override
+        super().showEvent(event)
+        self.refresh()
+        self._poll_timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 — Qt override
+        self._poll_timer.stop()
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt override
+        self._poll_timer.stop()
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------ slots
+
+    def _on_scan_finished(self, devices: List[bt.BluetoothDevice]) -> None:
+        self._scan_in_flight = False
         self._render(devices)
         if self._supported:
             self.status_message.emit(
