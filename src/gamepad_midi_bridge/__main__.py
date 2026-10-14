@@ -99,6 +99,11 @@ def _do_headless(deep_link: str | None, demo: bool = False, keyboard: bool = Fal
     import logging
     from PySide6.QtCore import QCoreApplication
 
+    # No display to pop a crash dialog onto (kiosks, touring rigs, CI) — the
+    # crash file and the log are the whole story here.
+    from .crash_reporter import disable_gui_dialog
+    disable_gui_dialog()
+
     log = logging.getLogger("headless")
     from .bridge import BridgeController
     from .mapping import Mapping
@@ -170,11 +175,30 @@ def main() -> int:
     return run(sys.argv)
 
 
-if __name__ == "__main__":
-    _rc = main()
-    # Bypass Python's normal module-teardown chain on exit to avoid the
-    # PySide6/Shiboken destructionVisitor segfault on macOS. The app has
-    # already run its closeEvent + autobackup.mark_clean_shutdown, so all
-    # user-facing cleanup is complete. os._exit skips finalizers entirely.
+def console_entry() -> None:
+    """Console-script entry point (`gamepad-midi-bridge`).
+
+    Hard-exits via ``os._exit`` to dodge the PySide6/Shiboken
+    ``destructionVisitor`` teardown segfault on macOS: Python's finaliser sweeps
+    live Qt wrappers (QSlider, QDoubleSpinBox, …) and crashes in
+    ``Py_FinalizeEx``. The app has already run its closeEvent +
+    autobackup.mark_clean_shutdown by then, so skipping finalisers is safe.
+
+    The ``finally`` is load-bearing: an earlier version put ``os._exit`` after
+    ``main()`` returned, so an ABNORMAL exit (Ctrl-C raising KeyboardInterrupt,
+    or any uncaught exception) skipped the guard and let the interpreter finalise
+    → segfault. Routing through ``finally`` guarantees the hard-exit on every
+    exit path. (Ctrl-C is also defused at source via SIG_DFL in ``app.run``.)
+    """
     import os as _os_exit
-    _os_exit._exit(_rc if _rc is not None else 0)
+    rc = 0
+    try:
+        rc = main()
+    except KeyboardInterrupt:
+        rc = 130  # 128 + SIGINT, conventional Ctrl-C exit code
+    finally:
+        _os_exit._exit(rc if rc is not None else 0)
+
+
+if __name__ == "__main__":
+    console_entry()

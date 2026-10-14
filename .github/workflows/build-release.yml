@@ -126,6 +126,64 @@ jobs:
         run: |
           Compress-Archive -Path "dist/Universal Controller MIDI" -DestinationPath "gamepad-midi-bridge-$env:TAG-windows.zip"
 
+      # Actually LAUNCH the thing before we ship it. v2.1.5 went out with a
+      # Windows binary no human or machine had ever run — CI compiled it, zipped
+      # it, and published it. A missing hidden import or an unloadable DLL would
+      # have reached paying customers as a silent flash-and-vanish.
+      #
+      # `--demo` uses the synthetic controller so no hardware is needed. We give
+      # it 40s to get through Qt init, theme load, the SDL pump timer and first
+      # paint; if it is still alive it got past every import and constructed the
+      # main window. No `${{ }}` interpolation in this script on purpose.
+      - name: Smoke-test the Windows build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = "dist\Universal Controller MIDI\Universal Controller MIDI.exe"
+          if (-not (Test-Path $exe)) { throw "Built exe not found at $exe" }
+
+          $data     = Join-Path $env:APPDATA "Universal Controller MIDI"
+          $crashDir = Join-Path $data "crashes"
+          $log      = Join-Path $data "logs\app.log"
+          if (Test-Path $crashDir) { Remove-Item "$crashDir\*" -Force -ErrorAction SilentlyContinue }
+          if (Test-Path $log)      { Remove-Item $log -Force -ErrorAction SilentlyContinue }
+
+          Write-Host "Launching $exe --demo"
+          $p = Start-Process -FilePath $exe -ArgumentList "--demo" -PassThru
+          Start-Sleep -Seconds 40
+
+          $exited = $p.HasExited
+          if (-not $exited) {
+            Write-Host "Still running after 40s - startup OK."
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 3
+          }
+
+          if (Test-Path $log) {
+            Write-Host "---- app.log (tail) ----"
+            Get-Content $log -Tail 120
+          } else {
+            Write-Host "No app.log was written."
+          }
+
+          $crashes = @(Get-ChildItem $crashDir -Filter *.txt -ErrorAction SilentlyContinue)
+          if ($crashes.Count -gt 0) {
+            Write-Host "---- crash report ----"
+            Get-Content $crashes[0].FullName
+            throw "App produced a crash report on startup."
+          }
+
+          if ($exited) {
+            throw "App exited within 40s (exit code $($p.ExitCode)) - it should still be running."
+          }
+
+          if (Test-Path $log) {
+            if (Select-String -Path $log -Pattern "Traceback|CRITICAL" -Quiet) {
+              throw "Traceback or CRITICAL found in app.log on a clean startup."
+            }
+          }
+          Write-Host "Windows smoke test passed."
+
       # Linux: --onefile produces a single binary `dist/Universal Controller MIDI`.
       # Zip it so the asset name + extension stay consistent across OSes.
       - name: Zip Linux binary
@@ -149,6 +207,13 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Only ever publish from a tag. Dispatching this workflow on `main` used to
+    # reach here with `github.ref_name == "main"`, which would cut a release
+    # literally named "main" and — worse — hand that string to
+    # publish-to-storefront as the tag, overwriting the live `current` manifest
+    # so midi.aidxn.com advertised a non-existent "main" build. This guard is
+    # what makes a no-publish verification run (dispatch on a branch) safe.
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       # Download all three per-OS artifacts into a single folder. v4 changed
       # behaviour: omitting `name` downloads every artifact, each into its own
@@ -193,8 +258,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Skip cleanly when running on a fork / before secrets are wired in.
-    if: ${{ github.repository == 'aidenwood/gamepad-midi-bridge' }}
+    # Skip cleanly when running on a fork / before secrets are wired in, and
+    # never publish from a branch — see the guard on the `release` job above for
+    # why a dispatch on `main` must not reach the storefront manifest.
+    if: ${{ github.repository == 'aidenwood/gamepad-midi-bridge' && startsWith(github.ref, 'refs/tags/') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -23,6 +23,28 @@ def crash_dir() -> Path:
     return d
 
 
+def report_text(
+    exc_type: Type[BaseException],
+    exc_value: BaseException,
+    tb,
+) -> str:
+    """Render the full crash report as a string.
+
+    Split out from ``write_report`` so the crash dialog can show the user the
+    exact same text that lands on disk — one definition, two consumers.
+    """
+    header = (
+        "Universal Controller MIDI crash report\n"
+        f"version: {__version__}\n"
+        f"python:  {sys.version}\n"
+        f"platform:{sys.platform}\n"
+        f"when:    {datetime.now(timezone.utc).isoformat()}\n"
+        + "=" * 60 + "\n"
+    )
+    body = "".join(traceback.format_exception(exc_type, exc_value, tb))
+    return header + body
+
+
 def write_report(
     exc_type: Type[BaseException],
     exc_value: BaseException,
@@ -31,14 +53,7 @@ def write_report(
     """Write a single crash report. Returns the file path."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     path = crash_dir() / f"crash-{stamp}.txt"
-    with path.open("w", encoding="utf-8") as f:
-        f.write(f"Universal Controller MIDI crash report\n")
-        f.write(f"version: {__version__}\n")
-        f.write(f"python:  {sys.version}\n")
-        f.write(f"platform:{sys.platform}\n")
-        f.write(f"when:    {datetime.now(timezone.utc).isoformat()}\n")
-        f.write("=" * 60 + "\n")
-        traceback.print_exception(exc_type, exc_value, tb, file=f)
+    path.write_text(report_text(exc_type, exc_value, tb), encoding="utf-8")
     return path
 
 
@@ -107,22 +122,78 @@ def _redact_sensitive(content: str) -> str:
     return re.sub(pattern, replace_value, content, flags=re.IGNORECASE)
 
 
+# Headless / CLI runs must never try to pop a window. ``__main__`` flips this
+# off before entering the headless branch.
+_gui_dialog_enabled = True
+
+# A crash inside the crash handler would recurse forever. One dialog per
+# process is all anyone needs.
+_dialog_shown = False
+
+
+def disable_gui_dialog() -> None:
+    """Suppress the crash dialog (headless mode, kiosk rigs, CI)."""
+    global _gui_dialog_enabled
+    _gui_dialog_enabled = False
+
+
+def _show_dialog(text: str, path: Optional[Path]) -> None:
+    """Best-effort GUI crash dialog. Never raises."""
+    global _dialog_shown
+    if not _gui_dialog_enabled or _dialog_shown:
+        return
+    _dialog_shown = True
+    try:
+        from .ui.crash_dialog import show_crash_dialog
+        show_crash_dialog(text, path, __version__)
+    except Exception:
+        # Qt unavailable or already torn down — the file on disk is still
+        # there, and app_entry's native fallback covers import-time failures.
+        pass
+
+
 def install_hook() -> None:
-    """Replace `sys.excepthook` so unhandled errors land in a file."""
+    """Replace `sys.excepthook` so unhandled errors land in a file and a dialog.
+
+    The dialog matters most on Windows: ``build.py`` ships with ``--noconsole``,
+    which leaves ``sys.stdout``/``sys.stderr`` as ``None``, so a written-to-disk
+    report is invisible to the user. Without the dialog the app simply
+    disappears and we get a support email with nothing in it.
+    """
     previous = sys.excepthook
 
     def hook(exc_type, exc_value, tb) -> None:
+        text = ""
+        path: Optional[Path] = None
         try:
-            path = write_report(exc_type, exc_value, tb)
-            sys.stderr.write(f"\nCrash report saved to {path}\n")
+            text = report_text(exc_type, exc_value, tb)
         except Exception:
             pass
+        try:
+            path = write_report(exc_type, exc_value, tb)
+        except Exception:
+            pass
+        try:
+            # `--noconsole` builds have sys.stderr set to None; guard rather
+            # than relying on the surrounding except to swallow it.
+            if sys.stderr is not None and path is not None:
+                sys.stderr.write(f"\nCrash report saved to {path}\n")
+        except Exception:
+            pass
+
+        if text:
+            _show_dialog(text, path)
+
         # Chain to the previous hook so the OS still sees the failure.
         if previous is not None and previous is not sys.__excepthook__:
             try:
                 previous(exc_type, exc_value, tb)
             except Exception:
                 pass
-        sys.__excepthook__(exc_type, exc_value, tb)
+        try:
+            sys.__excepthook__(exc_type, exc_value, tb)
+        except Exception:
+            # Default hook writes to stderr, which is None under --noconsole.
+            pass
 
     sys.excepthook = hook
