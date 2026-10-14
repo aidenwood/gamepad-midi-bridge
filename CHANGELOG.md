@@ -6,7 +6,7 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
-## [2.1.6] - 2026-10-15
+## [2.2.0] - 2026-10-15
 
 **First Windows bug-fix pass — console windows, frozen UI, and wrong controller labels.** Everything below came out of a Windows user's screen recording.
 
