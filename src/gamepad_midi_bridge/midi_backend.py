@@ -85,24 +85,59 @@ def open_port(preferred_name: str = DEFAULT_PORT_NAME) -> OpenedPort:
                 "to create one, then click Start again."
             )
 
+        # Build the candidate list in preference order, then open the first
+        # one that actually works.
+        #
+        # Opening CAN fail even when the port is listed: rtmidi raises
+        # _rtmidi.SystemError("MidiOutWinMM::openPort: error creating Windows
+        # MM MIDI output port.") for a port the OS enumerates but won't hand
+        # out — a device claimed by another app, or the GS synth on a machine
+        # with no usable audio device (which is exactly what a CI runner is).
+        # That error is NOT a MidiPortError, so it used to escape open_port
+        # entirely and crash the first-run wizard, whose caller only catches
+        # MidiPortError. Try the next candidate instead, and never let a
+        # backend exception out of this function untyped.
+        #
         # 1. A loopMIDI / named routing port — real app-to-app routing into a
         #    DAW. Prefer a port carrying our own (or legacy) name, then fall back
         #    to ANY loopMIDI port so a freshly-installed default "loopMIDI Port"
         #    is auto-detected without the user renaming it.
-        idx = _find_port(ports, names=(preferred_name, *WINDOWS_FALLBACK_NAMES))
-        if idx is None:
-            idx = _find_port(ports, hints=WINDOWS_LOOPMIDI_HINTS)
-        if idx is not None:
-            out.open_port(idx)
-            return OpenedPort(port=out, name=ports[idx], virtual=False)
+        routed: List[int] = []
+        for finder in (
+            lambda: _find_port(ports, names=(preferred_name, *WINDOWS_FALLBACK_NAMES)),
+            lambda: _find_port(ports, hints=WINDOWS_LOOPMIDI_HINTS),
+        ):
+            idx = finder()
+            if idx is not None and idx not in routed:
+                routed.append(idx)
 
         # 2. Built-in Microsoft GS Wavetable Synth — instant audible fallback.
+        # 3. Anything else that's available (e.g. a hardware synth).
+        fallbacks: List[int] = []
         idx = _find_port(ports, hints=WINDOWS_BUILTIN_SYNTH_HINTS)
-        if idx is None:
-            # 3. Anything else that's available (e.g. a hardware synth).
-            idx = 0
-        out.open_port(idx)
-        return OpenedPort(port=out, name=ports[idx], virtual=False, fallback=True)
+        if idx is not None:
+            fallbacks.append(idx)
+        for i in range(len(ports)):
+            if i not in routed and i not in fallbacks:
+                fallbacks.append(i)
+
+        errors: List[str] = []
+        for idx in routed + fallbacks:
+            try:
+                out.open_port(idx)
+            except Exception as e:  # noqa: BLE001 — rtmidi raises its own types
+                errors.append(f"{ports[idx]}: {e}")
+                continue
+            return OpenedPort(port=out, name=ports[idx], virtual=False,
+                              fallback=idx not in routed)
+
+        del out
+        detail = "; ".join(errors) if errors else "no candidate ports"
+        raise MidiPortError(
+            "Windows listed MIDI output ports but none could be opened "
+            f"({detail}). Install loopMIDI and create a port, then click "
+            "Start again."
+        )
 
     # macOS / Linux — create a true virtual port
     try:

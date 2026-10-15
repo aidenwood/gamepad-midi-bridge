@@ -91,3 +91,85 @@ def test_non_windows_creates_virtual_port(monkeypatch):
     assert fake.opened_virtual == "My Port"
     assert opened.virtual is True
     assert opened.fallback is False
+
+
+class _UnopenableMidiOut(_FakeMidiOut):
+    """rtmidi that enumerates ports but refuses to open some of them.
+
+    Reproduces the CI failure that blocked the v2.2.0 release: Windows lists
+    "Microsoft GS Wavetable Synth 0", but opening it raises
+
+        _rtmidi.SystemError: MidiOutWinMM::openPort: error creating Windows
+        MM MIDI output port.
+
+    That is not a MidiPortError, and every caller (including the first-run
+    wizard's _poll_midi) only catches MidiPortError — so it escaped and
+    crashed the app on startup.
+    """
+
+    def __init__(self, ports, unopenable):
+        super().__init__(ports)
+        self._unopenable = set(unopenable)
+        self.attempts = []
+
+    def open_port(self, index):
+        self.attempts.append(index)
+        if index in self._unopenable:
+            raise SystemError(
+                "MidiOutWinMM::openPort: error creating Windows MM MIDI "
+                "output port."
+            )
+        self.opened_index = index
+
+
+def _patch_unopenable(monkeypatch, ports, unopenable):
+    fake = _UnopenableMidiOut(ports, unopenable)
+    monkeypatch.setattr(midi_backend.rtmidi, "MidiOut", lambda: fake)
+    return fake
+
+
+def test_backend_error_becomes_midi_port_error(win32, monkeypatch):
+    """The exact CI crash: the only port exists but will not open."""
+    fake = _patch_unopenable(monkeypatch, ["Microsoft GS Wavetable Synth 0"], {0})
+    with pytest.raises(MidiPortError) as excinfo:
+        open_port()
+    # Callers show this text to the user, so it has to name the fix.
+    assert "loopMIDI" in str(excinfo.value)
+    assert fake.attempts == [0]
+
+
+def test_falls_through_to_a_port_that_opens(win32, monkeypatch):
+    """A dead first choice must not stop us finding a working port."""
+    ports = ["Microsoft GS Wavetable Synth 0", "Some USB Synth"]
+    fake = _patch_unopenable(monkeypatch, ports, {0})
+    opened = open_port()
+    assert opened.name == "Some USB Synth"
+    assert opened.fallback is True
+    assert fake.attempts == [0, 1]
+
+
+def test_dead_loopmidi_falls_back_to_the_synth(win32, monkeypatch):
+    """loopMIDI present but claimed by another app — still make noise."""
+    ports = ["loopMIDI Port", "Microsoft GS Wavetable Synth 0"]
+    fake = _patch_unopenable(monkeypatch, ports, {0})
+    opened = open_port()
+    assert opened.name == "Microsoft GS Wavetable Synth 0"
+    # Not a routed port, so the UI must show the "no DAW routing" warning.
+    assert opened.fallback is True
+    assert fake.attempts == [0, 1]
+
+
+def test_working_loopmidi_is_not_marked_fallback(win32, monkeypatch):
+    """Guard the happy path while we're in here."""
+    fake = _patch_unopenable(monkeypatch, ["loopMIDI Port", "Other"], set())
+    opened = open_port()
+    assert opened.name == "loopMIDI Port"
+    assert opened.fallback is False
+    assert fake.attempts == [0]
+
+
+def test_never_leaks_a_raw_backend_exception(win32, monkeypatch):
+    """Nothing but MidiPortError may escape, whatever rtmidi throws."""
+    _patch_unopenable(monkeypatch, ["A", "B", "C"], {0, 1, 2})
+    with pytest.raises(MidiPortError):
+        open_port()

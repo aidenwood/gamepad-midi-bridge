@@ -469,6 +469,7 @@ class MainWindow(QMainWindow):
             self._tray.show_requested.connect(self._show_from_tray)
             self._tray.command_palette_requested.connect(self._open_command_palette)
             self._tray.latency_test_requested.connect(self._on_latency_test)
+            self._tray.panic_requested.connect(self._on_panic)
             self._tray.about_requested.connect(self._menu_show_about)
             self._tray.quit_requested.connect(self._quit_from_tray)
 
@@ -1121,6 +1122,8 @@ class MainWindow(QMainWindow):
             "Click for how to fix it."
         )
         self._midi_fallback_btn.setVisible(True)
+        if self._tray is not None:
+            self._tray.set_status(port=port_name, fallback=True)
 
     def _show_midi_fallback_help(self) -> None:
         """Explain the Windows loopMIDI requirement and link the download."""
@@ -1998,6 +2001,9 @@ class MainWindow(QMainWindow):
                              controller=_anonymise(controller_name))
         if self._tray is not None:
             self._tray.set_running(True)
+            # Tray mirrors the header: the window is often minimised away
+            # while bridging, so this is the only visible status.
+            self._tray.set_status(controller=controller_name, port=port_name)
         if self._hud is not None:
             self._hud.set_status(True)
             self._hud.set_preset(getattr(self._mapping, "name", "—") or "—")
