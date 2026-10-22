@@ -4,9 +4,11 @@ Visible in free mode behind a ProLockOverlay so users can see what they're missi
 """
 from __future__ import annotations
 
+import time
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtCore import Qt, Signal, QSettings, QTimer
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QFrame, QGroupBox, QHeaderView,
     QHBoxLayout, QLabel, QPushButton,
@@ -21,6 +23,13 @@ from ..mapping import L2_AXIS, R2_AXIS, STICK_AXES, Mapping
 from ..scales import SCALES
 from .primitives import UIButton, UIInput, UILabel, UISpinBox
 from .pro_lock import ProLockOverlay
+from .tokens import ACCENT_TEAL, ACCENT_TEAL_DIM
+
+# Live-input display constants.
+_LIVE_COL = 2                 # column index of the "Live" cell in capture tables
+_LIVE_HOLD_S = 0.25           # a momentary hit stays lit this long after release
+_LIVE_FLUSH_MS = 60           # repaint cadence; axis_value alone is 30 Hz per axis
+_AXIS_LIVE_THRESHOLD = 0.08   # ignore resting stick noise
 
 
 class MappingEditor(QWidget):
@@ -41,6 +50,26 @@ class MappingEditor(QWidget):
         # Track the last selected (table, kind) so set_mapping can re-emit selection.
         self._last_selected_table: Optional[QTableWidget] = None
         self._last_selected_kind: Optional[str] = None
+
+        # Guards _on_item_changed against the refresh that builds the tables.
+        self._filling = False
+
+        # ── Live input highlight ──
+        # BridgeWorker lives on its own QThread (bridge.py), so all four
+        # signals below cross threads. They are connected to BOUND METHODS of
+        # this QWidget on purpose: Qt's AutoConnection sees the receiver's
+        # GUI-thread affinity and queues the call. A bare lambda has no
+        # receiver QObject and can run in the emitting thread — don't use one.
+        self._live_connected = False
+        self._live_tables: dict = {}
+        # (section, row) -> {"held": bool, "hit": float, "lit": bool, "text": str|None}
+        self._live: dict = {}
+        # section -> {control index -> row} and {midi number -> row}
+        self._row_for_control: dict = {"buttons": {}, "axes": {}, "hats": {}}
+        self._row_for_midi: dict = {"buttons": {}, "axes": {}, "hats": {}}
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(_LIVE_FLUSH_MS)
+        self._live_timer.timeout.connect(self._flush_live)
 
         # Stacked: actual editor underneath, lock overlay on top when not Pro.
         self._stack = QStackedLayout(self)
@@ -185,6 +214,11 @@ class MappingEditor(QWidget):
         self._lock.activate_clicked.connect(self.activate_clicked.emit)
         self._stack.addWidget(self._lock)
 
+        self._live_tables = {
+            "buttons": self._buttons_table,
+            "axes": self._axes_table,
+            "hats": self._hats_table,
+        }
         self._refresh_tables()
         self.refresh_lock()
 
@@ -195,7 +229,156 @@ class MappingEditor(QWidget):
         buttons can listen to controller events.  Safe to call before or after
         construction; ``None`` is accepted (Capture buttons will open the dialog
         but never auto-confirm)."""
+        self._unsubscribe_live()
         self._worker = worker
+        if self.isVisible():
+            self._subscribe_live()
+
+    # ------------------------------------------------------------- live input
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt override
+        super().showEvent(event)
+        self._subscribe_live()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 — Qt override
+        self._unsubscribe_live()
+        super().hideEvent(event)
+
+    def _subscribe_live(self) -> None:
+        """Attach to the worker only while this tab is on screen.
+
+        Same reasoning as BluetoothTab's showEvent gating: a 30 Hz per-axis
+        stream into a table nobody is looking at is pure waste.
+        """
+        w = self._worker
+        if w is None or self._live_connected:
+            return
+        w.button_state.connect(self._on_live_button)
+        w.hat_state.connect(self._on_live_hat)
+        w.axis_value.connect(self._on_live_axis)
+        w.midi_message.connect(self._on_live_midi)
+        self._live_connected = True
+        self._live_timer.start()
+
+    def _unsubscribe_live(self) -> None:
+        self._live_timer.stop()
+        w = self._worker
+        if w is None or not self._live_connected:
+            return
+        for sig, slot in (
+            (w.button_state, self._on_live_button),
+            (w.hat_state, self._on_live_hat),
+            (w.axis_value, self._on_live_axis),
+            (w.midi_message, self._on_live_midi),
+        ):
+            try:
+                sig.disconnect(slot)
+            except (RuntimeError, TypeError):
+                # Already gone — matches CaptureDialog._disconnect_worker.
+                pass
+        self._live_connected = False
+        self._clear_live()
+
+    def _on_live_button(self, idx: int, pressed: bool) -> None:
+        self._mark("buttons", idx, pressed)
+
+    def _on_live_hat(self, direction: str, pressed: bool) -> None:
+        self._mark("hats", direction, pressed)
+
+    def _on_live_axis(self, idx: int, value: float) -> None:
+        self._mark("axes", idx, abs(value) >= _AXIS_LIVE_THRESHOLD)
+
+    def _on_live_midi(self, direction: str, _channel: int, status: int,
+                      data1: int, data2: int, _label: str) -> None:
+        """Fill the Live column with the value the bridge actually sent.
+
+        Matched on data1 (note / CC number) against the row's MIDI column, so
+        the number shown is the real outgoing byte rather than a
+        re-derivation of the curve / deadzone / invert maths in shaping.py.
+        """
+        if direction != "sent":
+            return
+        kind = status & 0xF0
+        if kind == 0x90:                      # note-on
+            for section in ("buttons", "hats"):
+                self._set_live_text(section, data1, f"v{data2}")
+        elif kind == 0x80:                    # note-off
+            for section in ("buttons", "hats"):
+                self._set_live_text(section, data1, "")
+        elif kind == 0xB0:                    # control change
+            self._set_live_text("axes", data1, str(data2))
+
+    def _mark(self, section: str, index, active: bool) -> None:
+        row = self._row_for_control.get(section, {}).get(index)
+        if row is None:
+            return
+        st = self._live.setdefault(
+            (section, row), {"held": False, "hit": 0.0, "lit": False, "text": None})
+        st["held"] = active
+        if active:
+            st["hit"] = time.perf_counter()
+
+    def _set_live_text(self, section: str, midi_num: int, text: str) -> None:
+        row = self._row_for_midi.get(section, {}).get(midi_num)
+        if row is None:
+            return
+        st = self._live.setdefault(
+            (section, row), {"held": False, "hit": 0.0, "lit": False, "text": None})
+        st["text"] = text
+        st["hit"] = time.perf_counter()
+
+    def _flush_live(self) -> None:
+        """Repaint coalescer — ~16 Hz on the GUI thread.
+
+        The slots above only record state. axis_value alone arrives at 30 Hz
+        per axis, and repainting a QTableWidget on every one of those is
+        churn for no visible gain.
+        """
+        now = time.perf_counter()
+        for key in list(self._live.keys()):
+            section, row = key
+            st = self._live[key]
+            table = self._live_tables.get(section)
+            if table is None or row >= table.rowCount():
+                self._live.pop(key, None)
+                continue
+
+            if st["text"] is not None:
+                item = table.item(row, _LIVE_COL)
+                if item is not None and item.text() != st["text"]:
+                    item.setText(st["text"])
+                st["text"] = None
+
+            lit = st["held"] or (now - st["hit"]) < _LIVE_HOLD_S
+            if lit != st["lit"]:
+                st["lit"] = lit
+                self._paint_row(table, row, lit)
+            if not lit:
+                # Blank the stale value so an old number never reads as
+                # "currently firing", then drop the entry.
+                item = table.item(row, _LIVE_COL)
+                if item is not None and item.text():
+                    item.setText("")
+                self._live.pop(key, None)
+
+    def _paint_row(self, table: QTableWidget, row: int, lit: bool) -> None:
+        bg = QBrush(QColor(ACCENT_TEAL_DIM)) if lit else QBrush()
+        for col in range(table.columnCount()):
+            item = table.item(row, col)
+            if item is not None:
+                item.setBackground(bg)
+
+    def _clear_live(self) -> None:
+        """Drop every highlight, so the user never comes back to a tab with a
+        row frozen mid-press."""
+        for (section, row) in list(self._live.keys()):
+            table = self._live_tables.get(section)
+            if table is not None and row < table.rowCount():
+                self._paint_row(table, row, False)
+                item = table.item(row, _LIVE_COL)
+                if item is not None:
+                    item.setText("")
+        self._live.clear()
 
     def set_mapping(self, mapping: Mapping) -> None:
         self._mapping = mapping
@@ -557,16 +740,19 @@ class MappingEditor(QWidget):
         return lbl
 
     def _make_table(self, headers: list, capture_kind: str = "") -> QTableWidget:
-        # When capture_kind is given, add a read-only "Capture" column.
-        all_headers = headers + ["Capture"] if capture_kind else headers
+        # When capture_kind is given, add a live-value column plus a read-only
+        # "Capture" column. "Live" shows the velocity / CC value the bridge
+        # actually sent for this row, so the table stops being a static list.
+        all_headers = headers + ["Live", "Capture"] if capture_kind else headers
         t = QTableWidget(0, len(all_headers))
         t.setHorizontalHeaderLabels(all_headers)
         if capture_kind:
-            # Data columns stretch equally; capture column stays narrow.
+            # Data columns stretch equally; live + capture stay narrow.
             hdr = t.horizontalHeader()
             for col in range(len(headers)):
                 hdr.setSectionResizeMode(col, QHeaderView.Stretch)
             hdr.setSectionResizeMode(len(headers), QHeaderView.ResizeToContents)
+            hdr.setSectionResizeMode(len(headers) + 1, QHeaderView.ResizeToContents)
         else:
             t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         t.verticalHeader().setVisible(False)
@@ -577,41 +763,126 @@ class MappingEditor(QWidget):
         if capture_kind:
             # Store kind on the widget so _fill can create the right buttons.
             t.setProperty("capture_kind", capture_kind)
+            # The MIDI column has always been editable (AllEditTriggers above)
+            # and nothing listened, so every edit was silently discarded.
+            t.itemChanged.connect(self._on_item_changed)
         return t
 
     def _refresh_tables(self) -> None:
-        self._fill(self._buttons_table, [(str(k), str(v)) for k, v in sorted(self._mapping.buttons.items())])
-        self._fill(self._axes_table, [(str(k), str(v)) for k, v in sorted(self._mapping.axes.items())])
-        self._fill(self._hats_table, [(k, str(v)) for k, v in self._mapping.hats.items()])
+        buttons = sorted(self._mapping.buttons.items())
+        axes = sorted(self._mapping.axes.items())
+        hats = list(self._mapping.hats.items())
+
+        self._fill(self._buttons_table, [(str(k), str(v)) for k, v in buttons])
+        self._fill(self._axes_table, [(str(k), str(v)) for k, v in axes])
+        self._fill(self._hats_table, [(k, str(v)) for k, v in hats])
+
+        # Row order just changed under us — a stale lookup lights the wrong
+        # row, which is worse than no highlight at all. Rebuild both maps and
+        # drop any in-flight live state.
+        self._row_for_control = {
+            "buttons": {k: r for r, (k, _v) in enumerate(buttons)},
+            "axes":    {k: r for r, (k, _v) in enumerate(axes)},
+            "hats":    {k: r for r, (k, _v) in enumerate(hats)},
+        }
+        self._row_for_midi = {
+            "buttons": {v: r for r, (_k, v) in enumerate(buttons)},
+            "axes":    {v: r for r, (_k, v) in enumerate(axes)},
+            "hats":    {v: r for r, (_k, v) in enumerate(hats)},
+        }
+        self._live.clear()
+
         tp = self._mapping.touchpad
         tp_info = f"x:{tp.x_cc} y:{tp.y_cc} | mode:{tp.mode}" if tp.enabled else "disabled"
         self._fill(self._touchpad_table, [("DualSense touchpad", tp_info)])
 
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        """Persist an edited MIDI number back into the mapping.
+
+        Column 1 has been user-editable since this table was written, but no
+        handler existed — you could type a new note, see it in the cell, and
+        lose it on the next refresh while the controller kept sending the old
+        one. Out-of-range or non-numeric input reverts rather than writing a
+        value the MIDI spec can't carry.
+        """
+        if self._filling or item.column() != 1:
+            return
+        table = item.tableWidget()
+        kind = table.property("capture_kind") or ""
+        if not kind:
+            return
+        key_item = table.item(item.row(), 0)
+        if key_item is None:
+            return
+
+        target = {"button": self._mapping.buttons,
+                  "axis": self._mapping.axes,
+                  "hat": self._mapping.hats}.get(kind)
+        if target is None:
+            return
+        key = key_item.text() if kind == "hat" else int(key_item.text())
+
+        try:
+            value = int(item.text().strip())
+        except (TypeError, ValueError):
+            value = -1
+        if not 0 <= value <= 127:
+            self._filling = True
+            item.setText(str(target.get(key, 0)))
+            self._filling = False
+            return
+
+        target[key] = value
+        # Keep the midi->row lookup honest, or the live highlight starts
+        # lighting whichever row used to own that number.
+        section = {"button": "buttons", "axis": "axes", "hat": "hats"}[kind]
+        self._row_for_midi[section] = {
+            int(table.item(r, 1).text()): r
+            for r in range(table.rowCount())
+            if table.item(r, 1) is not None and table.item(r, 1).text().isdigit()
+        }
+        self.mapping_changed.emit()
+
     def _fill(self, table: QTableWidget, rows: list) -> None:
         capture_kind = table.property("capture_kind") or ""
-        table.setRowCount(len(rows))
-        for r, (a, b) in enumerate(rows):
-            ai = QTableWidgetItem(a)
-            ai.setFlags(ai.flags() & ~Qt.ItemIsEditable)
-            ai.setTextAlignment(Qt.AlignCenter)
-            table.setItem(r, 0, ai)
-            bi = QTableWidgetItem(b)
-            bi.setTextAlignment(Qt.AlignCenter)
-            table.setItem(r, 1, bi)
-            if capture_kind:
-                btn = QPushButton("⊙")
-                btn.setObjectName("MappingCaptureButton")
-                btn.setToolTip("Press a controller input to assign this row")
-                btn.setFixedSize(28, 22)
-                from .learn_mode import learn
-                learn(btn, "Capture (press to assign)",
-                      "Click this, then press a button or move a stick on your controller — "
-                      "that input gets bound to this row. The fastest way to map.")
-                btn.clicked.connect(
-                    lambda _checked, row=r, kind=capture_kind, tbl=table:
-                    self._on_capture_clicked(tbl, row, kind)
-                )
-                table.setCellWidget(r, 2, btn)
+        # Populating fires itemChanged for every cell. Without this guard the
+        # handler would treat the refresh as a user edit and write the table
+        # back over the mapping it was just built from.
+        self._filling = True
+        try:
+            table.setRowCount(len(rows))
+            for r, (a, b) in enumerate(rows):
+                ai = QTableWidgetItem(a)
+                ai.setFlags(ai.flags() & ~Qt.ItemIsEditable)
+                ai.setTextAlignment(Qt.AlignCenter)
+                table.setItem(r, 0, ai)
+                bi = QTableWidgetItem(b)
+                bi.setTextAlignment(Qt.AlignCenter)
+                table.setItem(r, 1, bi)
+                if capture_kind:
+                    li = QTableWidgetItem("")
+                    li.setFlags(li.flags() & ~Qt.ItemIsEditable)
+                    li.setTextAlignment(Qt.AlignCenter)
+                    li.setForeground(QBrush(QColor(ACCENT_TEAL)))
+                    li.setToolTip(
+                        "Live value sent for this row — note velocity, or CC 0-127")
+                    table.setItem(r, _LIVE_COL, li)
+
+                    btn = QPushButton("⊙")
+                    btn.setObjectName("MappingCaptureButton")
+                    btn.setToolTip("Press a controller input to assign this row")
+                    btn.setFixedSize(28, 22)
+                    from .learn_mode import learn
+                    learn(btn, "Capture (press to assign)",
+                          "Click this, then press a button or move a stick on your controller — "
+                          "that input gets bound to this row. The fastest way to map.")
+                    btn.clicked.connect(
+                        lambda _checked, row=r, kind=capture_kind, tbl=table:
+                        self._on_capture_clicked(tbl, row, kind)
+                    )
+                    table.setCellWidget(r, table.columnCount() - 1, btn)
+        finally:
+            self._filling = False
 
     def _on_capture_clicked(self, table: QTableWidget, row: int, kind: str) -> None:
         """Open CaptureDialog; on accept, update the row index and mapping dict."""

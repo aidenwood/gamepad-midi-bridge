@@ -20,6 +20,7 @@ TEXT_DISABLED  = "#5b6068"
 # Accent
 ACCENT_TEAL    = "#2dd4bf"
 ACCENT_TEAL_FG = "#06070a"
+ACCENT_TEAL_DIM = "#123b36"   # lit mapping row — teal at ~15% over BG_SURFACE
 ACCENT_CORAL   = "#f87171"
 ACCENT_AMBER   = "#fbbf24"
 
