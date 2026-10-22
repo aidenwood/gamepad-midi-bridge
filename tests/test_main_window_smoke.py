@@ -80,3 +80,57 @@ class TestResponsiveTabWidgetChrome:
         w.set_chrome_visible(False)
         w.set_chrome_visible(True)
         assert w._chrome_hidden is False
+
+
+@pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+class TestControllerDiagramPaints:
+    """A real paint pass. The diagram crashed the app with
+    `'_ControllerDiagram' object has no attribute '_haptic_stamps'` because
+    an edit inserted a method into the middle of __init__, orphaning every
+    assignment after it. Constructing the widget was not enough to catch
+    that — only painting it touches those attributes.
+    """
+
+    def _diagram(self, family=None):
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QPixmap, QColor
+        from gamepad_midi_bridge.ui.visualise_tab import _ControllerDiagram
+        QApplication.instance() or QApplication([])
+        d = _ControllerDiagram()
+        if family is not None:
+            d.set_family(family)
+        d.resize(700, 420)
+        pm = QPixmap(700, 420)
+        pm.fill(QColor("#0e0f12"))
+        d.render(pm)          # forces paintEvent
+        return d
+
+    def test_init_completes_fully(self):
+        """Every attribute paintEvent needs must survive __init__."""
+        from gamepad_midi_bridge.ui.visualise_tab import _ControllerDiagram
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance() or QApplication([])
+        d = _ControllerDiagram()
+        for attr in ("_axes", "_buttons", "_hats", "_touch_contact",
+                     "_touch_x", "_touch_y", "_family", "_haptic_stamps"):
+            assert hasattr(d, attr), f"__init__ never set {attr}"
+
+    def test_paints_for_every_family(self):
+        from gamepad_midi_bridge import control_labels as cl
+        for family in (cl.PLAYSTATION, cl.XBOX, cl.SWITCH, cl.GENERIC):
+            self._diagram(family)
+
+    def test_paints_with_live_input_applied(self):
+        d = self._diagram()
+        d.on_axis(0, 0.7); d.on_button(3, True); d.on_hat("up", True)
+        d.on_haptic("L", "rumble", 1.0)
+        from PySide6.QtGui import QPixmap, QColor
+        pm = QPixmap(700, 420); pm.fill(QColor("#0e0f12"))
+        d.render(pm)
+
+    def test_minimum_size_is_not_lost(self):
+        """Also orphaned by the same edit — the floor exists so the tab
+        never forces a horizontal scrollbar on narrow windows."""
+        d = self._diagram()
+        assert d.minimumSize().width() == 220
+        assert d.minimumSize().height() == 160

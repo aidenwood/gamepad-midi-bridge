@@ -198,12 +198,6 @@ class _ControllerDiagram(QWidget):
         self._touch_x = 0.5
         self._touch_y = 0.5
         self._family = cl.PLAYSTATION
-
-    def set_family(self, family: str) -> None:
-        if family == self._family:
-            return
-        self._family = family
-        self.update()
         # Haptic pulse markers — perf-counter timestamp per side ("L"/"R").
         # Diagram repaints fade the marker over `HEATMAP_DECAY_S` so users
         # see a brief teal dot next to each trigger when MIDI fires haptics.
@@ -214,6 +208,12 @@ class _ControllerDiagram(QWidget):
         # to whatever it's given.
         self.setMinimumSize(220, 160)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def set_family(self, family: str) -> None:
+        if family == self._family:
+            return
+        self._family = family
+        self.update()
 
     def on_haptic(self, side: str, _effect: str, _intensity: float) -> None:
         """Stamp the most recent haptic-in pulse so paintEvent can draw it."""
