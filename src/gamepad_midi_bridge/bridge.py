@@ -2649,15 +2649,23 @@ class BridgeWorker(QObject):
             hat_channel = self._channel_for_hat(mapping, direction)
             hat_note_on = 0x90 | hat_channel
             hat_note_off = 0x80 | hat_channel
+            # `_emit_midi_message` is what feeds the MIDI ACTIVITY panel and
+            # the console. Buttons and axes call it; the D-pad never did, so
+            # every D-pad hit fired real MIDI while showing up nowhere in the
+            # UI — it only blipped the activity dot via `midi_sent`.
             if now and not was:
                 midi.port.send_message([hat_note_on, note, 127])
                 self._rtp_send(hat_note_on, note, 127)
                 self.midi_sent.emit()
+                self._emit_midi_message(
+                    "sent", hat_note_on, note, 127, f"NOTE-ON #{note}")
                 _usage_stats.tracker().record("hat", direction)
             elif not now and was:
                 midi.port.send_message([hat_note_off, note, 0])
                 self._rtp_send(hat_note_off, note, 0)
                 self.midi_sent.emit()
+                self._emit_midi_message(
+                    "sent", hat_note_off, note, 0, f"NOTE-OFF #{note}")
             if now != was:
                 self._prev_hat[direction] = now
                 self.hat_state.emit(direction, now)

@@ -10,6 +10,8 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+from .control_labels import display_name
+
 # Headless flag has to be set BEFORE pygame.init() — keeps SDL from probing
 # for a display server (Linux servers / CI / packaged apps).
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -75,12 +77,19 @@ class ControllerReader:
         js = pygame.joystick.Joystick(self._slot_index)
         js.init()
         self._joystick = js
+        # Normalise the name HERE, at the one place ControllerInfo is built,
+        # so the header, LIVE STATS, telemetry, controller history and the
+        # A/B/X/Y label family all correct together. SDL hands back the USB
+        # product string, and Microsoft sets that to the literal word
+        # "Controller" — which then classified as GENERIC and cost Xbox pads
+        # their button names too. The real VID:PID is in the GUID.
+        guid = js.get_guid()
         return ControllerInfo(
-            name=js.get_name(),
+            name=display_name(js.get_name(), guid),
             num_axes=js.get_numaxes(),
             num_buttons=js.get_numbuttons(),
             num_hats=js.get_numhats(),
-            guid=js.get_guid(),
+            guid=guid,
         )
 
     def is_connected(self) -> bool:
@@ -192,6 +201,6 @@ def available_controllers() -> List[str]:
     for i in range(pygame.joystick.get_count()):
         js = pygame.joystick.Joystick(i)
         js.init()
-        names.append(js.get_name())
+        names.append(display_name(js.get_name(), js.get_guid()))
         js.quit()
     return names

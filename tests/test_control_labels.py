@@ -144,3 +144,74 @@ class TestLiveViewAdaptsToController:
     def test_both_sticks_are_hittable(self):
         rects = self._meter("Xbox One Controller")._stick_rects
         assert "left" in rects and "right" in rects
+
+
+class TestGuidIdentity:
+    """Naming a pad from its GUID rather than its USB product string.
+
+    Microsoft's Xbox descriptor sets the product string to the literal word
+    "Controller". SDL passes that through, so LIVE STATS read
+    "CONTROLLER: Controller" and — worse — `family_for("Controller")`
+    returned GENERIC, costing the pad the A/B/X/Y labels this module exists
+    to provide. The VID:PID was sitting unused in ControllerInfo.guid.
+    """
+
+    DUALSENSE_USB = "030000004c050000e60c000000006800"
+    DUALSENSE_BT = "050000004c050000e60c000000006800"
+    XBOX_SERIES = "030000005e040000120b000000006800"
+
+    def test_decodes_vid_pid_from_a_real_dualsense_guid(self):
+        assert cl.vid_pid_from_guid(self.DUALSENSE_USB) == (0x054C, 0x0CE6)
+
+    def test_decodes_vid_pid_from_a_real_xbox_guid(self):
+        assert cl.vid_pid_from_guid(self.XBOX_SERIES) == (0x045E, 0x0B12)
+
+    def test_decodes_bus_type(self):
+        assert cl.bus_from_guid(self.DUALSENSE_USB) == cl.BUS_USB
+        assert cl.bus_from_guid(self.DUALSENSE_BT) == cl.BUS_BLUETOOTH
+
+    @pytest.mark.parametrize("guid", ["", None, "xyz", "zzzzzzzzzzzzzzzzzzzz"])
+    def test_garbage_guids_do_not_raise(self, guid):
+        assert cl.vid_pid_from_guid(guid) == (0, 0)
+        assert cl.bus_from_guid(guid) == 0
+
+    def test_xbox_useless_name_is_replaced_from_guid(self):
+        """The actual bug: SDL says "Controller", the GUID says Xbox."""
+        assert cl.display_name("Controller", self.XBOX_SERIES) == \
+            "Xbox Wireless Controller"
+
+    def test_replaced_name_now_classifies_as_xbox(self):
+        """Why the name mattered — family_for reads the same string, so a
+        blank name also cost the pad its A/B/X/Y labels."""
+        assert cl.family_for(cl.display_name("Controller", self.XBOX_SERIES)) \
+            == cl.XBOX
+
+    def test_raw_controller_string_still_classifies_as_generic(self):
+        """Guards the reason display_name has to run FIRST."""
+        assert cl.family_for("Controller") == cl.GENERIC
+
+    def test_dualsense_name_is_preserved(self):
+        assert cl.display_name("DualSense Wireless Controller",
+                               self.DUALSENSE_USB) == \
+            "DualSense Wireless Controller"
+
+    def test_known_vid_pid_beats_a_vague_sdl_name(self):
+        assert cl.display_name("Wireless Controller", self.DUALSENSE_USB) == \
+            "DualSense Wireless Controller"
+
+    def test_unknown_pid_from_known_vendor_falls_back_to_brand(self):
+        unknown_sony = "03000000" + "4c05" + "0000" + "ffff" + "000000006800"
+        assert cl.display_name("Controller", unknown_sony) == \
+            "PlayStation Controller"
+
+    def test_unknown_hardware_keeps_its_own_name(self):
+        assert cl.display_name("8BitDo SN30 Pro", "") == "8BitDo SN30 Pro"
+
+    def test_nothing_useful_anywhere_is_still_a_string(self):
+        assert cl.display_name("", "") == "Unknown Controller"
+        assert cl.display_name(None, None) == "Unknown Controller"
+
+    def test_unknown_vendor_reports_the_ids_it_found(self):
+        logitech = "03000000" + "6d04" + "0000" + "1dc2" + "000000006800"
+        assert cl.display_name("Controller", logitech) == \
+            "Unknown Controller (046d:c21d)"
