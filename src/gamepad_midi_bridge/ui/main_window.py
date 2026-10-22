@@ -64,6 +64,7 @@ from .hud_overlay import HudOverlay
 from .responsive_tab_widget import ResponsiveTabWidget
 from .primitives.button import UIButton
 from .icons import load_icon
+from .tokens import SHELL_PURPLE, SHELL_TEAL, SHELL_TEAL_FG
 
 
 from .about_tab import AboutTab
@@ -373,16 +374,35 @@ class MainWindow(QMainWindow):
         # handle down to "just header visible" but no further. Collapse via
         # toggle button uses the same 36 px.
         self._log_console.setMinimumHeight(36)
-        body_splitter.addWidget(self._log_console)
 
         # MIDI Activity Log Panel — scrolling MIDI message feed
         self._midi_log_panel = MidiLogPanel()
         self._midi_log_panel.setMinimumHeight(36)
-        body_splitter.addWidget(self._midi_log_panel)
+
+        # Side by side, MIDI on the left and Console on the right, as the
+        # Setup wireframe shows. Stacking them cost two full-width strips of
+        # vertical space for two panels that are each mostly empty, and
+        # pushed the workspace up off the screen.
+        #
+        # They are deliberately NOT the same thing: the MIDI monitor shows
+        # input/output events, the Console shows application events. The
+        # wireframe duplicates the table in both, which is placeholder art,
+        # not a spec.
+        self._bottom_splitter = QSplitter(Qt.Horizontal)
+        self._bottom_splitter.setChildrenCollapsible(False)
+        self._bottom_splitter.setHandleWidth(2)
+        self._bottom_splitter.setStyleSheet(
+            "QSplitter::handle:horizontal { background-color: #3f4754; } "
+            "QSplitter::handle:horizontal:hover { background-color: #5a6478; }"
+        )
+        self._bottom_splitter.addWidget(self._midi_log_panel)
+        self._bottom_splitter.addWidget(self._log_console)
+        self._bottom_splitter.setStretchFactor(0, 1)
+        self._bottom_splitter.setStretchFactor(1, 1)
+        body_splitter.addWidget(self._bottom_splitter)
 
         body_splitter.setStretchFactor(0, 1)
         body_splitter.setStretchFactor(1, 0)
-        body_splitter.setStretchFactor(2, 0)
         self._body_splitter = body_splitter
         # Apply initial splitter sizes from each panel's persisted collapsed
         # state. ``_set_bottom_panel_sizes`` is the single sizing path used by
@@ -721,6 +741,11 @@ class MainWindow(QMainWindow):
         # Initial fixed height is the wide-mode value — adjusted by
         # ``_arrange_status_bar`` if/when the window is narrow.
         bar.setFixedHeight(64)
+        # Purple carries structure in the new direction; the header
+        # sat on the old near-black, which is most of why it read as
+        # "the same app with new buttons".
+        bar.setStyleSheet(f"QFrame#StatusBar {{ background-color: {SHELL_PURPLE}; "
+                          f"border-bottom: 1px solid #2a0b47; }}")
         outer = QVBoxLayout(bar)
         outer.setContentsMargins(16, 8, 14, 8)
         outer.setSpacing(6)
@@ -1680,8 +1705,16 @@ class MainWindow(QMainWindow):
             parent = self._body_splitter.parentWidget()
             total = parent.height() if parent is not None else 720
         total = max(total, 240)
-        content_h = max(160, total - console_h - midi_h)
-        self._body_splitter.setSizes([content_h, console_h, midi_h])
+        # One bottom row now, not two stacked strips. Its height is whichever
+        # panel needs more, so collapsing one does not crop the other.
+        bottom_h = max(console_h, midi_h)
+        content_h = max(160, total - bottom_h)
+        self._body_splitter.setSizes([content_h, bottom_h])
+        # Give the two panels equal width unless the user has dragged them.
+        if hasattr(self, "_bottom_splitter"):
+            w = self._bottom_splitter.width()
+            if w > 0 and not any(self._bottom_splitter.sizes()):
+                self._bottom_splitter.setSizes([w // 2, w - w // 2])
 
     def _toggle_inspector(self) -> None:
         """Show / hide the right inspector(s). When split is on, both
@@ -2223,7 +2256,12 @@ class MainWindow(QMainWindow):
         at, so the action that matters right now carries the teal.
         """
         running = self._stop_btn.isEnabled()
-        self._connect_btn.set_variant("secondary" if running else "primary")
+        self._connect_btn.set_variant("header" if running else "primary")
+        # The icon has to contrast with the fill underneath it. Teal on a
+        # teal primary button renders an invisible icon, which is exactly
+        # how CONNECT ended up looking label-only.
+        self._connect_btn.setIcon(load_icon(
+            "plug", SHELL_TEAL_FG if not running else SHELL_TEAL))
         if not self._connect_btn.is_compact():
             self._connect_btn.setText("CONNECTED" if running else "CONNECT")
 
