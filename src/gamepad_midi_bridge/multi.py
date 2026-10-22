@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import copy
 import os
+from dataclasses import dataclass
 from typing import List, Optional
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal, Slot
 
 from . import license as _license
 from . import telemetry
 from .bridge import BridgeController
-from .controller import available_count
+from .controller import available_count, available_devices
 from .mapping import Mapping
 from .midi_backend import DEFAULT_PORT_NAME
 
@@ -100,6 +101,18 @@ def desired_slot_count(mode: str, detected: Optional[int] = None) -> int:
     return 1
 
 
+@dataclass
+class SlotConnection:
+    name: str = "No controller"
+    instance_id: int = -1
+    phase: str = "Idle"
+    port: str = ""
+    channel: int = 1
+    running: bool = False
+    messages: int = 0
+    error: str = ""
+
+
 class MultiBridgeController(QObject):
     """Owns one or two BridgeControllers. Behaves like a single one when the
     free tier or hardware can't support multi-controller.
@@ -109,6 +122,8 @@ class MultiBridgeController(QObject):
     when Pro is active AND the mode says so.
     """
 
+    changed = Signal()
+
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._parent = parent
@@ -117,6 +132,104 @@ class MultiBridgeController(QObject):
         self.bridges: List[BridgeController] = [
             BridgeController(parent, demo=self._demo, keyboard=self._keyboard)
         ]
+        self.connections = [SlotConnection()]
+        self._watch(self.bridges[0], 0)
+
+    def _watch(self, bridge, index: int) -> None:
+        worker = bridge.worker
+        worker.controller_info.connect(self._worker_device)
+        worker.started.connect(self._worker_started)
+        worker.stopped.connect(self._worker_stopped)
+        worker.error.connect(self._worker_error)
+        worker.status.connect(self._worker_status)
+        worker.midi_message.connect(self._worker_message)
+
+    def _sender_index(self):
+        sender = self.sender()
+        return next((i for i, bridge in enumerate(self.bridges) if bridge.worker is sender), None)
+
+    @Slot(object)
+    def _worker_device(self, info):
+        index = self._sender_index()
+        if index is not None:
+            self._device(index, info)
+
+    @Slot(str, str)
+    def _worker_started(self, name, port):
+        index = self._sender_index()
+        if index is not None:
+            self._started(index, name, port)
+
+    @Slot()
+    def _worker_stopped(self):
+        index = self._sender_index()
+        if index is not None:
+            self._stopped(index)
+
+    @Slot(str)
+    def _worker_error(self, message):
+        index = self._sender_index()
+        if index is not None:
+            self._error(index, message)
+
+    @Slot(str)
+    def _worker_status(self, text):
+        index = self._sender_index()
+        if index is not None:
+            self._status(index, text)
+
+    @Slot(str, int, int, int, int, str)
+    def _worker_message(self, direction, channel, status, data1, data2, label):
+        index = self._sender_index()
+        if index is not None:
+            self._message(index, direction)
+
+    def _device(self, index, info) -> None:
+        if index >= len(self.connections):
+            return
+        state = self.connections[index]
+        if info is None:
+            state.phase = "Disconnected"
+            state.running = False
+        else:
+            state.name, state.instance_id = info.name, info.instance_id
+        self.changed.emit()
+
+    def _started(self, index, name, port) -> None:
+        if index >= len(self.connections):
+            return
+        state = self.connections[index]
+        state.name, state.port, state.running = name, port, True
+        state.phase, state.error = "Bridging", ""
+        self.changed.emit()
+
+    def _stopped(self, index) -> None:
+        if index >= len(self.connections):
+            return
+        state = self.connections[index]
+        state.running = False
+        state.phase = "Error" if state.error else "Disconnected"
+        self.changed.emit()
+
+    def _error(self, index, message) -> None:
+        if index >= len(self.connections):
+            return
+        state = self.connections[index]
+        state.error, state.phase, state.running = message, "Error", False
+        self.changed.emit()
+
+    def _status(self, index, text) -> None:
+        if index >= len(self.connections):
+            return
+        if "Calibrating" in text:
+            self.connections[index].phase = "Calibrating"
+            self.changed.emit()
+
+    def _message(self, index, direction) -> None:
+        if index >= len(self.connections):
+            return
+        if direction == "sent":
+            self.connections[index].messages += 1
 
     # ------------------------------------------------------------------ slots
 
@@ -131,17 +244,24 @@ class MultiBridgeController(QObject):
 
     # ------------------------------------------------------------------ configure
 
-    def configure(self, base_mapping: Mapping, mode: str) -> int:
+    def configure(self, base_mapping: Mapping, mode: str,
+                  preferred_instance_id: int | None = None) -> int:
         """Decide how many slots to activate and (re)build BridgeControllers.
 
         Returns the active slot count. Must be called BEFORE start() — once a
         thread is running we don't hot-swap workers.
         """
-        wanted = desired_slot_count(mode)
+        if any(bridge.thread.isRunning() for bridge in self.bridges):
+            raise RuntimeError("Disconnect controllers before changing the active slots.")
+        devices = available_devices()
+        if preferred_instance_id is not None:
+            devices.sort(key=lambda device: device.instance_id != preferred_instance_id)
+        wanted = desired_slot_count(mode, detected=len(devices))
         # Tear down any prior secondary if we're dropping back to 1.
         if wanted == 1 and len(self.bridges) > 1:
             self.bridges[1].shutdown()
             self.bridges = self.bridges[:1]
+            self.connections = self.connections[:1]
         # Build the secondary on demand. Primary is rebuilt only if we're
         # adding a slot to make sure its mapping/port match the new config.
         if wanted >= 2 and len(self.bridges) < 2:
@@ -152,17 +272,30 @@ class MultiBridgeController(QObject):
                 keyboard=self._keyboard,
                 midi_port_name=port_name_for_slot(1),
             ))
+            self.connections.append(SlotConnection())
+            self._watch(self.bridges[1], 1)
         # Push per-slot mappings — each worker gets a deep copy so edits on
         # slot 1 don't bleed into slot 0.
         for i, bridge in enumerate(self.bridges):
             bridge.worker.set_mapping(mapping_for_slot(base_mapping, i))
+            info = devices[i] if i < len(devices) else None
+            bridge.worker._controller_instance_id = info.instance_id if info else None
+            self.connections[i] = SlotConnection(
+                name=info.name if info else "No controller",
+                instance_id=info.instance_id if info else -1,
+                channel=((base_mapping.midi_channel + i) & 0x0F) + 1,
+                phase="Ready" if info else "No controller",
+            )
+        self.changed.emit()
         return wanted
 
     # ------------------------------------------------------------------ lifecycle
 
     def start(self) -> None:
-        for bridge in self.bridges:
+        for i, bridge in enumerate(self.bridges):
+            self.connections[i].phase = "Starting"
             bridge.start()
+        self.changed.emit()
         if len(self.bridges) >= 2:
             telemetry.send_event("multi_controller_active",
                                  slot_count=len(self.bridges))

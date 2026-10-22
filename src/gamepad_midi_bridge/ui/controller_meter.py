@@ -184,7 +184,7 @@ class ControllerMeter(QWidget):
             f.setPointSize(13)
             p.setFont(f)
             p.drawText(self.rect(), Qt.AlignCenter,
-                       "No controller connected.\nPlug in a PS5 or Xbox controller, then click Start.")
+                       "No controller connected.\nPlug in a PS5 or Xbox controller, then open Connect.")
             return
 
         family = family_for(self._controller_name)

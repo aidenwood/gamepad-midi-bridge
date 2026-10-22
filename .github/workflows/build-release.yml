@@ -95,6 +95,20 @@ jobs:
       - name: Run PyInstaller via build.py
         run: python build.py
 
+      - name: Read artifact version
+        id: version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from gamepad_midi_bridge import __version__
+          tag = f"v{__version__}"
+          if os.environ.get("GITHUB_REF_TYPE") == "tag" and os.environ["GITHUB_REF_NAME"] != tag:
+              raise SystemExit("Release tag does not match the application version")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"tag={tag}\n")
+          PY
+
       # ---- Per-OS packaging ----
       # macOS: PyInstaller --windowed produces `dist/Universal Controller MIDI.app`
       # (a directory bundle). We zip the .app directly. `ditto` preserves the
@@ -110,7 +124,7 @@ jobs:
       - name: Zip macOS .app
         if: runner.os == 'macOS'
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           cd dist
           ditto -c -k --sequesterRsrc --keepParent "Universal Controller MIDI.app" "../gamepad-midi-bridge-${TAG}-macos.zip"
@@ -122,7 +136,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           Compress-Archive -Path "dist/Universal Controller MIDI" -DestinationPath "gamepad-midi-bridge-$env:TAG-windows.zip"
 
@@ -189,7 +203,7 @@ jobs:
       - name: Zip Linux binary
         if: runner.os == 'Linux'
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           cd dist
           zip "../gamepad-midi-bridge-${TAG}-linux.zip" "Universal Controller MIDI"

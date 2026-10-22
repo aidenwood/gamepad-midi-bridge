@@ -7,6 +7,7 @@ PyInstaller bundles stay small and we don't pop a window.
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -16,6 +17,9 @@ from .sdl_profiles import IDENTITY_AXES, IDENTITY_BUTTONS, profile_for
 # Headless flag has to be set BEFORE pygame.init() — keeps SDL from probing
 # for a display server (Linux servers / CI / packaged apps).
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+# Qt owns the visible window; SDL must keep reading while the DAW has focus.
+# https://wiki.libsdl.org/SDL2/SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS
+os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
 # Force SDL to use its bundled HIDAPI backend for game-controller enumeration.
 # Without these hints, SDL2 on macOS 12+ falls back to IOHID, which silently
@@ -31,6 +35,16 @@ os.environ.setdefault("SDL_JOYSTICK_HIDAPI_XBOX", "1")
 
 import pygame  # noqa: E402
 
+_SDL_LOCK = threading.RLock()
+
+
+def _ensure_joysticks() -> None:
+    """Initialize once; inventory queries must never invalidate live readers."""
+    if not pygame.get_init():
+        pygame.init()
+    if not pygame.joystick.get_init():
+        pygame.joystick.init()
+
 
 @dataclass
 class ControllerInfo:
@@ -45,6 +59,35 @@ class ControllerInfo:
     raw_name: str = ""
     # Canonical axis -> device axis, as a 6-tuple indexed by canonical.
     axis_map: tuple = ()
+    instance_id: int = -1
+
+
+def _info(js) -> ControllerInfo:
+    axes, _, _ = profile_for(js.get_guid(), js.get_numhats(), js.get_numbuttons())
+    return ControllerInfo(
+        name=display_name(js.get_name(), js.get_guid()),
+        num_axes=js.get_numaxes(), num_buttons=js.get_numbuttons(),
+        num_hats=js.get_numhats(), guid=js.get_guid(), raw_name=js.get_name(),
+        axis_map=tuple(axes.get(i, i) for i in range(6)),
+        instance_id=js.get_instance_id(),
+    )
+
+
+def available_devices() -> list[ControllerInfo]:
+    """Snapshot attached devices without closing their shared SDL handles."""
+    with _SDL_LOCK:
+        _ensure_joysticks()
+        pygame.event.pump()
+        devices = []
+        for index in range(pygame.joystick.get_count()):
+            try:
+                joystick = pygame.joystick.Joystick(index)
+                if not joystick.get_init():
+                    joystick.init()
+                devices.append(_info(joystick))
+            except pygame.error:
+                continue  # hot-unplugged between count and lookup
+        return devices
 
 
 class ControllerReader:
@@ -55,12 +98,11 @@ class ControllerReader:
     keeps the single-controller path byte-identical to V1.1.
     """
 
-    def __init__(self, slot_index: int = 0) -> None:
-        if not pygame.get_init():
-            pygame.init()
-        if not pygame.joystick.get_init():
-            pygame.joystick.init()
+    def __init__(self, slot_index: int = 0, instance_id: int | None = None) -> None:
+        with _SDL_LOCK:
+            _ensure_joysticks()
         self._slot_index = max(0, int(slot_index))
+        self._instance_id = instance_id
         self._joystick: Optional[pygame.joystick.JoystickType] = None
         # Canonical-index -> device-index remap, resolved per device in
         # detect(). Identity until then, so a reader that has never detected
@@ -77,22 +119,29 @@ class ControllerReader:
     def detect(self) -> Optional[ControllerInfo]:
         """Pick up the joystick at `slot_index`. Returns None if not present.
 
-        We avoid a global `pygame.joystick.quit()` here when slot_index > 0 —
-        re-initialising the subsystem would invalidate any joystick handle held
-        by another reader running in parallel.
+        Inventory is shared across readers. Refreshing one device must never
+        restart the joystick subsystem or invalidate another live handle.
         """
-        if self._slot_index == 0:
-            # Preserves V1.1 behaviour: a fresh init guarantees a clean count.
-            pygame.joystick.quit()
-            pygame.joystick.init()
-        elif not pygame.joystick.get_init():
-            pygame.joystick.init()
-        if pygame.joystick.get_count() <= self._slot_index:
-            self._joystick = None
-            return None
-        js = pygame.joystick.Joystick(self._slot_index)
-        js.init()
+        with _SDL_LOCK:
+            _ensure_joysticks()
+            pygame.event.pump()
+            js = None
+            if self._instance_id is None:
+                if pygame.joystick.get_count() > self._slot_index:
+                    js = pygame.joystick.Joystick(self._slot_index)
+            else:
+                for index in range(pygame.joystick.get_count()):
+                    candidate = pygame.joystick.Joystick(index)
+                    if candidate.get_instance_id() == self._instance_id:
+                        js = candidate
+                        break
+            if js is None:
+                self.close()
+                return None
+            if not js.get_init():
+                js.init()
         self._joystick = js
+        self._instance_id = js.get_instance_id()
         # Normalise the name HERE, at the one place ControllerInfo is built,
         # so the header, LIVE STATS, telemetry, controller history and the
         # A/B/X/Y label family all correct together. SDL hands back the USB
@@ -116,6 +165,7 @@ class ControllerReader:
             guid=guid,
             raw_name=self._raw_name,
             axis_map=tuple(self._axis_map.get(i, i) for i in range(6)),
+            instance_id=self._instance_id,
         )
 
     @property
@@ -124,7 +174,11 @@ class ControllerReader:
         return self._raw_name
 
     def is_connected(self) -> bool:
-        return self._joystick is not None and pygame.joystick.get_count() > 0
+        if not self._alive():
+            return False
+        # Indices shift when another device is unplugged. The instance ID of
+        # the handle we actually opened stays fixed for its connection lifetime.
+        return any(d.instance_id == self._instance_id for d in available_devices())
 
     def close(self) -> None:
         if self._joystick is not None:
@@ -133,10 +187,8 @@ class ControllerReader:
             except Exception:
                 pass
             self._joystick = None
-        # Only the slot-0 reader tears down the subsystem — otherwise the
-        # second reader's joystick handle would dangle on the first stop.
-        if self._slot_index == 0:
-            pygame.joystick.quit()
+        # SDL's joystick subsystem belongs to the process, not slot zero.
+        # Closing one reader must leave every other controller operational.
 
     # ------------------------------------------------------------------ polling
 
@@ -146,7 +198,7 @@ class ControllerReader:
         if not pygame.get_init() or not pygame.joystick.get_init():
             return False
         try:
-            return pygame.joystick.get_count() > self._slot_index
+            return self._joystick.get_init()
         except pygame.error:
             return False
 
@@ -251,23 +303,9 @@ def available_count() -> int:
     Cheap helper so the multi-controller path can decide whether to spin up a
     second bridge without doing the full name-listing dance.
     """
-    if not pygame.get_init():
-        pygame.init()
-    pygame.joystick.quit()
-    pygame.joystick.init()
-    return pygame.joystick.get_count()
+    return len(available_devices())
 
 
 def available_controllers() -> List[str]:
     """List currently connected joystick names (for the settings dropdown)."""
-    if not pygame.get_init():
-        pygame.init()
-    pygame.joystick.quit()
-    pygame.joystick.init()
-    names = []
-    for i in range(pygame.joystick.get_count()):
-        js = pygame.joystick.Joystick(i)
-        js.init()
-        names.append(display_name(js.get_name(), js.get_guid()))
-        js.quit()
-    return names
+    return [device.name for device in available_devices()]

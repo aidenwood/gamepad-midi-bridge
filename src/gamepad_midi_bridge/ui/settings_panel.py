@@ -783,6 +783,12 @@ class SettingsPanel(QWidget):
     def current_multi_mode(self) -> str:
         return self._MULTI_MODE_LABELS[self._multi_mode.currentIndex()][1]
 
+    def set_multi_mode(self, mode: str) -> None:
+        for index, (_, value) in enumerate(self._MULTI_MODE_LABELS):
+            if value == mode:
+                self._multi_mode.setCurrentIndex(index)
+                return
+
     @staticmethod
     def _apply_corner_combo(combo: QComboBox, cfg) -> None:
         idx = combo.currentIndex()

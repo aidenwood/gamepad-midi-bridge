@@ -152,6 +152,7 @@ class BridgeWorker(QObject):
         """
         super().__init__()
         self._slot_index = max(0, int(slot_index))
+        self._controller_instance_id = None
         self._midi_port_name = midi_port_name or DEFAULT_PORT_NAME
         self._demo = bool(demo)
         self._keyboard = bool(keyboard)
@@ -176,6 +177,8 @@ class BridgeWorker(QObject):
         self._haptic_lock = threading.Lock()
         self._haptic_revert_timers: List["threading.Timer"] = []
         self._running = False
+        self._stop_requested = threading.Event()
+        self._recalibrate_requested = threading.Event()
         self._prev_buttons: Dict[int, bool] = {}
         self._prev_cc: Dict[int, int] = {}
         # MIDI clock state
@@ -347,8 +350,8 @@ class BridgeWorker(QObject):
 
         Cross-thread safety: invoked via Qt::QueuedConnection from the GUI
         thread, so the body runs on the worker thread and `_reader.detect()`
-        — which calls `pygame.joystick.quit() + init()` — is colocated
-        with the polling loop that owns the joystick handle.
+        stays on the thread owning the reader. Device discovery preserves
+        every other reader's handle.
         """
         try:
             if self._reader is None:
@@ -393,6 +396,16 @@ class BridgeWorker(QObject):
     @Slot()
     def start(self) -> None:
         """Entry point — invoked once when the worker's thread starts."""
+        try:
+            self._start_bridge()
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Controller bridge failed")
+            self._running = False
+            self._cleanup()
+            self.error.emit(str(exc))
+            self.stopped.emit()
+
+    def _start_bridge(self) -> None:
         if self._keyboard:
             self._reader = KeyboardControllerReader(slot_index=self._slot_index)
         elif self._mouse:
@@ -400,11 +413,16 @@ class BridgeWorker(QObject):
         elif self._demo:
             self._reader = SyntheticControllerReader(slot_index=self._slot_index)
         else:
-            self._reader = ControllerReader(slot_index=self._slot_index)
+            self._reader = ControllerReader(
+                slot_index=self._slot_index,
+                instance_id=self._controller_instance_id,
+            )
         info = self._reader.detect()
         self.controller_info.emit(info)
         if info is None:
             self.error.emit("No controller detected. Plug one in and click Start.")
+            self._cleanup()
+            self.stopped.emit()
             return
 
         # Windows: make sure the helper apps the pipeline leans on are running
@@ -424,6 +442,8 @@ class BridgeWorker(QObject):
             self._midi = open_port(self._midi_port_name)
         except MidiPortError as e:
             self.error.emit(str(e))
+            self._cleanup()
+            self.stopped.emit()
             return
 
         self._probe_midi2_support()
@@ -437,6 +457,11 @@ class BridgeWorker(QObject):
 
         # Auto-calibrate on first start. UI may also trigger recalibration.
         self._run_calibration()
+
+        if self._stop_requested.is_set():
+            self._cleanup()
+            self.stopped.emit()
+            return
 
         self.started.emit(info.name, self._midi.name)
         if getattr(self._midi, "fallback", False):
@@ -453,6 +478,7 @@ class BridgeWorker(QObject):
 
     @Slot()
     def stop(self) -> None:
+        self._stop_requested.set()
         self._running = False
 
     def panic(self) -> None:
@@ -532,14 +558,10 @@ class BridgeWorker(QObject):
 
     @Slot()
     def recalibrate(self) -> None:
-        if self._reader is None:
-            return
-        was_running = self._running
-        self._running = False  # pause the inner loop
-        self._run_calibration()
-        if was_running:
-            self._running = True
-            self._loop()
+        # The poll loop occupies this worker's QThread, so a queued Qt slot
+        # cannot run until the bridge stops. Consume the request in the loop.
+        if self._reader is not None:
+            self._recalibrate_requested.set()
 
     # ---------------------------------------------------------------- macro recorder
 
@@ -1450,11 +1472,25 @@ class BridgeWorker(QObject):
         n_buttons = reader.num_buttons()
         n_axes = reader.num_axes()
         n_hats = reader.num_hats()
+        checked_connection_at = 0.0
+        mapping = base_mapping
 
         try:
             while self._running:
                 t0 = time.perf_counter()
                 reader.pump()
+                if self._recalibrate_requested.is_set():
+                    self._recalibrate_requested.clear()
+                    self._run_calibration()
+                    offsets = self._state.stick_offsets
+                    if not self._running:
+                        break
+                if t0 - checked_connection_at >= 0.25:
+                    checked_connection_at = t0
+                    if not reader.is_connected():
+                        self._running = False
+                        self.controller_info.emit(None)
+                        break
 
                 # Refresh base mapping reference in case set_mapping was called
                 # between ticks (e.g. user saved edits while bridge was running).
@@ -1486,6 +1522,7 @@ class BridgeWorker(QObject):
                 if elapsed < interval:
                     time.sleep(interval - elapsed)
         finally:
+            self._running = False
             self._silence_all(midi, mapping, channel)
             self._cleanup()
             self.stopped.emit()
@@ -3452,14 +3489,15 @@ class BridgeController(QObject):
 
     def start(self) -> None:
         if not self.thread.isRunning():
+            self.worker._stop_requested.clear()
+            self.worker._recalibrate_requested.clear()
             self.thread.start()
 
     def stop(self) -> None:
         self.worker.stop()
 
     def recalibrate(self) -> None:
-        from PySide6.QtCore import QMetaObject, Qt
-        QMetaObject.invokeMethod(self.worker, "recalibrate", Qt.QueuedConnection)
+        self.worker.recalibrate()
 
     def shutdown(self) -> None:
         self.worker.stop()

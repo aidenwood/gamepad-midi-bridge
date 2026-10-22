@@ -4,7 +4,16 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 ## [Unreleased]
 
-(Nothing yet.)
+Preparing v3.0.0. Public downloads remain on the previous release until hardware verification is complete.
+
+- Live and Setup share a purple header with Phosphor icons, Connect, Output, Status and contextual Learn help.
+- Controller discovery no longer shuts down the joystick subsystem while a bridge is using it. Scanning or starting a second controller preserves the first controller's handle.
+- Readers stay attached to their device instance when another controller is unplugged and device indices change.
+- Connect lists detected controllers and offers a Pro two-controller connection. Status reports each slot's state, MIDI port, channel and sent-message count.
+- A lost slot reconnects independently, preserving the other controller's connection. Failed starts clean up their worker thread so another connection can be attempted.
+- The paired MIDI/Console dock can expand to half the window height and remembers its dragged height during the session.
+- Stick-calibration instructions and results are non-modal toasts. The initial hands-off instruction is highlighted; completion dismisses automatically.
+- The controller-input test is opened explicitly from Status and receives raw button/axis input.
 
 ## [2.2.1] - 2026-10-22
 

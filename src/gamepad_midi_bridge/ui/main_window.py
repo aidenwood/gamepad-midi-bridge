@@ -8,20 +8,20 @@ import logging
 import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl, QMetaObject
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence, QShortcut, QAction
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QSplitter, QStackedLayout, QVBoxLayout, QWidget, QMenu,
+    QPushButton, QSizePolicy, QSplitter, QStackedLayout, QVBoxLayout, QWidget, QMenu,
 )
 
 from typing import Dict, List, Optional
 
 from .. import APP_NAME, __version__, telemetry, autobackup
-from ..controller_history import seen_controllers, mark_seen
+from ..controller_history import mark_seen
 
 _log = logging.getLogger(__name__)
-from ..controller import available_count
+from ..controller import available_count, available_devices
 from ..license import activate_from_string, is_pro, state as license_state
 from ..mapping import Mapping
 from ..multi import MultiBridgeController, desired_slot_count
@@ -373,6 +373,8 @@ class MainWindow(QMainWindow):
         content_splitter.setStretchFactor(2, 0)
         content_splitter.setStretchFactor(3, 0)
         content_splitter.setSizes([1000, INSPECTOR_WIDTH, 320, INSPECTOR_WIDTH])
+        content_splitter.setMinimumHeight(100)
+        content_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self._content_splitter = content_splitter
         self._side_panel.setVisible(False)  # split mode off by default
 
@@ -407,7 +409,13 @@ class MainWindow(QMainWindow):
         self._bottom_splitter.addWidget(self._log_console)
         self._bottom_splitter.setStretchFactor(0, 1)
         self._bottom_splitter.setStretchFactor(1, 1)
-        body_splitter.addWidget(self._bottom_splitter)
+        # QSplitter recomputes its own maximum from its children when a body
+        # is shown/hidden. A plain dock wrapper owns the half-window limit.
+        self._bottom_dock = QWidget()
+        bottom_layout = QVBoxLayout(self._bottom_dock)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.addWidget(self._bottom_splitter)
+        body_splitter.addWidget(self._bottom_dock)
 
         body_splitter.setStretchFactor(0, 1)
         body_splitter.setStretchFactor(1, 0)
@@ -779,7 +787,7 @@ class MainWindow(QMainWindow):
         self._status_title = QLabel("Idle")
         self._status_title.setObjectName("StatusTitle")
         self._status_title.setMinimumHeight(18)
-        self._status_sub = QLabel("Plug in a controller and click Start.")
+        self._status_sub = QLabel("Plug in a controller, then open Connect.")
         self._status_sub.setObjectName("StatusSub")
         self._status_sub.setMinimumHeight(16)
         title_col.addWidget(self._status_title)
@@ -1128,11 +1136,11 @@ class MainWindow(QMainWindow):
         against a purple-and-teal shell and was the loudest remaining
         "this is two different apps" tell.
         """
-        from .tokens import BORDER_SUBTLE, TEXT_DISABLED
+        from .tokens import BORDER_SUBTLE, TEXT_SECONDARY
         menu.setStyleSheet(self._MENU_CSS % {
             "purple": SHELL_PURPLE, "teal": SHELL_TEAL,
             "blue": "#203F5B", "text": "#f5f5f5",
-            "dim": TEXT_DISABLED, "sep": BORDER_SUBTLE,
+            "dim": TEXT_SECONDARY, "sep": BORDER_SUBTLE,
         })
 
     def _popup(self, menu, button) -> None:
@@ -1189,12 +1197,33 @@ class MainWindow(QMainWindow):
         """
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
+        devices = available_devices()
+        states = self._multi.connections
+        active = sum(state.running for state in states)
         running = self._stop_btn.isEnabled()
+        menu.addAction(f"{len(devices)} detected · {active} bridging").setEnabled(False)
+        for index, device in enumerate(devices):
+            state = next((s for s in states if s.instance_id == device.instance_id), None)
+            label = state.phase if state else "Available"
+            item = menu.addAction(
+                f"{index + 1}. {device.name} — {label}",
+                lambda checked=False, target=device.instance_id: self._connect_device(target),
+            )
+            item.setEnabled(not running)
+        if len(devices) >= 2:
+            both = menu.addAction(
+                "Connect both controllers" if is_pro() else "Connect both controllers — Pro",
+                self._connect_both_controllers,
+            )
+            both.setEnabled(is_pro() and active < 2)
+        if not devices:
+            menu.addAction("No controller detected — connect USB or pair Bluetooth").setEnabled(False)
+        menu.addSeparator()
         connect = menu.addAction(
-            "Connected" if running else "Connect controller",
+            "Connecting / connected" if running else "Connect controller",
             self._start_btn.click)
         connect.setEnabled(not running)
-        menu.addAction("Disconnect", self._stop_btn.click).setEnabled(running)
+        menu.addAction("Disconnect all", self._stop_btn.click).setEnabled(running)
         menu.addSeparator()
         panic = menu.addAction("Send all notes off (panic)",
                                self._panic_btn.click)
@@ -1202,6 +1231,20 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction(self._status_sub.text()).setEnabled(False)
         self._popup(menu, self._connect_btn)
+
+    def _connect_device(self, instance_id: int) -> None:
+        self._preferred_controller_id = instance_id
+        self._settings.set_multi_mode("off")
+        self._on_start()
+
+    def _connect_both_controllers(self) -> None:
+        if not is_pro():
+            return
+        self._reconnect_retry_timer.stop()
+        self._multi.shutdown()
+        self._on_stopped()
+        self._settings.set_multi_mode("auto")
+        self._on_start()
 
     def _open_output_dropdown(self) -> None:
         """Where MIDI goes. Owns routing; other headers must not duplicate it."""
@@ -1231,6 +1274,20 @@ class MainWindow(QMainWindow):
         running = self._stop_btn.isEnabled()
         menu.addAction(
             "Bridge running" if running else "Bridge idle").setEnabled(False)
+        for index, state in enumerate(self._multi.connections):
+            menu.addSeparator()
+            menu.addAction(f"Controller {index + 1}: {state.name}").setEnabled(False)
+            menu.addAction(f"{state.phase} · MIDI channel {state.channel}").setEnabled(False)
+            output = state.port if state.running else (f"{state.port} (closed)" if state.port else "Not active")
+            menu.addAction(f"Output: {output}").setEnabled(False)
+            menu.addAction(f"MIDI messages sent: {state.messages}").setEnabled(False)
+            if state.error:
+                menu.addAction(state.error).setEnabled(False)
+        menu.addSeparator()
+        menu.addAction("MIDI output does not confirm reception in your DAW.").setEnabled(False)
+        info = getattr(self, "_active_controller_info", None)
+        test = menu.addAction("Test controller inputs…", lambda: self._run_test_wizard(info))
+        test.setEnabled(info is not None and bool(self._multi.connections[0].running))
         self._popup(menu, self._shell_status_btn)
 
     def _arrange_status_bar(self, width: int) -> None:
@@ -1696,18 +1753,11 @@ class MainWindow(QMainWindow):
         self._midi_log_panel.set_collapsed(not want_open)
 
     def _on_bluetooth_rescan(self) -> None:
-        """Bluetooth Re-scan click → ask the bridge worker to re-detect.
-
-        Marshal across to the worker thread via QueuedConnection so the
-        pygame.joystick.quit() + init() that detect() performs runs on
-        the same thread that owns the live joystick handle. Safe to call
-        when the bridge isn't running — the worker's redetect() probes
-        with a transient reader.
-        """
-        worker = getattr(self._bridge, "worker", None) if self._bridge else None
-        if worker is None:
-            return
-        QMetaObject.invokeMethod(worker, "redetect", Qt.QueuedConnection)
+        """Refresh discovery without restarting any active controller."""
+        devices = available_devices()
+        self._status_sub.setText(
+            f"{len(devices)} controller(s) detected — open Connect to choose."
+        )
 
     # Collapsed height is no longer a constant here — ask the panel via
     # ``header_height()``. It grows with the app font scale, so a duplicated
@@ -1757,67 +1807,46 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 learn(widget, title, text)
 
-    def _on_body_splitter_moved(self, _pos: int, _index: int) -> None:
-        """Keep each bottom panel's collapse state in sync with a handle drag.
+    def _bottom_height_limit(self) -> int:
+        total = self._body_splitter.height()
+        header = max(self._log_console.header_height(), self._midi_log_panel.header_height())
+        return max(header, min(self.height() // 2, max(header, total - 100)))
 
-        Body splitter children are [content, log_console, midi_log_panel]. If the
-        user drags a collapsed panel taller than its header, expand it (show the
-        body); if they drag an open panel down to the header, collapse it. Uses
-        the *silent* setter so we don't re-snap and fight the live drag.
-        """
-        if not hasattr(self, "_body_splitter"):
+    def _on_body_splitter_moved(self, _pos: int, _index: int) -> None:
+        if getattr(self, "_clamping_bottom", False):
             return
         sizes = self._body_splitter.sizes()
-        if len(sizes) < 3:
+        if len(sizes) != 2:
             return
-        for panel, size, btn in (
-            (self._log_console, sizes[1], self._console_btn),
-            (self._midi_log_panel, sizes[2], self._midi_log_btn),
-        ):
-            # A little above THIS panel's collapsed header height so a few
-            # stray drag pixels don't flip the state. Per-panel rather than a
-            # shared 36 — the header grows with the font scale, and a fixed
-            # threshold would spuriously "expand" a collapsed panel.
-            threshold = panel.header_height() + 12
-            if size > threshold and panel.is_collapsed():
-                panel.set_collapsed_silent(False)
-                btn.setChecked(True)
-            elif size <= threshold and not panel.is_collapsed():
-                panel.set_collapsed_silent(True)
-                btn.setChecked(False)
+        height = sizes[1]
+        limit = self._bottom_height_limit()
+        if height > limit:
+            self._clamping_bottom = True
+            self._body_splitter.setSizes([sum(sizes) - limit, limit])
+            self._clamping_bottom = False
+            height = limit
+        threshold = max(self._log_console.header_height(), self._midi_log_panel.header_height()) + 12
+        if height > threshold:
+            if self._log_console.is_collapsed() and self._midi_log_panel.is_collapsed():
+                self._log_console.set_collapsed_silent(False)
+        else:
+            self._log_console.set_collapsed_silent(True)
+            self._midi_log_panel.set_collapsed_silent(True)
+        self._console_btn.setChecked(not self._log_console.is_collapsed())
+        self._midi_log_btn.setChecked(not self._midi_log_panel.is_collapsed())
+        if height > max(self._log_console.header_height(), self._midi_log_panel.header_height()) + 12:
+            self._bottom_open_height = height
 
     def _apply_bottom_panel_sizes(self) -> None:
         if not hasattr(self, "_body_splitter"):
             return
-        # Collapsed height comes from each panel's real header height, not a
-        # hardcoded 36 — at a larger font scale a frozen 36 clips the title.
-        console_h = (
-            self._log_console.header_height()
-            if self._log_console.is_collapsed()
-            else self._OPEN_CONSOLE_PX
-        )
-        midi_h = (
-            self._midi_log_panel.header_height()
-            if self._midi_log_panel.is_collapsed()
-            else self._OPEN_MIDI_PX
-        )
-        # Use the splitter's actual current height; fall back to the parent
-        # widget if the splitter hasn't been sized yet.
-        total = self._body_splitter.height()
-        if total <= 0:
-            parent = self._body_splitter.parentWidget()
-            total = parent.height() if parent is not None else 720
-        total = max(total, 240)
-        # One bottom row now, not two stacked strips. Its height is whichever
-        # panel needs more, so collapsing one does not crop the other.
-        bottom_h = max(console_h, midi_h)
-        content_h = max(160, total - bottom_h)
-        self._body_splitter.setSizes([content_h, bottom_h])
-        # Give the two panels equal width unless the user has dragged them.
-        if hasattr(self, "_bottom_splitter"):
-            w = self._bottom_splitter.width()
-            if w > 0 and not any(self._bottom_splitter.sizes()):
-                self._bottom_splitter.setSizes([w // 2, w - w // 2])
+        limit = self._bottom_height_limit()
+        self._bottom_dock.setMaximumHeight(limit)
+        total = max(1, self._body_splitter.height() - self._body_splitter.handleWidth())
+        header = max(self._log_console.header_height(), self._midi_log_panel.header_height())
+        opened = not (self._log_console.is_collapsed() and self._midi_log_panel.is_collapsed())
+        bottom = min(limit, getattr(self, "_bottom_open_height", 200)) if opened else header
+        self._body_splitter.setSizes([max(100, total - bottom), bottom])
 
     def _toggle_inspector(self) -> None:
         """Show / hide the right inspector(s). When split is on, both
@@ -2178,6 +2207,7 @@ class MainWindow(QMainWindow):
     # ============================================================== signal wiring
 
     def _wire_signals(self) -> None:
+        self._multi.changed.connect(self._refresh_connection_summary)
         # Slot 0 wiring is byte-identical to V1.1 — keeps the single-controller
         # path unchanged. Slot 1 wiring is deferred until configure() actually
         # spins up a second bridge.
@@ -2196,6 +2226,10 @@ class MainWindow(QMainWindow):
             self._nodes_tab.attach_bridge_signals(self._bridge.worker)
         # Wire MIDI message details to the activity log panel
         self._bridge.worker.midi_message.connect(self._on_midi_message)
+        self._bridge.worker.raw_input.connect(self._on_wizard_input)
+        self._bridge.worker.hat_state.connect(
+            lambda direction, pressed: self._on_wizard_input("hat", 0, 1.0) if pressed else None
+        )
 
     def _wire_bridge_to_meter(self, bridge, meter, primary: bool) -> None:
         w = bridge.worker
@@ -2215,7 +2249,9 @@ class MainWindow(QMainWindow):
         else:
             # Secondary still surfaces errors as toasts so a misbehaving slot
             # isn't silently dropped on the floor.
-            w.error.connect(self._on_error)
+            if bridge is not self._bridge:
+                w.error.connect(lambda message: self._on_slot_error(message))
+                w.midi_message.connect(self._on_midi_message)
             w.controller_info.connect(
                 lambda info, m=meter: m.set_connected(info is not None,
                                                      info.name if info else "")
@@ -2276,6 +2312,7 @@ class MainWindow(QMainWindow):
         try:
             slot_count = self._multi.configure(
                 self._mapping, self._settings.current_multi_mode(),
+                preferred_instance_id=getattr(self, "_preferred_controller_id", None),
             )
         except RuntimeError as e:
             QMessageBox.warning(self, "Multi-controller error", str(e))
@@ -2290,17 +2327,20 @@ class MainWindow(QMainWindow):
         self._status_sub.setText("Detecting controller and opening MIDI port.")
 
         # Calibration dialog shows immediately and follows worker signals.
-        self._calibration_dialog = CalibrationDialog(self)
+        self._begin_calibration_toast()
+        self._connection_requested = True
         self._multi.start()
 
     def _on_stop(self) -> None:
+        self._connection_requested = False
+        self._reconnect_retry_timer.stop()
         self._multi.stop()
         self._stop_btn.setEnabled(False)
 
     def _on_panic(self) -> None:
         """Send all notes off on every channel."""
-        if self._bridge is not None:
-            self._bridge.worker.panic()
+        for bridge in self._multi.bridges:
+            bridge.worker.panic()
 
     def _on_test_note(self) -> None:
         """Send a test MIDI note to verify connector DAW connectivity."""
@@ -2340,7 +2380,7 @@ class MainWindow(QMainWindow):
             (not is_pro()) and detected >= 2 and slot_count == 1
         )
 
-    def _on_multi_mode_changed(self, _mode: str) -> None:
+    def _preview_multi_mode(self, _mode: str) -> None:
         """Re-evaluate slot visibility live so users see immediate feedback
         when flipping the combo, even while the bridge is stopped."""
         try:
@@ -2368,7 +2408,31 @@ class MainWindow(QMainWindow):
         if not self._connect_btn.is_compact():
             self._connect_btn.setText("CONNECTED" if running else "CONNECT")
 
+    def _refresh_connection_summary(self) -> None:
+        states = self._multi.connections
+        active = [state for state in states if state.running]
+        if active:
+            self._stop_btn.setEnabled(True)
+            self._start_btn.setEnabled(False)
+            self._panic_btn.setEnabled(True)
+            self._status_title.setText(f"{len(active)} controller{'s' if len(active) != 1 else ''} bridging")
+            self._status_sub.setText(" · ".join(
+                f"{state.name} → {state.port}" for state in active
+            ))
+        self._refresh_connect_affordance()
+        if (getattr(self, "_connection_requested", False)
+                and self._mapping.auto_reconnect_enabled
+                and any(state.phase == "Disconnected" for state in states)
+                and not self._reconnect_retry_timer.isActive()):
+            self._reconnect_retry_timer.start()
+
+    def _on_slot_error(self, message: str) -> None:
+        _log.error("Secondary controller: %s", message)
+        self._meter2.set_connected(False)
+        self._refresh_connection_summary()
+
     def _on_started(self, controller_name: str, port_name: str) -> None:
+        self._current_port_name = port_name
         self._refresh_connect_affordance()
         self._status_title.setText("Bridging")
         self._status_sub.setText(f"{controller_name}  →  {port_name}")
@@ -2382,17 +2446,20 @@ class MainWindow(QMainWindow):
         if self._hud is not None:
             self._hud.set_status(True)
             self._hud.set_preset(getattr(self._mapping, "name", "—") or "—")
-        if self._calibration_dialog and not self._calibration_dialog.isVisible():
-            # Dialog already closed by user — nothing to do.
-            self._calibration_dialog = None
 
     def _on_stopped(self) -> None:
+        if any(state.running for state in self._multi.connections):
+            self._meter.set_connected(False)
+            self._side_meter.set_connected(False)
+            self._refresh_connection_summary()
+            return
         self._refresh_connect_affordance()
         self._midi_fallback_btn.setVisible(False)
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._panic_btn.setEnabled(False)
         self._refresh_status_idle()
+        self._refresh_connect_affordance()
         # Every meter, not just the Live tab's. The Split View "Live Preview"
         # is visible alongside other tabs and is only reset by controller_info,
         # which is never emitted with None on stop — so it kept painting
@@ -2412,6 +2479,7 @@ class MainWindow(QMainWindow):
         self._on_stopped()
 
     def _on_controller_info(self, info) -> None:
+        self._active_controller_info = info
         if info is None:
             self._meter.set_connected(False)
             # Only start the reconnect flow if the bridge was actively running
@@ -2419,8 +2487,12 @@ class MainWindow(QMainWindow):
             if (self._stop_btn.isEnabled()
                     and self._mapping.auto_reconnect_enabled
                     and not self._reconnect_overlay.isVisible()):
-                self._start_reconnect_flow()
+                if any(state.running for state in self._multi.connections):
+                    self._reconnect_retry_timer.start()
+                else:
+                    self._start_reconnect_flow()
         else:
+            self._preferred_controller_id = info.instance_id
             self._meter.set_connected(True, info.name)
             # If the overlay is counting/retrying, a non-None info means
             # reconnect succeeded — notify the overlay and stop retrying.
@@ -2428,31 +2500,27 @@ class MainWindow(QMainWindow):
                 self._reconnect_retry_timer.stop()
                 self._reconnect_overlay.notify_success()
             
-            # Test wizard on first-time controller connect. `Mapping` has no
-            # `config` dict — earlier code tried `mapping.config.get(...)` and
-            # crashed every connect with AttributeError. Gate on the seen-
-            # controllers history alone, which is what we actually wanted.
-            #
-            # Hand the wizard the ControllerInfo we were just given. It used to
-            # re-read `worker.controller_info`, which is the Signal declared at
-            # bridge.py:95 rather than its payload, so the wizard was handed a
-            # SignalInstance and died on `.num_buttons`. That crashed on EVERY
-            # connect, not just the first: `mark_seen` only runs after the
-            # wizard completes, so a wizard that cannot open never marks the
-            # controller seen and the gate below passes again next time.
-            if info.name not in seen_controllers():
-                QTimer.singleShot(800, lambda inf=info: self._run_test_wizard(inf))
+            # Input testing is available explicitly in Status. Auto-opening
+            # a modal wizard here covered the workspace on first connection.
+
+    def _begin_calibration_toast(self) -> None:
+        if self._calibration_dialog is not None:
+            self._calibration_dialog.hide()
+            self._calibration_dialog.deleteLater()
+        self._calibration_dialog = CalibrationDialog(self.centralWidget())
+        self._calibration_dialog.on_progress(0.0)
+
+    def _on_wizard_input(self, kind: str, index: int, value: float) -> None:
+        wizard = self._test_wizard
+        if wizard is not None and wizard.isVisible() and abs(value) > 0.2:
+            wizard.record_input(kind, index)
 
     def _on_calibration_progress(self, fraction: float) -> None:
         if self._calibration_dialog is not None:
-            if not self._calibration_dialog.isVisible():
-                self._calibration_dialog.show()
             self._calibration_dialog.on_progress(fraction)
 
     def _on_calibration_done(self, offsets, severe, significant) -> None:
         if self._calibration_dialog is not None:
-            if not self._calibration_dialog.isVisible():
-                self._calibration_dialog.show()
             self._calibration_dialog.on_done(offsets, severe, significant)
 
     def _run_test_wizard(self, info) -> None:
@@ -2510,7 +2578,7 @@ class MainWindow(QMainWindow):
                 "then re-calibrate from Settings.",
             )
             return
-        self._calibration_dialog = CalibrationDialog(self)
+        self._begin_calibration_toast()
         self._multi.recalibrate()
 
     def _on_preset_loaded(self, mapping: Mapping) -> None:
@@ -2597,7 +2665,10 @@ class MainWindow(QMainWindow):
         """Called every second while the overlay is counting. Try to restart."""
         # Only attempt while the overlay is still in counting state (it may have
         # already timed out and moved to FAILED, in which case we stop the timer).
-        if not self._reconnect_overlay.isVisible():
+        if not getattr(self, "_connection_requested", False):
+            self._reconnect_retry_timer.stop()
+            return
+        if all(state.running for state in self._multi.connections):
             self._reconnect_retry_timer.stop()
             return
         self._attempt_reconnect()
@@ -2605,20 +2676,33 @@ class MainWindow(QMainWindow):
     def _attempt_reconnect(self) -> None:
         """Try to spin the bridge back up via a fresh start cycle."""
         try:
-            # Gracefully stop any partially-running bridge state before restarting.
-            self._multi.stop()
-            slot_count = self._multi.configure(
-                self._mapping, self._settings.current_multi_mode(),
-            )
-            self._bridge = self._multi.primary()
-            self._sync_live_layout(slot_count)
-            self._multi.start()
+            # Reconnect only the missing slot. Restarting the whole multi
+            # bridge here disconnected the controller that was still working.
+            devices = available_devices()
+            occupied = {state.instance_id for state in self._multi.connections if state.running}
+            for index, bridge in enumerate(self._multi.bridges):
+                state = self._multi.connections[index]
+                if state.running or bridge.thread.isRunning():
+                    continue
+                info = next((d for d in devices if d.instance_id not in occupied), None)
+                if info is None:
+                    continue
+                occupied.add(info.instance_id)
+                state.instance_id, state.name, state.phase = info.instance_id, info.name, "Starting"
+                bridge.worker._controller_instance_id = info.instance_id
+                bridge.start()
+            if all(state.running for state in self._multi.connections):
+                self._reconnect_retry_timer.stop()
         except Exception as e:
             _log.debug("Auto-reconnect attempt failed: %s", e)
 
     def _on_reconnect_cancelled(self) -> None:
         """User dismissed the overlay — stop the retry ticker and go idle."""
+        self._connection_requested = False
         self._reconnect_retry_timer.stop()
+        if any(state.running for state in self._multi.connections):
+            self._refresh_connection_summary()
+            return
         self._multi.stop()
         self._on_stopped()
 
@@ -2704,9 +2788,10 @@ class MainWindow(QMainWindow):
 
     def _on_multi_mode_changed(self, mode: str) -> None:
         """User flipped the 'Active controllers' combo in Settings."""
-        slots = self._multi.configure(self._mapping, mode)
-        self._bridge = self._multi.primary()
-        telemetry.send_event("multi_mode_set", mode=mode, slots=slots)
+        # Never replace or remap a worker while its poll loop owns a device.
+        # The next Connect applies the mode; Connect both restarts explicitly.
+        self._preview_multi_mode(mode)
+        telemetry.send_event("multi_mode_set", mode=mode)
 
     # ============================================================== shortcuts
 
@@ -2883,7 +2968,7 @@ class MainWindow(QMainWindow):
             self._status_title.setText("Idle · Pro")
         else:
             self._status_title.setText("Idle")
-        self._status_sub.setText("Plug in a controller and click Start.")
+        self._status_sub.setText("Plug in a controller, then open Connect.")
 
 
     # ============================================================== command palette
@@ -3031,6 +3116,9 @@ class MainWindow(QMainWindow):
         # Reflow the status bar between 1-row (wide) and 2-row (narrow)
         # modes whenever the window changes width.
         self._arrange_status_bar(event.size().width())
+        if hasattr(self, "_bottom_dock"):
+            self._bottom_dock.setMaximumHeight(self._bottom_height_limit())
+            QTimer.singleShot(0, self._apply_bottom_panel_sizes)
         panel = getattr(self, "_description_panel", None)
         if panel is not None and panel.isVisible():
             panel.place_default()
