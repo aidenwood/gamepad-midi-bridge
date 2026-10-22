@@ -175,6 +175,15 @@ class MainWindow(QMainWindow):
         self._bridge = self._multi.primary()
         self._calibration_dialog = None
         self._test_wizard = None
+        # Built here, NOT in _build_about_tab. About is the one LazyTab
+        # (see _build_tabs), so it is constructed only when the user first
+        # opens it — but _refresh_tier_label is called from the licence
+        # activation path, which the Activate buttons on Mapping and Presets
+        # and the ucmd:// store deep link all reach. A buyer who pastes a key
+        # without ever opening About used to get an AttributeError and a
+        # crash dialog on the paid-conversion path. AboutTab is handed this
+        # same instance when it is eventually built.
+        self._tier_label = QLabel()
         self._activity_timer = QTimer(self)
         self._activity_timer.setSingleShot(True)
         self._activity_timer.timeout.connect(self._fade_activity)
@@ -1768,7 +1777,6 @@ class MainWindow(QMainWindow):
 
     def _build_about_tab(self) -> QWidget:
         """Build the About tab using the polished AboutTab widget with Pro features."""
-        self._tier_label = QLabel()
         about_tab = AboutTab(
             tier_label_widget=self._tier_label,
             on_upgrade=self._open_upgrade,
