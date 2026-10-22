@@ -146,6 +146,11 @@ def run(argv: Optional[List[str]] = None) -> int:
 
         def _grab_and_quit() -> None:
             try:
+                if os.environ.get("GMB_UI_SMOKE_LEARN"):
+                    btn = getattr(win, "_nodeview_btn", None)
+                    if btn is not None:
+                        btn.setChecked(True)
+                        app.processEvents()
                 if os.environ.get("GMB_UI_SMOKE_GEOM"):
                     def _dump(w, depth=0, name=""):
                         g = w.geometry()

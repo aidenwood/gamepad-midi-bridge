@@ -842,11 +842,16 @@ class MainWindow(QMainWindow):
         self._mode_live_btn.clicked.connect(lambda: self.set_mode("live"))
         self._mode_setup_btn.clicked.connect(lambda: self.set_mode("setup"))
 
-        self._nodeview_btn = UIButton("NODE VIEW", variant="header")
-        self._nodeview_btn.setToolTip("Open the node graph")
-        self._nodeview_btn.set_compact_text("\u2325")
-        self._nodeview_btn.setIcon(load_icon("graph"))
-        self._nodeview_btn.clicked.connect(self._open_node_view)
+        # LEARN takes the slot NODE VIEW had. Node View is a destination you
+        # visit occasionally; the description panel is something you leave on
+        # while finding your way around, which is the whole point of making
+        # this app understandable. Node View moves into MENU.
+        self._nodeview_btn = UIButton("LEARN", variant="header")
+        self._nodeview_btn.setToolTip(
+            "Explain whatever the cursor is over, in a panel you can move")
+        self._nodeview_btn.setIcon(load_icon("app-window"))
+        self._nodeview_btn.setCheckable(True)
+        self._nodeview_btn.toggled.connect(self._toggle_description_panel)
 
         self._connect_btn = UIButton("CONNECT", variant="header")
         self._connect_btn.setToolTip("Connect or disconnect your controller")
@@ -1021,8 +1026,20 @@ class MainWindow(QMainWindow):
     # third mode; the remaining nine sit behind MENU. This is the explicit
     # destination inventory the handover asks for.
     _MODE_TABS = {"live": "Live", "setup": "Mapping"}
-    _MENU_TABS = ("Visualise", "Templates", "Presets", "Marketplace",
-                  "Connectors", "Bluetooth", "Settings", "Help", "About")
+    # (tab title, icon name). Node View sits here now that LEARN has the
+    # header slot. Icons make a 10-item list scannable instead of a wall.
+    _MENU_TABS = (
+        ("Nodes", "graph"),
+        ("Visualise", "app-window"),
+        ("Templates", "tabs"),
+        ("Presets", "tabs"),
+        ("Marketplace", "browsers"),
+        ("Connectors", "plugs"),
+        ("Bluetooth", "plug"),
+        ("Settings", "app-window"),
+        ("Help", "terminal-window"),
+        ("About", "game-controller"),
+    )
 
     def _tab_index(self, title: str) -> int:
         tabs = getattr(self, "_tabs_ref", None)
@@ -1058,6 +1075,66 @@ class MainWindow(QMainWindow):
     def _open_node_view(self) -> None:
         self._show_tab("Nodes")
 
+    def _toggle_description_panel(self, active: bool) -> None:
+        """Show / hide the DESCRIPTION panel.
+
+        Built lazily and parented to the central widget so it floats over
+        the workspace rather than stealing layout space from it — the
+        wireframe has it overlapping the lower-right of the canvas.
+        """
+        panel = getattr(self, "_description_panel", None)
+        if panel is None:
+            from .description_panel import DescriptionPanel
+            # Parent to the WORKSPACE, not the central widget. The wireframe
+            # floats it over the lower-right of the canvas; parenting it to
+            # the whole window drops it on top of the MIDI and Console
+            # panels, covering the thing a learner most wants to watch.
+            host = None
+            if hasattr(self, "_body_splitter") and self._body_splitter.count():
+                host = self._body_splitter.widget(0)
+            host = host or self.centralWidget() or self
+            panel = self._description_panel = DescriptionPanel(host)
+        panel.set_active(active)
+
+    _MENU_CSS = """
+        QMenu {
+            background-color: %(purple)s;
+            border: 1px solid %(teal)s;
+            border-radius: 8px;
+            padding: 6px;
+            color: %(text)s;
+        }
+        QMenu::item {
+            padding: 7px 16px 7px 12px;
+            border-radius: 5px;
+            margin: 1px 2px;
+            font-size: 12px;
+        }
+        QMenu::item:selected { background-color: %(blue)s; }
+        QMenu::item:disabled { color: %(dim)s; }
+        QMenu::icon { padding-left: 8px; }
+        QMenu::separator {
+            height: 1px;
+            background: %(sep)s;
+            margin: 6px 10px;
+        }
+        QMenu::indicator { width: 14px; height: 14px; margin-left: 8px; }
+    """
+
+    def _style_menu(self, menu) -> None:
+        """One look for every header dropdown.
+
+        Unstyled QMenus render as native grey strips, which is jarring
+        against a purple-and-teal shell and was the loudest remaining
+        "this is two different apps" tell.
+        """
+        from .tokens import BORDER_SUBTLE, TEXT_DISABLED
+        menu.setStyleSheet(self._MENU_CSS % {
+            "purple": SHELL_PURPLE, "teal": SHELL_TEAL,
+            "blue": "#203F5B", "text": "#f5f5f5",
+            "dim": TEXT_DISABLED, "sep": BORDER_SUBTLE,
+        })
+
     def _popup(self, menu, button) -> None:
         """Show an anchored dropdown under its header trigger.
 
@@ -1065,6 +1142,7 @@ class MainWindow(QMainWindow):
         popped rather than run modally — dismissing a dropdown must never
         disconnect a controller or cancel an operation in flight.
         """
+        self._style_menu(menu)
         self._open_dropdown = menu
         menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
 
@@ -1072,9 +1150,10 @@ class MainWindow(QMainWindow):
         """Everything that is not a mode or a header action."""
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
-        for title in self._MENU_TABS:
+        for title, icon_name in self._MENU_TABS:
             if self._tab_index(title) >= 0:
-                menu.addAction(title, lambda t=title: self._show_tab(t))
+                act = menu.addAction(title, lambda t=title: self._show_tab(t))
+                act.setIcon(load_icon(icon_name, SHELL_TEAL, 16))
         menu.addSeparator()
         # The old toolbar toggles. They are still real controls with real
         # state — the menu drives the same buttons rather than duplicating
@@ -2952,6 +3031,9 @@ class MainWindow(QMainWindow):
         # Reflow the status bar between 1-row (wide) and 2-row (narrow)
         # modes whenever the window changes width.
         self._arrange_status_bar(event.size().width())
+        panel = getattr(self, "_description_panel", None)
+        if panel is not None and panel.isVisible():
+            panel.place_default()
 
     # ============================================================== close
 
