@@ -2,9 +2,9 @@
 
 Versions follow semver: `MAJOR.MINOR.PATCH`.
 
-## [Unreleased]
+## [3.0.0] - 2026-10-22
 
-Preparing v3.0.0. Public downloads remain on the previous release until hardware verification is complete.
+Major UI and controller-connection update.
 
 - Live and Setup share a purple header with Phosphor icons, Connect, Output, Status and contextual Learn help.
 - Controller discovery no longer shuts down the joystick subsystem while a bridge is using it. Scanning or starting a second controller preserves the first controller's handle.
