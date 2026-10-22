@@ -14,12 +14,13 @@ persists across launches via the config file (key ``midi_panel_open``).
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QPushButton, QVBoxLayout, QWidget,
@@ -53,6 +54,80 @@ class MidiFilter(Enum):
     RECEIVED = "Received only"
     NOTES = "Notes only"
     CCS = "CCs only"
+
+
+BLINK_DECAY_S = 0.35
+
+
+class ChannelBlinkers(QWidget):
+    """Sixteen per-channel lamps that blink on outgoing MIDI.
+
+    Lives in the panel HEADER, not the body, so it stays visible when the
+    log is collapsed — the point is to confirm "my press reached MIDI"
+    without opening a scrolling text log and reading timestamps.
+
+    Notes light brighter than CCs: a stick sweep otherwise holds every lamp
+    on and tells you nothing about button presses.
+    """
+
+    CELL_W = 13
+    CELL_H = 13
+    GAP = 2
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._stamps: dict = {}     # channel -> (time, is_note)
+        self.setFixedSize(16 * self.CELL_W + 15 * self.GAP, self.CELL_H)
+        self.setToolTip(
+            "MIDI channels 1-16. A lamp blinks when this app sends on that "
+            "channel — bright for notes, dim for CCs.")
+        # Only repaints while something is actually decaying.
+        self._timer = QTimer(self)
+        self._timer.setInterval(40)
+        self._timer.timeout.connect(self._tick)
+
+    def blink(self, channel: int, is_note: bool) -> None:
+        if not 0 <= channel <= 15:
+            return
+        self._stamps[channel] = (time.perf_counter(), is_note)
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def clear(self) -> None:
+        self._stamps.clear()
+        self._timer.stop()
+        self.update()
+
+    def _tick(self) -> None:
+        now = time.perf_counter()
+        self._stamps = {ch: v for ch, v in self._stamps.items()
+                        if now - v[0] < BLINK_DECAY_S}
+        if not self._stamps:
+            self._timer.stop()
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        now = time.perf_counter()
+        off = QColor("#1f232b")
+        for ch in range(16):
+            x = ch * (self.CELL_W + self.GAP)
+            rect = QRectF(x, 0, self.CELL_W, self.CELL_H)
+            stamp = self._stamps.get(ch)
+            if stamp is None:
+                colour = off
+            else:
+                t = max(0.0, 1.0 - (now - stamp[0]) / BLINK_DECAY_S)
+                peak = QColor("#2dd4bf") if stamp[1] else QColor("#1d7f74")
+                colour = QColor(
+                    int(off.red() + (peak.red() - off.red()) * t),
+                    int(off.green() + (peak.green() - off.green()) * t),
+                    int(off.blue() + (peak.blue() - off.blue()) * t),
+                )
+            p.setPen(QPen(QColor("#24262d"), 1))
+            p.setBrush(QBrush(colour))
+            p.drawRoundedRect(rect, 2, 2)
 
 
 class MidiLogPanel(QWidget):
@@ -136,6 +211,13 @@ class MidiLogPanel(QWidget):
         title.setMinimumHeight(20)
         self._header_title = title
         h.addWidget(title)
+
+        # Press blinkers sit next to the title, so a user can confirm MIDI is
+        # actually leaving the app without expanding the log.
+        self._blinkers = ChannelBlinkers()
+        h.addSpacing(10)
+        h.addWidget(self._blinkers, 0, Qt.AlignVCenter)
+
         h.addStretch(1)
 
         self._filter_combo = QComboBox()
@@ -229,6 +311,9 @@ class MidiLogPanel(QWidget):
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         meta_str = f" ({value_meta})" if value_meta else ""
         text = f"{ts} ▲ ch{channel} {status_label} d1={data1:3d} d2={data2:3d}{meta_str}"
+        # Blink before the row is filtered — the lamp reports what was SENT,
+        # not what the current filter happens to show.
+        self._blinkers.blink(channel, "NOTE-ON" in status_label.upper())
         self._add_row(MidiFilter.SENT, text, QColor(34, 197, 94))  # green-600
 
     def append_received(
@@ -308,6 +393,7 @@ class MidiLogPanel(QWidget):
         self._list.clear()
         self._visible_count = 0
         self._user_scrolled = False
+        self._blinkers.clear()
 
     @staticmethod
     def _monospace_font():
