@@ -18,16 +18,35 @@ from gamepad_midi_bridge import shaping
 # ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("raw,expected", [
-    (-1.0, 0.0),     # DInput rest position
-    (-0.5, 0.25),    # mid-press, DInput-style report
-    (0.0, 0.0),      # XInput rest, OR DInput mid-press both map to 0 cleanly
-    (0.5, 0.5),      # mid-press, XInput-style report
+    (-1.0, 0.0),     # rest
+    (-0.5, 0.25),    # quarter press
+    (0.0, 0.5),      # HALF press — SDL reports 0.0 at the midpoint of travel
+    (0.5, 0.75),     # three-quarter press
     (1.0, 1.0),      # full press
     (-2.0, 0.0),     # out of range below
     (2.0, 1.0),      # out of range above
 ])
 def test_normalise_trigger_pressure(raw, expected):
     assert shaping.normalise_trigger_pressure(raw) == pytest.approx(expected, abs=1e-6)
+
+
+def test_trigger_pressure_is_monotonic_across_the_whole_stroke():
+    """The regression this file previously enshrined.
+
+    Two of the old cases asserted `0.0 -> 0.0` and `0.5 -> 0.5`, on the
+    theory that some platform reports triggers as 0..1 natively. None does —
+    SDL normalises to -1..+1 on every driver it ships. The function branched
+    on the sign to serve both readings at once, which put a cliff at the
+    midpoint: pressure climbed to 0.4995 just below raw 0.0 and dropped to
+    0.0 the instant it crossed, so every trigger sent CC 63 then CC 0 then
+    climbed again. Monotonicity is the property that was actually wanted.
+    """
+    steps = [i / 100.0 for i in range(-100, 101)]
+    values = [shaping.normalise_trigger_pressure(r) for r in steps]
+    for earlier, later in zip(values, values[1:]):
+        assert later >= earlier, "trigger pressure must never fall as travel increases"
+    assert values[0] == pytest.approx(0.0)
+    assert values[-1] == pytest.approx(1.0)
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -39,21 +39,24 @@ class TriggerState:
 def normalise_trigger_pressure(raw: float) -> float:
     """Coerce whatever pygame returns into a clean 0..1 trigger reading.
 
-    SDL/pygame reports triggers differently per platform:
-      - Some return -1.0 at rest, +1.0 at full press (DInput-style)
-      - Others return  0.0 at rest, +1.0 at full press (XInput-style)
+    SDL normalises analog triggers to -1.0 at rest and +1.0 at full press on
+    every driver it ships (HIDAPI, IOKit/darwin, MFi, XInput), so this is one
+    unconditional remap.
 
-    Both cases produce a sensible 0..1 here because we clamp the lower
-    bound at 0 after a single linear remap. Values in (-1, 0) only appear
-    on DInput-style platforms where the trigger sits below zero at rest;
-    we map those to 0 because that IS the rest position.
+    It used to branch on the sign, remapping only when ``raw < 0`` on the
+    theory that some platform reported 0..1 natively. Nothing does, and the
+    branch put a hard discontinuity in the middle of every trigger stroke:
+
+        raw -1.000 (rest)      -> 0.000   CC 0
+        raw -0.001 (49.9%)     -> 0.4995  CC 63
+        raw  0.000 (half)      -> 0.000   CC 0     <-- collapsed to zero
+        raw +1.000 (full)      -> 1.000   CC 127
+
+    So a trigger ramped 0->63 over the first half of travel, snapped back to
+    0 at half-press, then ramped 0->127 over the second half. This affected
+    DualSense and Xbox pads alike.
     """
-    # If the raw value is negative, the platform is reporting -1..1 with
-    # rest at -1. Remap to 0..1.
-    if raw < 0.0:
-        return max(0.0, min(1.0, (raw + 1.0) / 2.0))
-    # Otherwise it's already 0..1.
-    return max(0.0, min(1.0, raw))
+    return max(0.0, min(1.0, (raw + 1.0) / 2.0))
 
 
 def apply_trigger(

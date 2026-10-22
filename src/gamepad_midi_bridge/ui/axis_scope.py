@@ -76,8 +76,10 @@ class AxisScope(QWidget):
     def add_sample(self, value: float) -> None:
         """Append a new value and drop oldest if at capacity."""
         if self._is_trigger:
-            # Trigger: clamp to 0..1
-            self._samples.append(max(0.0, min(1.0, float(value))))
+            # `axis_value` carries the RAW -1..+1 reading, not pressure, so
+            # remap rather than clamp. Clamping pinned the trace flat at zero
+            # for the entire first half of every trigger pull.
+            self._samples.append(max(0.0, min(1.0, (float(value) + 1.0) / 2.0)))
         else:
             # Stick: clamp to -1..+1
             self._samples.append(max(-1.0, min(1.0, float(value))))

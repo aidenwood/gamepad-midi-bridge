@@ -70,7 +70,13 @@ class TestAxisScope:
 
     @pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
     def test_scope_add_samples(self):
-        """add_sample clamping works per axis type."""
+        """Sticks clamp to -1..+1; triggers REMAP from -1..+1 into 0..1.
+
+        The trigger case used to assert `-0.5 -> 0.0`, i.e. a quarter-pressed
+        trigger drawing as fully released. `axis_value` carries the raw SDL
+        reading, which rests at -1.0, so clamping it flattened the trace for
+        the whole first half of every pull.
+        """
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication([])
 
@@ -81,10 +87,14 @@ class TestAxisScope:
         assert stick._samples[1] == -1.0
 
         trigger = AxisScope(4, "L2")
-        trigger.add_sample(-0.5)
-        trigger.add_sample(2.0)
+        trigger.add_sample(-1.0)     # rest
+        trigger.add_sample(-0.5)     # quarter press
+        trigger.add_sample(0.0)      # half press
+        trigger.add_sample(2.0)      # over-range full press
         assert trigger._samples[0] == 0.0
-        assert trigger._samples[1] == 1.0
+        assert trigger._samples[1] == 0.25
+        assert trigger._samples[2] == 0.5
+        assert trigger._samples[3] == 1.0
 
 
 class TestVisualiseTabs:

@@ -2025,7 +2025,15 @@ class MainWindow(QMainWindow):
         self._stop_btn.setEnabled(False)
         self._panic_btn.setEnabled(False)
         self._refresh_status_idle()
+        # Every meter, not just the Live tab's. The Split View "Live Preview"
+        # is visible alongside other tabs and is only reset by controller_info,
+        # which is never emitted with None on stop — so it kept painting
+        # pre-stop axis values straight through the next run's calibration
+        # modal, which is how triggers appeared pinned full while the pad was
+        # sitting untouched on the desk.
         self._meter.set_connected(False)
+        self._side_meter.set_connected(False)
+        self._meter2.set_connected(False)
         if self._tray is not None:
             self._tray.set_running(False)
         if self._hud is not None:

@@ -220,6 +220,8 @@ class BridgeWorker(QObject):
         # visualiser. Key by axis index so every axis throttles independently.
         self._last_telemetry: Dict[int, float] = {}
         self._telemetry_interval = 1.0 / 30.0
+        # Samples the throttle above swallowed, awaiting the next window.
+        self._pending_axis: Dict[int, float] = {}
         # Battery + touchpad poll less often — they don't need 100Hz
         self._last_battery_poll: float = 0.0
         self._battery_interval = 5.0
@@ -1466,6 +1468,9 @@ class BridgeWorker(QObject):
                 if self._ds_handle is not None:
                     self._poll_dualsense(mapping, midi, cc, t0)
                 self._poll_node_graph(reader, mapping)
+                # Release anything the 30 Hz UI throttle held back, so the
+                # meter can never freeze on a stale full-travel value.
+                self._flush_pending_axes()
 
                 # Sleep the remainder of the interval — keeps CPU usage low
                 elapsed = time.perf_counter() - t0
@@ -3358,10 +3363,35 @@ class BridgeWorker(QObject):
     # ---------------------------------------------------------- telemetry
 
     def _emit_axis(self, idx: int, value: float) -> None:
+        """Push an axis sample to the UI at <=30 Hz without losing the last one.
+
+        The poll loop runs at 100 Hz while this throttles to 30, and the
+        caller updates `_prev_cc` on every change — so a sample dropped here
+        is never re-sent. A spring-loaded trigger snaps from full travel back
+        to rest in 20-40 ms, which often lands entirely inside one 33 ms
+        window: the UI's last-seen value stayed the full-press one and the
+        meter showed a solid bar for the rest of the session, with the pad
+        sitting untouched on the desk.
+
+        Park the dropped sample and flush it on a later tick instead.
+        """
         now = time.perf_counter()
         if now - self._last_telemetry.get(idx, 0.0) >= self._telemetry_interval:
             self.axis_value.emit(idx, value)
             self._last_telemetry[idx] = now
+            self._pending_axis.pop(idx, None)
+        else:
+            self._pending_axis[idx] = value
+
+    def _flush_pending_axes(self) -> None:
+        """Emit any sample the throttle swallowed, once its window has passed."""
+        if not self._pending_axis:
+            return
+        now = time.perf_counter()
+        for idx in list(self._pending_axis):
+            if now - self._last_telemetry.get(idx, 0.0) >= self._telemetry_interval:
+                self.axis_value.emit(idx, self._pending_axis.pop(idx))
+                self._last_telemetry[idx] = now
 
 
 class BridgeController(QObject):
