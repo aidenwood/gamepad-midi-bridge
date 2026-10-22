@@ -6,6 +6,19 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 
 (Nothing yet.)
 
+## [2.2.1] - 2026-10-22
+
+**Three crashes, and an Xbox pad that finally knows what it is.** Everything below came out of reviewing a recorded first-use session frame by frame.
+
+- **The app no longer crashes every time you plug a controller in.** The first-connect test wizard was handed the `controller_info` *Signal* instead of the controller it carries, and died asking a Qt object for `num_buttons`. The guard above it tested that same Signal for `None`, which a SignalInstance never is, so it never caught anything. Worse than a first-run bug: a controller is only marked "seen" once the wizard *completes*, so a wizard that cannot open never marks it, and the crash repeated on every connect forever.
+- **Activating a Pro licence no longer crashes.** The tier label was built inside the About tab, which loads lazily — so buying Pro and pasting the key from the Mapping or Presets tab, or via a `ucmd://` link, hit an `AttributeError` on the paid-conversion path unless you happened to have opened About first.
+- **Xbox controllers are identified properly.** Microsoft's USB descriptor sets the product string to the literal word "Controller", so that is what the app displayed — and because the button-naming code matches on that same string, the pad also fell through to generic `Btn 1/2/3/4` labels. The real VID:PID was already being read into the SDL GUID and thrown away. Names now come from there, which fixes the title and the A/B/X/Y labels together.
+- **The Visualise tab follows your controller.** It was hardcoded PlayStation, so an Xbox user saw A/B/X/Y on the Live tab and Cross/Circle/Square/Triangle on Visualise in the same session — over a touchpad their hardware doesn't have. Labels, face glyphs, shoulder and trigger names and the touchpad now all follow the connected pad.
+- **The Mapping tab shows what you're pressing.** The firing row lights up, and a new Live column shows the real velocity or CC value that went out — taken from the outgoing MIDI itself, so it cannot disagree with what your DAW receives. The highlight is driven by the physical control rather than the note number, so it stays correct under the shift layer and A/B compare.
+- **Editing a MIDI note in the Mapping table actually saves it.** The cells have been editable since the table was written and nothing listened, so every edit was silently discarded on the next refresh while the controller kept sending the old note.
+- **Press lamps on the MIDI activity panel.** Sixteen per-channel lamps in the panel header — bright for notes, dim for CCs — so you can confirm MIDI is leaving the app without expanding a scrolling text log. They work while the panel is collapsed.
+- **D-pad presses show up in the MIDI activity panel.** They were sending real MIDI while appearing nowhere in the log or console; every other input type reported itself.
+
 ## [2.2.0] - 2026-10-15
 
 **First Windows bug-fix pass — console windows, frozen UI, and wrong controller labels.** Everything below came out of a Windows user's screen recording.
