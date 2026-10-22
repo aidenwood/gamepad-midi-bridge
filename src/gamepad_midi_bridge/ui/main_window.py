@@ -796,6 +796,7 @@ class MainWindow(QMainWindow):
         self._menu_btn.setToolTip("Everything else: Visualise, Templates, "
                                   "Presets, Marketplace, Connectors, "
                                   "Bluetooth, Settings, Help, About")
+        self._menu_btn.set_compact_text("\u2630")
         self._menu_btn.clicked.connect(self._open_menu_dropdown)
 
         self._mode_live_btn = UIButton("LIVE", variant="mode")
@@ -808,18 +809,22 @@ class MainWindow(QMainWindow):
 
         self._nodeview_btn = UIButton("NODE VIEW", variant="header")
         self._nodeview_btn.setToolTip("Open the node graph")
+        self._nodeview_btn.set_compact_text("\u2325")
         self._nodeview_btn.clicked.connect(self._open_node_view)
 
         self._connect_btn = UIButton("CONNECT", variant="header")
         self._connect_btn.setToolTip("Connect or disconnect your controller")
+        self._connect_btn.set_compact_text("\u23fb")
         self._connect_btn.clicked.connect(self._open_connect_dropdown)
 
         self._output_btn = UIButton("OUTPUT", variant="header")
         self._output_btn.setToolTip("Where MIDI is sent")
+        self._output_btn.set_compact_text("\u2192")
         self._output_btn.clicked.connect(self._open_output_dropdown)
 
         self._shell_status_btn = UIButton("STATUS", variant="header")
         self._shell_status_btn.setToolTip("Readiness and diagnostics")
+        self._shell_status_btn.set_compact_text("\u25cf")
         self._shell_status_btn.clicked.connect(self._open_status_dropdown)
 
         # Layout toggles — Split (side panel) + Console (bottom pane).
@@ -1915,7 +1920,7 @@ class MainWindow(QMainWindow):
         # container so every tab keeps working exactly as before — a row of
         # twelve tabs plus a toolbar of toggles was the thing to remove,
         # not the pages themselves.
-        tabs.tabBar().setVisible(False)
+        tabs.set_chrome_visible(False)
         self._help = HelpTab()
         self._help.toggle_bridge_requested.connect(self._toggle_bridge)
         self._help.quit_requested.connect(self._quit_from_tray)

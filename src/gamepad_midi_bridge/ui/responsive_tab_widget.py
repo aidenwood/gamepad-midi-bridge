@@ -48,6 +48,7 @@ class ResponsiveTabWidget(QWidget):
         super().__init__(parent)
         self._threshold = threshold
         self._compact = False  # current mode; set properly in first resizeEvent
+        self._chrome_hidden = False
 
         # --- inner QTabWidget ---
         self._tabs = QTabWidget()
@@ -122,11 +123,30 @@ class ResponsiveTabWidget(QWidget):
         super().resizeEvent(event)
         self._apply_mode(event.size().width())
 
+    def set_chrome_visible(self, visible: bool) -> None:
+        """Show or permanently hide this widget's OWN navigation chrome.
+
+        The shell header owns navigation now, so the tab strip and its
+        compact combo are redundant. They cannot simply be hidden from
+        outside: `_apply_mode` re-asserts tab-bar visibility on every
+        resize, so an external hide gets undone on the next resize event
+        and the two fight each other. One owner, one switch.
+        """
+        self._chrome_hidden = not visible
+        self._tabs.tabBar().setVisible(visible and not self._compact)
+        self._combo.setVisible(visible and self._compact)
+
     def _apply_mode(self, width: int) -> None:
         compact = width < self._threshold
         if compact == self._compact:
             return
         self._compact = compact
+        if getattr(self, "_chrome_hidden", False):
+            # Still track compact state for anything else that reads it,
+            # but leave the chrome alone — the header is doing this job.
+            self._tabs.tabBar().setVisible(False)
+            self._combo.setVisible(False)
+            return
         if compact:
             # Hide the native tab bar; show the combo.
             self._tabs.tabBar().setVisible(False)

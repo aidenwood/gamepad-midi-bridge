@@ -323,6 +323,7 @@ class UIButton(QPushButton):
         self._variant: Variant = variant
         self._size: Size = size
         self._full_text = text
+        self._compact_text = ""
         self._compact = False
         self.setStyleSheet(_build_stylesheet(variant, size))
         if variant == "mode":
@@ -354,6 +355,15 @@ class UIButton(QPushButton):
         if compact:
             if not self.toolTip():
                 self.setToolTip(self._full_text)
-            self.setText("")
+            # Never render an empty button. Until the Phosphor set is
+            # bundled, a glyph stands in for the icon — a blank rectangle
+            # is worse than the label it replaced.
+            self.setText(self._compact_text)
         else:
             self.setText(self._full_text)
+
+    def set_compact_text(self, glyph: str) -> None:
+        """Glyph shown in place of the label at narrow widths."""
+        self._compact_text = glyph
+        if self._compact:
+            self.setText(glyph)
