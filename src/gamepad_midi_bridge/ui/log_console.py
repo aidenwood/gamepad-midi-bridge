@@ -126,6 +126,8 @@ class LogConsole(QWidget):
         outer.setSpacing(0)
         outer.addWidget(self._build_header())
         outer.addWidget(self._build_body(), 1)
+        # Same top-pin as MidiLogPanel — see the note there.
+        outer.addStretch(0)
 
         # Apply initial collapsed state without flashing the body.
         self._apply_collapsed()

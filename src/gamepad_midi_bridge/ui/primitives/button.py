@@ -324,6 +324,7 @@ class UIButton(QPushButton):
         self._size: Size = size
         self._full_text = text
         self._compact_text = ""
+        self._extra_css = ""
         self._compact = False
         self.setStyleSheet(_build_stylesheet(variant, size))
         if variant == "mode":
@@ -344,7 +345,10 @@ class UIButton(QPushButton):
         if variant == self._variant:
             return
         self._variant = variant
-        self.setStyleSheet(_build_stylesheet(variant, self._size))
+        # Re-append whatever the caller added on top, or a variant swap
+        # silently reverts padding/sizing and that button alone grows.
+        self.setStyleSheet(_build_stylesheet(variant, self._size)
+                           + self._extra_css)
 
     def is_compact(self) -> bool:
         return self._compact
@@ -370,6 +374,12 @@ class UIButton(QPushButton):
             self.setText(self._compact_text)
         else:
             self.setText(self._full_text)
+
+    def add_css(self, css: str) -> None:
+        """Append instance styling that survives a variant change."""
+        self._extra_css += css
+        self.setStyleSheet(_build_stylesheet(self._variant, self._size)
+                           + self._extra_css)
 
     def set_compact_text(self, glyph: str) -> None:
         """Glyph shown in place of the label at narrow widths."""

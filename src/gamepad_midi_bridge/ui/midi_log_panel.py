@@ -157,6 +157,11 @@ class MidiLogPanel(QWidget):
         outer.setSpacing(0)
         outer.addWidget(self._build_header())
         outer.addWidget(self._build_body(), 1)
+        # Pin the header to the top. With the body hidden there is nothing
+        # left that can expand, so QVBoxLayout centres the lone header in
+        # whatever height it was given — which side-by-side panels now hit
+        # whenever one is collapsed and its neighbour is open.
+        outer.addStretch(0)
 
         self._apply_collapsed()
 

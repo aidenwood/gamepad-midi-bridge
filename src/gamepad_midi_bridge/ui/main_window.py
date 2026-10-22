@@ -1,6 +1,8 @@
 """Main window — status header + tabbed body. Owns the BridgeController."""
 from __future__ import annotations
 
+import os
+
 import json
 import logging
 import webbrowser
@@ -63,7 +65,7 @@ from .visualise_tab import VisualiseTab
 from .hud_overlay import HudOverlay
 from .responsive_tab_widget import ResponsiveTabWidget
 from .primitives.button import UIButton
-from .icons import load_icon
+from .icons import dot_icon, load_icon
 from .tokens import SHELL_PURPLE, SHELL_TEAL, SHELL_TEAL_FG
 
 
@@ -152,7 +154,13 @@ class MainWindow(QMainWindow):
 
         # Crash recovery: check if app exited cleanly last time
         autobackup.mark_unclean_startup()
-        if not autobackup.was_clean_shutdown() and autobackup.latest_autosave() is not None:
+        # UI smoke runs must never block on a modal. A dialog waiting for a
+        # click is indistinguishable from a hang when nobody is at the
+        # keyboard, and it was hiding the window from every screenshot.
+        _ui_smoke = bool(os.environ.get("GMB_UI_SMOKE"))
+        if (not _ui_smoke
+                and not autobackup.was_clean_shutdown()
+                and autobackup.latest_autosave() is not None):
             # Show recovery dialog
             reply = QMessageBox.question(
                 self,
@@ -843,7 +851,7 @@ class MainWindow(QMainWindow):
         self._connect_btn = UIButton("CONNECT", variant="header")
         self._connect_btn.setToolTip("Connect or disconnect your controller")
         self._connect_btn.set_compact_text("\u23fb")
-        self._connect_btn.setIcon(load_icon("plug"))
+        self._connect_btn.setIcon(load_icon("game-controller"))
         self._connect_btn.clicked.connect(self._open_connect_dropdown)
 
         self._output_btn = UIButton("OUTPUT", variant="header")
@@ -855,7 +863,7 @@ class MainWindow(QMainWindow):
         self._shell_status_btn = UIButton("STATUS", variant="header")
         self._shell_status_btn.setToolTip("Readiness and diagnostics")
         self._shell_status_btn.set_compact_text("\u25cf")
-        self._shell_status_btn.setIcon(load_icon("app-window"))
+        self._shell_status_btn.setIcon(dot_icon())
         self._shell_status_btn.clicked.connect(self._open_status_dropdown)
 
         # Size the header group as one family. The wireframe's actions are
@@ -869,16 +877,21 @@ class MainWindow(QMainWindow):
             _b.setFixedHeight(30)
             _b.setIconSize(_QSize(16, 16))
             _b.setCursor(Qt.PointingHandCursor)
+        from PySide6.QtWidgets import QSizePolicy as _QSP
         for _b in (self._menu_btn, self._nodeview_btn, self._connect_btn,
                    self._output_btn, self._shell_status_btn):
-            _b.setStyleSheet(_b.styleSheet() + """
-                QPushButton { padding: 0px 12px; font-size: 12px; }
-            """)
+            _b.add_css("QPushButton { padding: 0px 12px; font-size: 12px; }")
         for _b in (self._mode_live_btn, self._mode_setup_btn):
             _b.setMinimumWidth(68)
-            _b.setStyleSheet(_b.styleSheet() + """
-                QPushButton { padding: 0px 14px; font-size: 12px; }
-            """)
+            _b.add_css("QPushButton { padding: 0px 14px; font-size: 12px; }")
+        # Header actions must never be squeezed by the stretchy status
+        # column beside them — a clipped "NODE VII" is worse than a
+        # shorter status line.
+        for _b in (self._menu_btn, self._mode_live_btn, self._mode_setup_btn,
+                   self._nodeview_btn, self._connect_btn, self._output_btn,
+                   self._shell_status_btn):
+            _b.setSizePolicy(_QSP.Fixed, _QSP.Fixed)
+            _b.setMinimumWidth(_b.sizeHint().width())
 
         # Layout toggles — Split (side panel) + Console (bottom pane).
         # Click handlers wired in __init__ once dependent widgets exist.
@@ -1176,9 +1189,20 @@ class MainWindow(QMainWindow):
         self._status_row1_layout.addWidget(self._mode_setup_btn)
 
         self._status_row1_layout.addSpacing(14)
+        # Status text gets whatever room is left and elides instead of
+        # clipping mid-word. It also loses its panel background: a filled
+        # box floating in the header is not in the design.
+        self._title_col_widget.setStyleSheet("background: transparent;")
+        self._status_title.setStyleSheet("background: transparent;")
+        self._status_sub.setStyleSheet("background: transparent;")
+        for _l in (self._status_title, self._status_sub):
+            _l.setMinimumWidth(0)
+            _l.setTextInteractionFlags(Qt.NoTextInteraction)
         self._status_row1_layout.addWidget(self._title_col_widget, 1)
-        self._status_row1_layout.addWidget(self._rate_label)
-        self._status_row1_layout.addWidget(self._activity_dot)
+        # Rate + activity dot are bridge telemetry, not header chrome. They
+        # rendered as an empty black box next to the title whenever idle.
+        self._rate_label.setVisible(False)
+        self._activity_dot.setVisible(False)
 
         # Right-hand action group, visually distinct from the mode pair.
         self._status_row1_layout.addWidget(self._nodeview_btn)
@@ -2261,7 +2285,7 @@ class MainWindow(QMainWindow):
         # teal primary button renders an invisible icon, which is exactly
         # how CONNECT ended up looking label-only.
         self._connect_btn.setIcon(load_icon(
-            "plug", SHELL_TEAL_FG if not running else SHELL_TEAL))
+            "game-controller", SHELL_TEAL_FG if not running else SHELL_TEAL))
         if not self._connect_btn.is_compact():
             self._connect_btn.setText("CONNECTED" if running else "CONNECT")
 

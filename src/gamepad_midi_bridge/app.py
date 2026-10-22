@@ -132,6 +132,45 @@ def run(argv: Optional[List[str]] = None) -> int:
         app.installEventFilter(url_filter)
         win._mac_url_filter = url_filter  # keep reference alive
 
+    # ── UI smoke mode ────────────────────────────────────────────────
+    # GMB_UI_SMOKE=<png path> shows the window, waits for layout to
+    # settle, saves a screenshot and quits. Exists because the UI was
+    # being changed blind: every verification went through the user
+    # launching the app and describing what they saw, which is slow and
+    # loses detail. MainWindow starts real timers and threads, so an
+    # offscreen render that never returns is not an option — this quits
+    # itself. See also GMB_UI_SMOKE's dialog suppression in main_window.
+    _smoke_path = os.environ.get("GMB_UI_SMOKE")
+    if _smoke_path:
+        from PySide6.QtCore import QTimer as _QTimer
+
+        def _grab_and_quit() -> None:
+            try:
+                if os.environ.get("GMB_UI_SMOKE_GEOM"):
+                    def _dump(w, depth=0, name=""):
+                        g = w.geometry()
+                        print(f"[geom] {'  '*depth}{name or type(w).__name__} "
+                              f"x={g.x()} y={g.y()} w={g.width()} h={g.height()} "
+                              f"vis={w.isVisible()}")
+                    for attr in ("_body_splitter", "_bottom_splitter",
+                                 "_midi_log_panel", "_log_console"):
+                        obj = getattr(win, attr, None)
+                        if obj is not None:
+                            _dump(obj, 0, attr)
+                            for ch in obj.children():
+                                if hasattr(ch, "geometry") and hasattr(ch, "isVisible"):
+                                    _dump(ch, 1)
+                win.grab().save(_smoke_path)
+                print(f"[ui-smoke] saved {_smoke_path}")
+            except Exception as exc:  # noqa: BLE001 — diagnostics only
+                print(f"[ui-smoke] failed: {exc}")
+            app.quit()
+
+        _QTimer.singleShot(
+            int(os.environ.get("GMB_UI_SMOKE_DELAY_MS", "1800")),
+            _grab_and_quit,
+        )
+
     # Hand control to Qt's event loop.
     run_loop = getattr(app, "exec")
     rc = run_loop()

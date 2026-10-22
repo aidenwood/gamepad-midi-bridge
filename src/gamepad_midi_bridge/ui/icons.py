@@ -64,3 +64,25 @@ def available() -> list:
     if not _ICON_DIR.exists():
         return []
     return sorted(p.stem for p in _ICON_DIR.glob("*.svg"))
+
+
+@lru_cache(maxsize=32)
+def _dot(colour: str, size: int) -> QPixmap:
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.Antialiasing)
+    from PySide6.QtGui import QBrush, QColor
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QBrush(QColor(colour)))
+    inset = size * 0.18
+    painter.drawEllipse(QRectF(inset, inset, size - inset * 2, size - inset * 2))
+    painter.end()
+    return pm
+
+
+def dot_icon(colour: str = "#2DD4BF", size: int = 14) -> QIcon:
+    """A filled dot. STATUS carries one in the wireframe rather than a
+    glyph — its meaning comes from the colour, which comes from real
+    state, never from the artwork."""
+    return QIcon(_dot(colour, size))
