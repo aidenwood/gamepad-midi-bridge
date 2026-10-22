@@ -102,6 +102,11 @@ class BridgeWorker(QObject):
     # --- Live telemetry (throttled to avoid spamming the GUI)
     axis_value = Signal(int, float)                   # axis_idx, -1..1 (post-offset)
     button_state = Signal(int, bool)
+    # Ground truth: the DEVICE index that physically moved, before any
+    # mapping or profile remap. Exists because three separate "which button
+    # is this" bugs were diagnosed by guessing at SDL layout tables, and the
+    # only reliable source is the hardware in front of the user.
+    raw_input = Signal(str, int, float)   # "button"|"axis", device index, value
     hat_state = Signal(str, bool)
 
     # --- V1.1 DualSense extras
@@ -222,6 +227,9 @@ class BridgeWorker(QObject):
         self._telemetry_interval = 1.0 / 30.0
         # Samples the throttle above swallowed, awaiting the next window.
         self._pending_axis: Dict[int, float] = {}
+        self._prev_raw_buttons: Dict[int, bool] = {}
+        self._prev_raw_axes: Dict[int, float] = {}
+        self._last_raw_scan = 0.0
         # Battery + touchpad poll less often — they don't need 100Hz
         self._last_battery_poll: float = 0.0
         self._battery_interval = 5.0
@@ -1471,6 +1479,7 @@ class BridgeWorker(QObject):
                 # Release anything the 30 Hz UI throttle held back, so the
                 # meter can never freeze on a stale full-travel value.
                 self._flush_pending_axes()
+                self._poll_raw_inputs(reader, n_buttons, n_axes)
 
                 # Sleep the remainder of the interval — keeps CPU usage low
                 elapsed = time.perf_counter() - t0
@@ -3382,6 +3391,30 @@ class BridgeWorker(QObject):
             self._pending_axis.pop(idx, None)
         else:
             self._pending_axis[idx] = value
+
+    def _poll_raw_inputs(self, reader, n_buttons: int, n_axes: int) -> None:
+        """Report every DEVICE button/axis that changes, mapped or not.
+
+        `_poll_buttons` only iterates the mapping's own keys (0-10), so a
+        pad that reports its shoulders at index 11+ is invisible to the
+        whole app — no MIDI, no meter, no console. This sees everything.
+
+        Edge-triggered and rate-limited, so an idle pad costs nothing.
+        """
+        now = time.perf_counter()
+        if now - self._last_raw_scan < 0.05:
+            return
+        self._last_raw_scan = now
+        for i in range(min(n_buttons, 32)):
+            pressed = reader.get_raw_button(i)
+            if pressed != self._prev_raw_buttons.get(i, False):
+                self._prev_raw_buttons[i] = pressed
+                self.raw_input.emit("button", i, 1.0 if pressed else 0.0)
+        for i in range(min(n_axes, 12)):
+            val = reader.get_raw_axis(i)
+            if abs(val - self._prev_raw_axes.get(i, 0.0)) > 0.15:
+                self._prev_raw_axes[i] = val
+                self.raw_input.emit("axis", i, val)
 
     def _flush_pending_axes(self) -> None:
         """Emit any sample the throttle swallowed, once its window has passed."""

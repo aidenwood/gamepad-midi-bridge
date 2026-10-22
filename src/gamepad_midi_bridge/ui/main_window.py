@@ -63,6 +63,7 @@ from .visualise_tab import VisualiseTab
 from .hud_overlay import HudOverlay
 from .responsive_tab_widget import ResponsiveTabWidget
 from .primitives.button import UIButton
+from .icons import load_icon
 
 
 from .about_tab import AboutTab
@@ -797,6 +798,7 @@ class MainWindow(QMainWindow):
                                   "Presets, Marketplace, Connectors, "
                                   "Bluetooth, Settings, Help, About")
         self._menu_btn.set_compact_text("\u2630")
+        self._menu_btn.setIcon(load_icon("game-controller"))
         self._menu_btn.clicked.connect(self._open_menu_dropdown)
 
         self._mode_live_btn = UIButton("LIVE", variant="mode")
@@ -810,22 +812,48 @@ class MainWindow(QMainWindow):
         self._nodeview_btn = UIButton("NODE VIEW", variant="header")
         self._nodeview_btn.setToolTip("Open the node graph")
         self._nodeview_btn.set_compact_text("\u2325")
+        self._nodeview_btn.setIcon(load_icon("graph"))
         self._nodeview_btn.clicked.connect(self._open_node_view)
 
         self._connect_btn = UIButton("CONNECT", variant="header")
         self._connect_btn.setToolTip("Connect or disconnect your controller")
         self._connect_btn.set_compact_text("\u23fb")
+        self._connect_btn.setIcon(load_icon("plug"))
         self._connect_btn.clicked.connect(self._open_connect_dropdown)
 
         self._output_btn = UIButton("OUTPUT", variant="header")
         self._output_btn.setToolTip("Where MIDI is sent")
         self._output_btn.set_compact_text("\u2192")
+        self._output_btn.setIcon(load_icon("browsers"))
         self._output_btn.clicked.connect(self._open_output_dropdown)
 
         self._shell_status_btn = UIButton("STATUS", variant="header")
         self._shell_status_btn.setToolTip("Readiness and diagnostics")
         self._shell_status_btn.set_compact_text("\u25cf")
+        self._shell_status_btn.setIcon(load_icon("app-window"))
         self._shell_status_btn.clicked.connect(self._open_status_dropdown)
+
+        # Size the header group as one family. The wireframe's actions are
+        # compact chips, not the tall pills the old Start/Stop pair needed —
+        # and a 64px bar full of 40px buttons is most of the reason the
+        # header read as heavy.
+        from PySide6.QtCore import QSize as _QSize
+        for _b in (self._menu_btn, self._mode_live_btn, self._mode_setup_btn,
+                   self._nodeview_btn, self._connect_btn, self._output_btn,
+                   self._shell_status_btn):
+            _b.setFixedHeight(30)
+            _b.setIconSize(_QSize(16, 16))
+            _b.setCursor(Qt.PointingHandCursor)
+        for _b in (self._menu_btn, self._nodeview_btn, self._connect_btn,
+                   self._output_btn, self._shell_status_btn):
+            _b.setStyleSheet(_b.styleSheet() + """
+                QPushButton { padding: 0px 12px; font-size: 12px; }
+            """)
+        for _b in (self._mode_live_btn, self._mode_setup_btn):
+            _b.setMinimumWidth(68)
+            _b.setStyleSheet(_b.styleSheet() + """
+                QPushButton { padding: 0px 14px; font-size: 12px; }
+            """)
 
         # Layout toggles — Split (side panel) + Console (bottom pane).
         # Click handlers wired in __init__ once dependent widgets exist.
@@ -947,7 +975,7 @@ class MainWindow(QMainWindow):
         return bar
 
     # Status bar mode-switch threshold. Below this, buttons wrap to row 2.
-    _STATUS_BAR_COMPACT_WIDTH = 980
+    _STATUS_BAR_COMPACT_WIDTH = 720
 
     # ── Shell modes + header dropdowns ───────────────────────────────────
     # Every existing tab keeps a reachable home. LIVE and SETUP are the two
@@ -2186,7 +2214,21 @@ class MainWindow(QMainWindow):
             target = 1
         self._sync_live_layout(target if self._stop_btn.isEnabled() else 1)
 
+    def _refresh_connect_affordance(self) -> None:
+        """Make CONNECT read as the primary action while nothing is bridged.
+
+        Start used to be a big teal button in the header. Moving it into
+        this dropdown is right — "connect my controller" is the intent —
+        but a uniform blue header button gives a new user nothing to aim
+        at, so the action that matters right now carries the teal.
+        """
+        running = self._stop_btn.isEnabled()
+        self._connect_btn.set_variant("secondary" if running else "primary")
+        if not self._connect_btn.is_compact():
+            self._connect_btn.setText("CONNECTED" if running else "CONNECT")
+
     def _on_started(self, controller_name: str, port_name: str) -> None:
+        self._refresh_connect_affordance()
         self._status_title.setText("Bridging")
         self._status_sub.setText(f"{controller_name}  →  {port_name}")
         telemetry.send_event("bridge_started",
@@ -2204,6 +2246,7 @@ class MainWindow(QMainWindow):
             self._calibration_dialog = None
 
     def _on_stopped(self) -> None:
+        self._refresh_connect_affordance()
         self._midi_fallback_btn.setVisible(False)
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
@@ -2694,6 +2737,7 @@ class MainWindow(QMainWindow):
                                 f"Couldn't decode preset: {e}")
 
     def _refresh_status_idle(self) -> None:
+        self._refresh_connect_affordance()
         if is_pro():
             self._status_title.setText("Idle · Pro")
         else:

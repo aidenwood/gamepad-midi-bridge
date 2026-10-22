@@ -263,7 +263,9 @@ class _ControllerDiagram(QWidget):
                         by + body_h * 0.34, face_size)
         # Shoulders + triggers — above body. Haptic pulses render as a teal
         # dot beside the L2/R2 fill bar, decaying over HEATMAP_DECAY_S.
-        sh_w = body_w * 0.18; sh_h = 18; tr_h = 28
+        # Triggers get a tall bar: analogue travel is the most
+        # watched readout on the diagram and 28px could not show it.
+        sh_w = body_w * 0.18; sh_h = 18; tr_h = 58
         now = time.perf_counter()
         for x_pct, btn_idx, ax_idx, sh_lbl, tr_lbl, side in (
             (0.10, 4, 4, cl.shoulder_label("L1", self._family),
@@ -285,16 +287,21 @@ class _ControllerDiagram(QWidget):
                     p.drawEllipse(
                         QPointF(sx + sh_w + 6, by - sh_h - tr_h / 2), 5, 5,
                     )
-        # Share / Options pills + PS button under touchpad.
+        # Meta buttons. These were hardcoded SHARE / OPT / PS, so an Xbox
+        # pad showed PlayStation names on the three buttons most likely to
+        # be mistaken for each other in the first place.
         small_y = tp_y + tp_h + 6
-        self._draw_pill(p, bx + body_w * 0.22, small_y, 44, 14,
-                        self._buttons.get(6, False), "SHARE")
-        self._draw_pill(p, bx + body_w * 0.74 - 44, small_y, 44, 14,
-                        self._buttons.get(7, False), "OPT")
+        self._draw_pill(p, bx + body_w * 0.22, small_y, 48, 14,
+                        self._buttons.get(6, False),
+                        cl.button_label(6, self._family).upper())
+        self._draw_pill(p, bx + body_w * 0.74 - 48, small_y, 48, 14,
+                        self._buttons.get(7, False),
+                        cl.button_label(7, self._family).upper())
         ps_size = 18
         self._draw_round(p, bx + (body_w - ps_size) / 2,
                          tp_y + tp_h + 28, ps_size,
-                         self._buttons.get(10, False), "PS")
+                         self._buttons.get(10, False),
+                         "PS" if self._family == cl.PLAYSTATION else "G")
 
     def _draw_stick(self, p, x, y, size, xv, yv, pressed, label) -> None:
         p.setPen(QPen(STICK_BORDER, 1)); p.setBrush(QBrush(STICK_BG))
@@ -580,6 +587,9 @@ class VisualiseTab(QWidget):
         self._stat_reported = self._make_stat(v, "OS reports", "—")
         self._stat_inputs   = self._make_stat(v, "Inputs", "—")
         self._stat_axismap  = self._make_stat(v, "Axis map", "—")
+        # Ground truth for "which button is this". Shows the DEVICE
+        # index that physically moved, before any remap.
+        self._stat_rawinput = self._make_stat(v, "Raw input", "press anything")
         self._stat_transport = self._make_stat(v, "Transport", "—")
         self._stat_battery  = self._make_stat(v, "Battery", "—")
         self._stat_rate     = self._make_stat(v, "MIDI msg/s", "0")
@@ -623,6 +633,8 @@ class VisualiseTab(QWidget):
         worker.midi_sent.connect(self._on_midi_sent)
         worker.midi_message.connect(self._on_midi_message)
         worker.controller_info.connect(self._on_controller_info)
+        if hasattr(worker, 'raw_input'):
+            worker.raw_input.connect(self._on_raw_input)
         worker.started.connect(self._on_started)
         worker.stopped.connect(self._on_stopped)
         # Optional: older worker builds may not expose `haptic_event` yet.
@@ -682,6 +694,26 @@ class VisualiseTab(QWidget):
             # Both were PlayStation-only, so an Xbox pad rendered a touchpad
             # it does not have under Cross/Circle/Square/Triangle glyphs.
             self._apply_family(info.name)
+
+    def _on_raw_input(self, kind: str, index: int, value: float) -> None:
+        """Show the last DEVICE input, with a short history.
+
+        Deliberately raw: the whole point is to answer "what index is this
+        physical control" without the mapping or profile in the way.
+        """
+        if kind == "button":
+            if value <= 0.0:
+                return
+            entry = f"button {index}"
+        else:
+            entry = f"axis {index} {value:+.2f}"
+        hist = getattr(self, "_raw_history", None)
+        if hist is None:
+            hist = self._raw_history = []
+        if not hist or hist[-1] != entry:
+            hist.append(entry)
+            del hist[:-4]
+        self._stat_rawinput.setText("   ".join(hist))
 
     def _apply_family(self, controller_name: str) -> None:
         """Push the connected pad's label family down to both renderers."""

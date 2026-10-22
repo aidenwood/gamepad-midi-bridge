@@ -111,12 +111,29 @@ class ConnectorsTab(QWidget):
         self._scroll.setFrameShape(QFrame.NoFrame)
         outer.addWidget(self._scroll, 1)
 
-        self._rebuild_detected()
+        # Deliberately NOT scanned here. Host detection walks ~/Documents
+        # looking for Resolume, TouchDesigner, VDMX and OBS folders, and on
+        # Windows shells out to PowerShell for Ableton and REAPER. Doing
+        # that in __init__ meant every launch fingerprinted the user's
+        # Documents folder before the window even appeared — which on macOS
+        # raises a TCC permission prompt at startup for a tab most users
+        # never open, and on Windows blocked the GUI thread on two cold
+        # PowerShell starts.
+        #
+        # Scan on first show instead, same gating BluetoothTab already uses.
+        self._scanned = False
         self._rebuild_list()
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt override
+        super().showEvent(event)
+        if not self._scanned:
+            self._scanned = True
+            self._rebuild_detected()
 
     # ---------------------------------------------------------------- public
 
     def refresh(self) -> None:
+        self._scanned = True
         self._rebuild_detected(force=True)
         self._rebuild_list()
         self.status_message.emit("Re-scanned host applications.")

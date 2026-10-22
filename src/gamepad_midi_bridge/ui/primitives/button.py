@@ -337,6 +337,15 @@ class UIButton(QPushButton):
     def variant(self) -> Variant:
         return self._variant
 
+    def set_variant(self, variant: Variant) -> None:
+        """Restyle in place. Used to make a header action read as the
+        primary thing to do right now — CONNECT is the whole job when
+        nothing is connected, and ordinary once it is."""
+        if variant == self._variant:
+            return
+        self._variant = variant
+        self.setStyleSheet(_build_stylesheet(variant, self._size))
+
     def is_compact(self) -> bool:
         return self._compact
 
