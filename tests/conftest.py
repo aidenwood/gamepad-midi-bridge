@@ -56,3 +56,36 @@ def tmp_user_data(tmp_path, monkeypatch):
 def _ensure_dir(p: Path) -> Path:
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+@pytest.fixture(scope="session", autouse=True)
+def qapp():
+    """One QApplication for the whole session, kept alive until the end.
+
+    Widget tests used to each do `QApplication.instance() or QApplication([])`
+    with nothing holding a reference. At interpreter shutdown PySide6 runs
+    `destroyQCoreApplication()` over objects Python had already collected,
+    which segfaults in `~QObject` — every run ended with "QObject: shared
+    QObject was deleted directly. The program is malformed and may crash."
+    and dropped a crash report in ~/Library/Logs/DiagnosticReports.
+
+    The suite still passed, so this was pure noise — but noise that would
+    hide a genuine crash, which is exactly the failure mode that let a
+    crash-on-every-connect ship under 7000 passing tests.
+
+    Session-scoped and autouse so the instance outlives every widget, and
+    offscreen so no window ever appears during a run.
+    """
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError:
+        yield None
+        return
+    app = QApplication.instance() or QApplication([])
+    yield app
+    # Deliberately NOT calling app.quit()/deleteLater(): letting Qt tear the
+    # application down while Python still owns wrapper objects is the crash
+    # this fixture exists to prevent. Holding the reference to process exit
+    # is the documented-safe shape for PySide6 test suites.

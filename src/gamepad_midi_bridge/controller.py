@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from .control_labels import display_name
+from .sdl_profiles import IDENTITY_AXES, IDENTITY_BUTTONS, profile_for
 
 # Headless flag has to be set BEFORE pygame.init() — keeps SDL from probing
 # for a display server (Linux servers / CI / packaged apps).
@@ -38,6 +39,12 @@ class ControllerInfo:
     num_buttons: int
     num_hats: int
     guid: str
+    # Diagnostics, so the UI can show what the app DECIDED rather than
+    # leaving a user to infer it from which control moved the wrong thing.
+    # Defaulted so every existing construction site still works.
+    raw_name: str = ""
+    # Canonical axis -> device axis, as a 6-tuple indexed by canonical.
+    axis_map: tuple = ()
 
 
 class ControllerReader:
@@ -55,6 +62,15 @@ class ControllerReader:
             pygame.joystick.init()
         self._slot_index = max(0, int(slot_index))
         self._joystick: Optional[pygame.joystick.JoystickType] = None
+        # Canonical-index -> device-index remap, resolved per device in
+        # detect(). Identity until then, so a reader that has never detected
+        # behaves exactly as it did before profiles existed.
+        self._axis_map = dict(IDENTITY_AXES)
+        self._button_map = dict(IDENTITY_BUTTONS)
+        self._dpad_buttons: Optional[Tuple[int, int, int, int]] = None
+        # The untouched string SDL handed us, before display_name tidies it.
+        # Shown in the UI so "what does the app think this is" is answerable.
+        self._raw_name = ""
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -84,13 +100,28 @@ class ControllerReader:
         # "Controller" — which then classified as GENERIC and cost Xbox pads
         # their button names too. The real VID:PID is in the GUID.
         guid = js.get_guid()
+        self._raw_name = js.get_name()
+        # Resolve the index remap for THIS device. pygame.joystick returns
+        # raw HID indices, not SDL GameController ones, so the numbers differ
+        # per pad — an Xbox Wireless Controller puts its left trigger on
+        # axis 2, where this app expects right-stick X.
+        self._axis_map, self._button_map, self._dpad_buttons = profile_for(
+            guid, js.get_numhats(), js.get_numbuttons()
+        )
         return ControllerInfo(
-            name=display_name(js.get_name(), guid),
+            name=display_name(self._raw_name, guid),
             num_axes=js.get_numaxes(),
             num_buttons=js.get_numbuttons(),
             num_hats=js.get_numhats(),
             guid=guid,
+            raw_name=self._raw_name,
+            axis_map=tuple(self._axis_map.get(i, i) for i in range(6)),
         )
+
+    @property
+    def raw_name(self) -> str:
+        """SDL's own string for the device, before display_name cleans it up."""
+        return self._raw_name
 
     def is_connected(self) -> bool:
         return self._joystick is not None and pygame.joystick.get_count() > 0
@@ -128,6 +159,20 @@ class ControllerReader:
             pass
 
     def get_axis(self, idx: int) -> float:
+        """Read a CANONICAL axis (0=LX 1=LY 2=RX 3=RY 4=L2 5=R2).
+
+        The device index is looked up per pad — see sdl_profiles. Callers
+        never deal in raw HID indices.
+        """
+        if not self._alive():
+            return 0.0
+        try:
+            return self._joystick.get_axis(self._axis_map.get(idx, idx))
+        except (pygame.error, IndexError):
+            return 0.0
+
+    def get_raw_axis(self, idx: int) -> float:
+        """Read a DEVICE axis with no remapping — diagnostics only."""
         if not self._alive():
             return 0.0
         try:
@@ -136,6 +181,19 @@ class ControllerReader:
             return 0.0
 
     def get_button(self, idx: int) -> bool:
+        """Read a CANONICAL button index. See get_axis."""
+        if not self._alive():
+            return False
+        physical = self._button_map.get(idx, idx)
+        if physical is None:
+            return False
+        try:
+            return bool(self._joystick.get_button(physical))
+        except (pygame.error, IndexError):
+            return False
+
+    def get_raw_button(self, idx: int) -> bool:
+        """Read a DEVICE button with no remapping — diagnostics only."""
         if not self._alive():
             return False
         try:
@@ -147,6 +205,15 @@ class ControllerReader:
         if not self._alive():
             return (0, 0)
         try:
+            # Pads with no hat carry the d-pad on four buttons instead —
+            # without this the d-pad was silently dead on those devices.
+            if self._dpad_buttons is not None:
+                up, down, left, right = self._dpad_buttons
+                x = (1 if self.get_raw_button(right) else 0) \
+                    - (1 if self.get_raw_button(left) else 0)
+                y = (1 if self.get_raw_button(up) else 0) \
+                    - (1 if self.get_raw_button(down) else 0)
+                return (x, y)
             if self._joystick.get_numhats() == 0:
                 return (0, 0)
             return self._joystick.get_hat(idx)

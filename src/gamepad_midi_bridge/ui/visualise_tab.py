@@ -412,7 +412,12 @@ class VisualiseTab(QWidget):
         self._connected_name = "—"
         self._battery_pct = -1
         self._battery_charging = False
-        self._wired = True
+        # None = unknown. This used to default True, and only the
+        # DualSense-specific hidapi path ever set it — so the Transport row
+        # read "USB" for every pad whether or not that was true, including
+        # an Xbox controller on Bluetooth.
+        self._wired = None
+        self._identity = None
         self._runtime_start: Optional[float] = None
 
         # Throughput tracking: counters for tick() — reset every 1s
@@ -566,6 +571,15 @@ class VisualiseTab(QWidget):
         v.setContentsMargins(16, 16, 16, 16); v.setSpacing(10)
         v.addWidget(self._section_title("LIVE STATS"))
         self._stat_name     = self._make_stat(v, "Controller", "—")
+        # What the app actually DECIDED about this pad, shown rather than
+        # assumed. Every label, glyph and default preset keys off the family,
+        # so when something maps wrong this is the first thing to check —
+        # and until now there was nowhere to check it.
+        self._stat_type     = self._make_stat(v, "Type", "—")
+        self._stat_hwid     = self._make_stat(v, "Hardware ID", "—")
+        self._stat_reported = self._make_stat(v, "OS reports", "—")
+        self._stat_inputs   = self._make_stat(v, "Inputs", "—")
+        self._stat_axismap  = self._make_stat(v, "Axis map", "—")
         self._stat_transport = self._make_stat(v, "Transport", "—")
         self._stat_battery  = self._make_stat(v, "Battery", "—")
         self._stat_rate     = self._make_stat(v, "MIDI msg/s", "0")
@@ -660,8 +674,10 @@ class VisualiseTab(QWidget):
         if info is None:
             self._connected_name = "—"; self._diagram.reset()
             self._runtime_start = None
+            self._identity = None
         else:
             self._connected_name = info.name
+            self._identity = info
             # Relabel the diagram + heatmap for whatever just connected.
             # Both were PlayStation-only, so an Xbox pad rendered a touchpad
             # it does not have under Cross/Circle/Square/Triangle glyphs.
@@ -690,6 +706,69 @@ class VisualiseTab(QWidget):
         for spark in self._sparklines.values(): spark.update()
         self._heatmap.update(); self._refresh_stats()
 
+    def _refresh_identity(self) -> None:
+        """Report what the app decided this pad is, and what the OS called it.
+
+        The family drives every button label, face glyph and default preset,
+        and it is derived from a NAME string — which Microsoft sets to the
+        literal word "Controller". When something maps to the wrong place
+        this is the first thing worth looking at, so show it rather than
+        making the user guess.
+        """
+        info = self._identity
+        if info is None:
+            for lbl in (self._stat_type, self._stat_hwid,
+                        self._stat_reported, self._stat_inputs,
+                        self._stat_axismap):
+                lbl.setText("—")
+            return
+
+        family = cl.family_for(info.name)
+        self._stat_type.setText(self._FAMILY_NAMES.get(family, family))
+
+        vid, pid = cl.vid_pid_from_guid(info.guid)
+        self._stat_hwid.setText(
+            f"{vid:04x}:{pid:04x}" if (vid or pid) else "unknown")
+
+        # The raw string SDL/the OS handed us, kept visible because it is what
+        # family_for() actually matches on.
+        raw = getattr(info, "raw_name", None)
+        self._stat_reported.setText(raw if raw else info.name)
+
+        self._stat_inputs.setText(
+            f"{info.num_buttons} buttons · {info.num_axes} axes · "
+            f"{info.num_hats} hat{'s' if info.num_hats != 1 else ''}")
+
+        # Which physical axis each canonical control is reading. This is the
+        # line that answers "why is L2 moving my right stick" outright.
+        amap = getattr(info, "axis_map", ()) or ()
+        if len(amap) >= 6:
+            names = ("LX", "LY", "RX", "RY", "L2", "R2")
+            remapped = any(a != i for i, a in enumerate(amap[:6]))
+            detail = "  ".join(f"{n}→a{a}" for n, a in zip(names, amap))
+            self._stat_axismap.setText(
+                detail + ("" if remapped else "   (direct)"))
+        else:
+            self._stat_axismap.setText("—")
+
+    def _transport_text(self) -> str:
+        """USB vs Bluetooth, from the GUID's bus byte when we have one.
+
+        `_wired` is only ever set by the DualSense-specific hidapi path, and
+        it initialises True — so this used to print "USB" unconditionally for
+        every non-Sony pad, including an Xbox controller on Bluetooth.
+        """
+        info = self._identity
+        if info is not None:
+            bus = cl.bus_from_guid(info.guid)
+            if bus == cl.BUS_USB:
+                return "USB"
+            if bus == cl.BUS_BLUETOOTH:
+                return "Bluetooth"
+        if self._wired is None:
+            return "—"
+        return "USB" if self._wired else "Bluetooth"
+
     def _flush_rate(self) -> None:
         self._stat_rate.setText(str(self._midi_count)); self._midi_count = 0
 
@@ -699,9 +778,17 @@ class VisualiseTab(QWidget):
         self._midi_out_counter = 0
         self._midi_in_counter = 0
 
+    _FAMILY_NAMES = {
+        cl.PLAYSTATION: "PlayStation",
+        cl.XBOX: "Xbox",
+        cl.SWITCH: "Nintendo Switch",
+        cl.GENERIC: "Generic / unrecognised",
+    }
+
     def _refresh_stats(self) -> None:
         self._stat_name.setText(self._connected_name or "—")
-        self._stat_transport.setText("USB" if self._wired else "Bluetooth")
+        self._refresh_identity()
+        self._stat_transport.setText(self._transport_text())
         if self._battery_pct < 0:
             self._stat_battery.setText("—")
         else:
