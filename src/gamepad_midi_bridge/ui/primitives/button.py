@@ -13,12 +13,19 @@ from PySide6.QtWidgets import QPushButton, QWidget
 from gamepad_midi_bridge.ui.tokens import (
     ACCENT_TEAL, ACCENT_TEAL_FG, ACCENT_CORAL, BG_ELEVATED, BG_HOVER,
     BG_PRESSED, BORDER_SUBTLE, FOCUS_RING, TEXT_PRIMARY,
+    SHELL_BLUE, SHELL_TEAL, SHELL_TEAL_FG, SHELL_TEAL_UTIL,
     FW_MED, R_M,
     S_XS, S_S, S_M, S_L,
     FS_S, FS_M, FS_L,
 )
 
-Variant = Literal["primary", "secondary", "ghost", "danger"]
+# The four repeated treatments from the Setup wireframe sit alongside the
+# original four. "mode" and "header" carry labels; the two utilities are
+# icon-only panel-header controls. See UI-HANDOVER.md.
+Variant = Literal[
+    "primary", "secondary", "ghost", "danger",
+    "mode", "header", "utility", "utility_round",
+]
 Size = Literal["s", "m", "l"]
 
 # Padding (v, h) per size
@@ -52,6 +59,10 @@ _TEAL_PRESSED = "#1e9e8e"
 # Coral darkened for hover/pressed
 _CORAL_HOVER   = "#f55f5f"
 _CORAL_PRESSED = "#e84848"
+
+# Shell secondary blue, lifted/darkened for hover/pressed.
+_SHELL_BLUE_HOVER   = "#2a5174"
+_SHELL_BLUE_PRESSED = "#1a3349"
 
 
 def _build_stylesheet(variant: Variant, size: Size) -> str:
@@ -150,6 +161,113 @@ def _build_stylesheet(variant: Variant, size: Size) -> str:
             }}
         """
 
+    elif variant == "mode":
+        # Primary / selected mode from the Setup wireframe: the filled half
+        # of the joined Live|Setup selector. Selection is driven by the Qt
+        # `checked` state, never by comparing label text.
+        base = f"""
+            QPushButton {{
+                background-color: {SHELL_BLUE};
+                color: {TEXT_PRIMARY};
+                border: none;
+                border-radius: {R_M}px;
+                padding: {pv}px {ph}px;
+                min-height: {mh}px;
+                font-size: {fs}px;
+                font-weight: {FW_MED};
+            }}
+            QPushButton:checked {{
+                background-color: {SHELL_TEAL};
+                color: {SHELL_TEAL_FG};
+            }}
+            QPushButton:hover:!checked {{
+                background-color: {_SHELL_BLUE_HOVER};
+            }}
+            QPushButton:checked:hover {{
+                background-color: {_TEAL_HOVER};
+                color: {SHELL_TEAL_FG};
+            }}
+            QPushButton:focus {{
+                outline: none;
+                border: 2px solid {FOCUS_RING};
+            }}
+            QPushButton:disabled {{
+                background-color: {BG_ELEVATED};
+                color: #3a3d46;
+            }}
+        """
+
+    elif variant == "header":
+        # Secondary header action: Menu, Node View, Connect, Output, Status.
+        # Muted blue fill, teal icon, light label. At narrow widths the label
+        # is hidden and the icon remains — a presentation change, not a
+        # different component, so the action and state are untouched.
+        base = f"""
+            QPushButton {{
+                background-color: {SHELL_BLUE};
+                color: {TEXT_PRIMARY};
+                border: none;
+                border-radius: {R_M}px;
+                padding: {pv}px {ph}px;
+                min-height: {mh}px;
+                font-size: {fs}px;
+                font-weight: {FW_MED};
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: {_SHELL_BLUE_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {_SHELL_BLUE_PRESSED};
+            }}
+            QPushButton:focus {{
+                outline: none;
+                border: 2px solid {FOCUS_RING};
+            }}
+            QPushButton:disabled {{
+                background-color: {BG_ELEVATED};
+                color: #3a3d46;
+            }}
+        """
+
+    elif variant in ("utility", "utility_round"):
+        # The two panel-header utilities on MIDI / Console. Dark teal; the
+        # round one is a circle. What the rectangular one DOES is not
+        # established by the wireframe, so this is styling only — don't
+        # invent its action.
+        # A true circle needs the radius to track the widget's own height.
+        # min-height is the floor, not the final size, so callers that fix a
+        # square size get a circle and the rest degrade to a pill rather
+        # than a rounded rectangle that reads as the other utility.
+        radius = "999px" if variant == "utility_round" else f"{R_M}px"
+        base = f"""
+            QPushButton {{
+                background-color: {SHELL_TEAL_UTIL};
+                color: {SHELL_TEAL_FG};
+                border: none;
+                border-radius: {radius};
+                padding: 0px;
+                min-height: {mh}px;
+                min-width: {mh}px;
+                font-size: {fs}px;
+                font-weight: {FW_MED};
+            }}
+            QPushButton:hover {{
+                background-color: {_TEAL_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {_TEAL_PRESSED};
+            }}
+            QPushButton:focus {{
+                outline: none;
+                border: 2px solid {FOCUS_RING};
+            }}
+            QPushButton:disabled {{
+                background-color: {BG_ELEVATED};
+                color: #3a3d46;
+            }}
+        """
+
     else:  # danger
         base = f"""
             QPushButton {{
@@ -202,4 +320,40 @@ class UIButton(QPushButton):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(text, parent)
+        self._variant: Variant = variant
+        self._size: Size = size
+        self._full_text = text
+        self._compact = False
         self.setStyleSheet(_build_stylesheet(variant, size))
+        if variant == "mode":
+            self.setCheckable(True)
+        if text:
+            # Icon-only presentation drops the visible label, so the
+            # accessible name has to live somewhere that survives it.
+            self.setAccessibleName(text)
+
+    @property
+    def variant(self) -> Variant:
+        return self._variant
+
+    def is_compact(self) -> bool:
+        return self._compact
+
+    def set_compact(self, compact: bool) -> None:
+        """Hide or restore the visible label, keeping the icon and action.
+
+        Narrow windows change the PRESENTATION of a header action, never the
+        command or its state — so this touches the label and nothing else.
+        The accessible name and tooltip keep the control reachable and
+        identifiable once the text is gone.
+        """
+        compact = bool(compact)
+        if compact == self._compact:
+            return
+        self._compact = compact
+        if compact:
+            if not self.toolTip():
+                self.setToolTip(self._full_text)
+            self.setText("")
+        else:
+            self.setText(self._full_text)
