@@ -62,6 +62,7 @@ from .tray import TrayController, is_available as tray_available
 from .visualise_tab import VisualiseTab
 from .hud_overlay import HudOverlay
 from .responsive_tab_widget import ResponsiveTabWidget
+from .primitives.button import UIButton
 
 
 from .about_tab import AboutTab
@@ -446,6 +447,10 @@ class MainWindow(QMainWindow):
         self._wire_signals()
         self._refresh_status_idle()
 
+        # Land in LIVE. A user opening the app wants to see their controller
+        # working before they are asked to configure anything.
+        self.set_mode("live")
+
         # Background update check. Silent on failure or opt-out.
         self._updater = UpdateChecker(self)
         self._updater.update_available.connect(self._on_update_available)
@@ -461,6 +466,13 @@ class MainWindow(QMainWindow):
         palette_sc = QShortcut(QKeySequence("Ctrl+K"), self)
         palette_sc.setContext(Qt.ApplicationShortcut)
         palette_sc.activated.connect(self._open_command_palette)
+
+        # Tab — switch Live <-> Setup. Aiden asked for Tab specifically; do
+        # not quietly substitute Ctrl+Tab. Scoped to the window rather than
+        # the application so a text field still gets its own Tab for focus.
+        mode_sc = QShortcut(QKeySequence("Tab"), self)
+        mode_sc.setContext(Qt.WindowShortcut)
+        mode_sc.activated.connect(self._toggle_mode)
 
         # Ctrl+Shift+P — panic (all notes off).
         panic_sc = QShortcut(QKeySequence("Ctrl+Shift+P"), self)
@@ -771,6 +783,45 @@ class MainWindow(QMainWindow):
         # Styled via QPushButton#PanicButton in styles.qss.
         self._panic_btn.clicked.connect(self._on_panic)
 
+        # ── Shell header (2026-10 UI direction, UI-HANDOVER.md) ──────────
+        # MENU · LIVE|SETUP · NODE VIEW · CONNECT · OUTPUT · STATUS.
+        #
+        # Start / Stop / PANIC are deliberately NOT in the header any more:
+        # Aiden identified that trio as the confusing part. They move inside
+        # the Connect dropdown, where "connect my controller" is the user's
+        # actual intent and start/stop is the implementation of it. The
+        # buttons themselves are kept alive and still own the bridge
+        # lifecycle, so every existing shortcut and state rule is untouched.
+        self._menu_btn = UIButton("MENU", variant="header")
+        self._menu_btn.setToolTip("Everything else: Visualise, Templates, "
+                                  "Presets, Marketplace, Connectors, "
+                                  "Bluetooth, Settings, Help, About")
+        self._menu_btn.clicked.connect(self._open_menu_dropdown)
+
+        self._mode_live_btn = UIButton("LIVE", variant="mode")
+        self._mode_live_btn.setToolTip("Perform — watch the controller and "
+                                       "the MIDI it is sending")
+        self._mode_setup_btn = UIButton("SETUP", variant="mode")
+        self._mode_setup_btn.setToolTip("Assign — map controls to notes and CCs")
+        self._mode_live_btn.clicked.connect(lambda: self.set_mode("live"))
+        self._mode_setup_btn.clicked.connect(lambda: self.set_mode("setup"))
+
+        self._nodeview_btn = UIButton("NODE VIEW", variant="header")
+        self._nodeview_btn.setToolTip("Open the node graph")
+        self._nodeview_btn.clicked.connect(self._open_node_view)
+
+        self._connect_btn = UIButton("CONNECT", variant="header")
+        self._connect_btn.setToolTip("Connect or disconnect your controller")
+        self._connect_btn.clicked.connect(self._open_connect_dropdown)
+
+        self._output_btn = UIButton("OUTPUT", variant="header")
+        self._output_btn.setToolTip("Where MIDI is sent")
+        self._output_btn.clicked.connect(self._open_output_dropdown)
+
+        self._shell_status_btn = UIButton("STATUS", variant="header")
+        self._shell_status_btn.setToolTip("Readiness and diagnostics")
+        self._shell_status_btn.clicked.connect(self._open_status_dropdown)
+
         # Layout toggles — Split (side panel) + Console (bottom pane).
         # Click handlers wired in __init__ once dependent widgets exist.
         self._status_divider1 = QFrame()
@@ -893,6 +944,145 @@ class MainWindow(QMainWindow):
     # Status bar mode-switch threshold. Below this, buttons wrap to row 2.
     _STATUS_BAR_COMPACT_WIDTH = 980
 
+    # ── Shell modes + header dropdowns ───────────────────────────────────
+    # Every existing tab keeps a reachable home. LIVE and SETUP are the two
+    # modes a user is actually in; NODE VIEW is a header destination, not a
+    # third mode; the remaining nine sit behind MENU. This is the explicit
+    # destination inventory the handover asks for.
+    _MODE_TABS = {"live": "Live", "setup": "Mapping"}
+    _MENU_TABS = ("Visualise", "Templates", "Presets", "Marketplace",
+                  "Connectors", "Bluetooth", "Settings", "Help", "About")
+
+    def _tab_index(self, title: str) -> int:
+        tabs = getattr(self, "_tabs_ref", None)
+        if tabs is None:
+            return -1
+        for i in range(tabs.count()):
+            if tabs.tabText(i) == title:
+                return i
+        return -1
+
+    def _show_tab(self, title: str) -> None:
+        idx = self._tab_index(title)
+        if idx >= 0:
+            self._tabs_ref.setCurrentIndex(idx)
+
+    def set_mode(self, mode: str) -> None:
+        """Switch between the two primary modes.
+
+        Switching mode must never restart the bridge, reset a mapping or
+        discard an edit — it only changes which surface is in front.
+        """
+        if mode not in self._MODE_TABS:
+            return
+        self._mode = mode
+        self._mode_live_btn.setChecked(mode == "live")
+        self._mode_setup_btn.setChecked(mode == "setup")
+        self._show_tab(self._MODE_TABS[mode])
+
+    def _toggle_mode(self) -> None:
+        self.set_mode("setup" if getattr(self, "_mode", "live") == "live"
+                      else "live")
+
+    def _open_node_view(self) -> None:
+        self._show_tab("Nodes")
+
+    def _popup(self, menu, button) -> None:
+        """Show an anchored dropdown under its header trigger.
+
+        Held on self so Python cannot collect the menu while it is open, and
+        popped rather than run modally — dismissing a dropdown must never
+        disconnect a controller or cancel an operation in flight.
+        """
+        self._open_dropdown = menu
+        menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _open_menu_dropdown(self) -> None:
+        """Everything that is not a mode or a header action."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        for title in self._MENU_TABS:
+            if self._tab_index(title) >= 0:
+                menu.addAction(title, lambda t=title: self._show_tab(t))
+        menu.addSeparator()
+        # The old toolbar toggles. They are still real controls with real
+        # state — the menu drives the same buttons rather than duplicating
+        # their logic, so checked state and handlers stay in one place.
+        for btn, label in (
+            (getattr(self, "_split_btn", None), "Split view"),
+            (getattr(self, "_console_btn", None), "Console panel"),
+            (getattr(self, "_midi_log_btn", None), "MIDI activity panel"),
+            (getattr(self, "_inspect_btn", None), "Inspector"),
+            (getattr(self, "_learn_btn", None), "Learn mode"),
+            (getattr(self, "_3d_btn", None), "3D background"),
+            (getattr(self, "_record_btn", None), "Record"),
+        ):
+            if btn is None:
+                continue
+            act = menu.addAction(label, btn.click)
+            act.setCheckable(btn.isCheckable())
+            act.setChecked(btn.isChecked())
+            act.setEnabled(btn.isEnabled())
+        menu.addSeparator()
+        menu.addAction("Smaller text",
+                       lambda: self._adjust_font_scale(-self._FONT_SCALE_STEP))
+        menu.addAction("Larger text",
+                       lambda: self._adjust_font_scale(self._FONT_SCALE_STEP))
+        self._popup(menu, self._menu_btn)
+
+    def _open_connect_dropdown(self) -> None:
+        """Connect is the ACTION. Start/Stop/PANIC live here.
+
+        The bridge lifecycle is unchanged — these entries drive the very
+        same buttons, so note-off and disconnect cleanup still run exactly
+        as before.
+        """
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        running = self._stop_btn.isEnabled()
+        connect = menu.addAction(
+            "Connected" if running else "Connect controller",
+            self._start_btn.click)
+        connect.setEnabled(not running)
+        menu.addAction("Disconnect", self._stop_btn.click).setEnabled(running)
+        menu.addSeparator()
+        panic = menu.addAction("Send all notes off (panic)",
+                               self._panic_btn.click)
+        panic.setEnabled(self._panic_btn.isEnabled())
+        menu.addSeparator()
+        menu.addAction(self._status_sub.text()).setEnabled(False)
+        self._popup(menu, self._connect_btn)
+
+    def _open_output_dropdown(self) -> None:
+        """Where MIDI goes. Owns routing; other headers must not duplicate it."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        port = getattr(self, "_current_port_name", None) or "—"
+        menu.addAction(f"Port: {port}").setEnabled(False)
+        menu.addSeparator()
+        if self._tab_index("Connectors") >= 0:
+            menu.addAction("Connectors…", lambda: self._show_tab("Connectors"))
+        if self._tab_index("Settings") >= 0:
+            menu.addAction("Output settings…",
+                           lambda: self._show_tab("Settings"))
+        self._popup(menu, self._output_btn)
+
+    def _open_status_dropdown(self) -> None:
+        """Status is FEEDBACK. It reports, it does not act.
+
+        A pad being attached, a MIDI port being open, and a DAW receiving a
+        mapped message are three different facts. Only claim what is known.
+        """
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.addAction(self._status_title.text()).setEnabled(False)
+        menu.addAction(self._status_sub.text()).setEnabled(False)
+        menu.addSeparator()
+        running = self._stop_btn.isEnabled()
+        menu.addAction(
+            "Bridge running" if running else "Bridge idle").setEnabled(False)
+        self._popup(menu, self._shell_status_btn)
+
     def _arrange_status_bar(self, width: int) -> None:
         """Switch the status bar between single-row (wide) and two-row
         (narrow) layouts so buttons never overflow off-screen."""
@@ -912,57 +1102,39 @@ class MainWindow(QMainWindow):
                 if w is not None:
                     w.setParent(None)
 
-        if compact:
-            # Row 1: status + activity + start/stop/panic
-            self._status_row1_layout.addWidget(self._title_col_widget, 1)
-            self._status_row1_layout.addWidget(self._rate_label)
-            self._status_row1_layout.addWidget(self._activity_dot)
-            self._status_row1_layout.addWidget(self._start_btn)
-            self._status_row1_layout.addWidget(self._stop_btn)
-            self._status_row1_layout.addWidget(self._panic_btn)
-            # Row 2: toggles + record (right-aligned)
-            self._status_row2_layout.addStretch(1)
-            self._status_row2_layout.addWidget(self._split_btn)
-            self._status_row2_layout.addWidget(self._console_btn)
-            self._status_row2_layout.addWidget(self._midi_log_btn)
-            self._status_row2_layout.addWidget(self._inspect_btn)
-            self._status_row2_layout.addWidget(self._learn_btn)
-            self._status_row2_layout.addWidget(self._3d_btn)
-            self._status_row2_layout.addWidget(self._font_smaller_btn)
-            self._status_row2_layout.addWidget(self._font_larger_btn)
-            self._status_row2_layout.addWidget(self._status_divider2)
-            self._status_row2_layout.addWidget(self._record_btn)
-            self._status_row2_layout.addWidget(self._update_btn)
-            self._status_row2_layout.addWidget(self._midi_fallback_btn)
-            self._status_row2_widget.setVisible(True)
-            # Hide divider1 — it separated start/panic from toggles in wide
-            # mode; in compact mode the row break is the separator.
-            self._status_divider1.setVisible(False)
-            self._status_bar.setFixedHeight(100)
-        else:
-            # Everything in row 1
-            self._status_row1_layout.addWidget(self._title_col_widget, 1)
-            self._status_row1_layout.addWidget(self._rate_label)
-            self._status_row1_layout.addWidget(self._activity_dot)
-            self._status_row1_layout.addWidget(self._start_btn)
-            self._status_row1_layout.addWidget(self._stop_btn)
-            self._status_row1_layout.addWidget(self._panic_btn)
-            self._status_divider1.setVisible(True)
-            self._status_row1_layout.addWidget(self._status_divider1)
-            self._status_row1_layout.addWidget(self._split_btn)
-            self._status_row1_layout.addWidget(self._console_btn)
-            self._status_row1_layout.addWidget(self._midi_log_btn)
-            self._status_row1_layout.addWidget(self._inspect_btn)
-            self._status_row1_layout.addWidget(self._learn_btn)
-            self._status_row1_layout.addWidget(self._3d_btn)
-            self._status_row1_layout.addWidget(self._font_smaller_btn)
-            self._status_row1_layout.addWidget(self._font_larger_btn)
-            self._status_row1_layout.addWidget(self._status_divider2)
-            self._status_row1_layout.addWidget(self._record_btn)
-            self._status_row1_layout.addWidget(self._update_btn)
-            self._status_row1_layout.addWidget(self._midi_fallback_btn)
-            self._status_row2_widget.setVisible(False)
-            self._status_bar.setFixedHeight(64)
+        # One header shape, two presentations. Narrow drops the labels and
+        # keeps the icons — the commands and their states never change.
+        # Everything that used to live out here now has a home behind MENU,
+        # CONNECT, OUTPUT or STATUS; nothing was removed.
+        for btn in (self._menu_btn, self._nodeview_btn, self._connect_btn,
+                    self._output_btn, self._shell_status_btn):
+            btn.set_compact(compact)
+
+        self._status_row1_layout.addWidget(self._menu_btn)
+        self._status_row1_layout.addSpacing(10)
+
+        # Joined, mutually exclusive mode pair, left of centre.
+        self._status_row1_layout.addWidget(self._mode_live_btn)
+        self._status_row1_layout.addWidget(self._mode_setup_btn)
+
+        self._status_row1_layout.addSpacing(14)
+        self._status_row1_layout.addWidget(self._title_col_widget, 1)
+        self._status_row1_layout.addWidget(self._rate_label)
+        self._status_row1_layout.addWidget(self._activity_dot)
+
+        # Right-hand action group, visually distinct from the mode pair.
+        self._status_row1_layout.addWidget(self._nodeview_btn)
+        self._status_row1_layout.addWidget(self._connect_btn)
+        self._status_row1_layout.addWidget(self._output_btn)
+        self._status_row1_layout.addWidget(self._shell_status_btn)
+        # Kept visible because it is an alert, not a routine control.
+        self._status_row1_layout.addWidget(self._midi_fallback_btn)
+        self._status_row1_layout.addWidget(self._update_btn)
+
+        self._status_divider1.setVisible(False)
+        self._status_row2_widget.setVisible(False)
+        self._status_bar.setFixedHeight(56 if compact else 64)
+        self._title_col_widget.setVisible(not compact)
 
     # Font-scale clamp + step. Lets users size the UI for their resolution.
     _FONT_SCALE_MIN = 0.80
@@ -1737,6 +1909,13 @@ class MainWindow(QMainWindow):
         # Help tab — owns its own QShortcut instances and signals them back
         # up so MainWindow keeps a single source of truth for app actions.
         self._tabs_ref = tabs
+        # The tab STRIP is hidden, not the tabs. Navigation now runs through
+        # the header: LIVE / SETUP for the two modes, NODE VIEW for the
+        # graph, MENU for the other nine. The widget stays as the page
+        # container so every tab keeps working exactly as before — a row of
+        # twelve tabs plus a toolbar of toggles was the thing to remove,
+        # not the pages themselves.
+        tabs.tabBar().setVisible(False)
         self._help = HelpTab()
         self._help.toggle_bridge_requested.connect(self._toggle_bridge)
         self._help.quit_requested.connect(self._quit_from_tray)
