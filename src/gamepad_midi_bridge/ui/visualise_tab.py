@@ -1,6 +1,6 @@
 """Visualise tab — richer post-setup live view with sub-tabs.
 
-Live: DualSense diagram + stats (battery/transport/rate/latency/runtime).
+Live: controller diagram + stats (battery/transport/rate/latency/runtime).
 Scope: Per-axis oscilloscope traces (5s history).
 Throughput: MIDI throughput graph + sparkline history.
 Heatmap: Button activity + session usage heatmap.
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget, QScrollArea, QTabWidget,
 )
 
+from .. import control_labels as cl
 from .axis_scope import AxisScope
 from .usage_heatmap import UsageHeatmap
 
@@ -53,12 +54,18 @@ SPARK_AXES: List[Tuple[int, str]] = [
 
 # Heatmap cells. Buttons 0..10 mirror mapping.py defaults; d-pad uses the
 # direction strings emitted by BridgeWorker.hat_state.
-BUTTON_CELLS: List[Tuple[str, object]] = [
-    ("Cross", 0), ("Circle", 1), ("Square", 2), ("Triangle", 3), ("L1", 4),
-    ("R1", 5), ("Share", 6), ("Options", 7), ("L3", 8), ("R3", 9),
-    ("PS", 10), ("D-Up", "up"), ("D-Down", "down"), ("D-Left", "left"),
-    ("D-Right", "right"),
-]
+#
+# Built per family rather than hardcoded. This list used to be PlayStation
+# only, so an Xbox user saw Cross / Circle / Square / Triangle / Share /
+# Options / PS here while the Live tab — which does go through
+# control_labels — showed A / B / X / Y for the same pad in the same session.
+def button_cells(family: str = cl.PLAYSTATION) -> List[Tuple[str, object]]:
+    cells: List[Tuple[str, object]] = [
+        (cl.button_label(i, family), i) for i in range(11)
+    ]
+    cells += [(cl.DPAD_LABELS[d], d)
+              for d in ("up", "down", "left", "right")]
+    return cells
 
 
 def _font(size: int, bold: bool = False) -> QFont:
@@ -125,20 +132,31 @@ class _Heatmap(QWidget):
         self._held: Dict[object, bool] = {}
         self.setMinimumHeight(60)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._family = cl.PLAYSTATION
+        self._cells = button_cells(self._family)
 
     def flash(self, key: object, pressed: bool) -> None:
         # Stamp every state change so a quick tap still leaves a trail.
         self._held[key] = pressed; self._stamps[key] = time.perf_counter()
 
+    def set_family(self, family: str) -> None:
+        """Relabel for the connected pad. Keys are indices and direction
+        strings, so held/decaying state survives the swap."""
+        if family == getattr(self, "_family", None):
+            return
+        self._family = family
+        self._cells = button_cells(family)
+        self.update()
+
     def paintEvent(self, _event) -> None:
         p = QPainter(self); p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        # 3 rows x 5 cols = 15 cells, exactly matches BUTTON_CELLS length.
+        # 3 rows x 5 cols = 15 cells, exactly matches the cell list length.
         cols, rows, margin, gap = 5, 3, 6, 6
         cw = (w - margin * 2 - gap * (cols - 1)) / cols
         ch = (h - margin * 2 - gap * (rows - 1)) / rows
         now = time.perf_counter()
-        for i, (label, key) in enumerate(BUTTON_CELLS):
+        for i, (label, key) in enumerate(self._cells):
             r, c = divmod(i, cols)
             rect = QRectF(margin + c * (cw + gap), margin + r * (ch + gap), cw, ch)
             if self._held.get(key):
@@ -161,9 +179,15 @@ class _Heatmap(QWidget):
         )
 
 
-class _DualSenseDiagram(QWidget):
-    """Big DualSense silhouette with live state. Pure QPainter — proportions
-    hand-tuned to read as a DualSense rather than a generic gamepad."""
+class _ControllerDiagram(QWidget):
+    """Big pad silhouette with live state. Pure QPainter — proportions
+    hand-tuned to read as a real controller rather than a generic box.
+
+    Face-button glyphs, shoulder/trigger names and the touchpad come from
+    ``control_labels`` and follow the connected pad. Was DualSense-only, so
+    an Xbox user got a touchpad their hardware doesn't have and PlayStation
+    glyphs on every face button.
+    """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -173,6 +197,13 @@ class _DualSenseDiagram(QWidget):
         self._touch_contact = False
         self._touch_x = 0.5
         self._touch_y = 0.5
+        self._family = cl.PLAYSTATION
+
+    def set_family(self, family: str) -> None:
+        if family == self._family:
+            return
+        self._family = family
+        self.update()
         # Haptic pulse markers — perf-counter timestamp per side ("L"/"R").
         # Diagram repaints fade the marker over `HEATMAP_DECAY_S` so users
         # see a brief teal dot next to each trigger when MIDI fires haptics.
@@ -208,10 +239,13 @@ class _DualSenseDiagram(QWidget):
         bar_w = body_w * 0.18
         p.setPen(Qt.NoPen); p.setBrush(QBrush(QColor("#1c2530")))
         p.drawRoundedRect(QRectF(bx + (body_w - bar_w) / 2, by + 6, bar_w, 4), 2, 2)
-        # Touchpad — broad rect, centred top.
+        # Touchpad — broad rect, centred top. PlayStation only; drawing a
+        # dead one on an Xbox pad is the kind of thing that makes a user
+        # distrust the whole readout.
         tp_w = body_w * 0.34; tp_h = body_h * 0.32
         tp_x = bx + (body_w - tp_w) / 2; tp_y = by + 22
-        self._draw_touchpad(p, tp_x, tp_y, tp_w, tp_h)
+        if cl.has_touchpad(self._family):
+            self._draw_touchpad(p, tp_x, tp_y, tp_w, tp_h)
         # Sticks — bottom row. L3=btn8, R3=btn9 light up when pressed.
         stick_size = body_h * 0.34
         stick_y = by + body_h - stick_size - 30
@@ -232,8 +266,10 @@ class _DualSenseDiagram(QWidget):
         sh_w = body_w * 0.18; sh_h = 18; tr_h = 28
         now = time.perf_counter()
         for x_pct, btn_idx, ax_idx, sh_lbl, tr_lbl, side in (
-            (0.10, 4, 4, "L1", "L2", "L"),
-            (0.72, 5, 5, "R1", "R2", "R"),
+            (0.10, 4, 4, cl.shoulder_label("L1", self._family),
+             cl.trigger_label("L2", self._family), "L"),
+            (0.72, 5, 5, cl.shoulder_label("R1", self._family),
+             cl.trigger_label("R2", self._family), "R"),
         ):
             sx = bx + body_w * x_pct
             self._draw_shoulder(p, sx, by - sh_h + 4, sh_w, sh_h,
@@ -286,14 +322,19 @@ class _DualSenseDiagram(QWidget):
                          BUTTON_ON if self._hats.get(direction) else BUTTON_OFF)
 
     def _draw_face(self, p, x, y, size) -> None:
-        # Diamond: triangle/circle/cross/square.
+        # Diamond, positioned by physical place on the pad: top / right /
+        # bottom / left. The GLYPH follows the family — PlayStation gets
+        # △○✕□, Xbox gets Y/B/A/X — but the index at each position does not
+        # change, because SDL reports the same index for the same physical
+        # button on both.
         r = size / 6
-        for idx, (cx, cy), glyph in (
-            (3, (x + size / 2, y), "△"),
-            (1, (x + size, y + size / 2), "○"),
-            (0, (x + size / 2, y + size), "✕"),
-            (2, (x, y + size / 2), "□"),
+        for idx, (cx, cy) in (
+            (3, (x + size / 2, y)),
+            (1, (x + size, y + size / 2)),
+            (0, (x + size / 2, y + size)),
+            (2, (x, y + size / 2)),
         ):
+            glyph = cl.button_glyph(idx, self._family)
             pressed = self._buttons.get(idx, False)
             p.setPen(QPen(STICK_BORDER, 1))
             p.setBrush(QBrush(BUTTON_ON if pressed else BUTTON_OFF))
@@ -424,7 +465,7 @@ class VisualiseTab(QWidget):
         live_layout.setContentsMargins(20, 20, 20, 20); live_layout.setSpacing(14)
 
         top = QHBoxLayout(); top.setSpacing(14)
-        self._diagram = _DualSenseDiagram()
+        self._diagram = _ControllerDiagram()
         top.addWidget(self._diagram, 3)
         top.addWidget(self._build_stats_panel(), 1)
         live_layout.addLayout(top)
@@ -621,10 +662,23 @@ class VisualiseTab(QWidget):
             self._runtime_start = None
         else:
             self._connected_name = info.name
+            # Relabel the diagram + heatmap for whatever just connected.
+            # Both were PlayStation-only, so an Xbox pad rendered a touchpad
+            # it does not have under Cross/Circle/Square/Triangle glyphs.
+            self._apply_family(info.name)
+
+    def _apply_family(self, controller_name: str) -> None:
+        """Push the connected pad's label family down to both renderers."""
+        family = cl.family_for(controller_name)
+        self._diagram.set_family(family)
+        self._heatmap.set_family(family)
 
     def _on_started(self, controller_name: str, _port_name: str) -> None:
         self._connected_name = controller_name
         self._runtime_start = time.perf_counter()
+        # `started` can arrive without a preceding controller_info, so relabel
+        # here too rather than trusting one of the two paths.
+        self._apply_family(controller_name)
 
     def _on_stopped(self) -> None:
         self._runtime_start = None; self._diagram.reset()

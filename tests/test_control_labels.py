@@ -215,3 +215,41 @@ class TestGuidIdentity:
         logitech = "03000000" + "6d04" + "0000" + "1dc2" + "000000006800"
         assert cl.display_name("Controller", logitech) == \
             "Unknown Controller (046d:c21d)"
+
+
+@pytest.mark.skipif("not _has_qapp()", reason="Qt not available")
+class TestVisualiseTabAdaptsToController:
+    """The Visualise tab was PlayStation-only while the Live tab wasn't, so
+    one session showed A/B/X/Y and Cross/Circle/Square/Triangle for the same
+    pad on two different tabs."""
+
+    def test_heatmap_cells_follow_the_family(self):
+        from gamepad_midi_bridge.ui.visualise_tab import button_cells
+        xbox = dict((label, key) for label, key in button_cells(cl.XBOX))
+        assert "A" in xbox and "B" in xbox and "X" in xbox and "Y" in xbox
+        assert "Cross" not in xbox and "Triangle" not in xbox
+
+    def test_playstation_cells_are_unchanged(self):
+        from gamepad_midi_bridge.ui.visualise_tab import button_cells
+        ps = dict((label, key) for label, key in button_cells(cl.PLAYSTATION))
+        assert ps["Cross"] == 0 and ps["Triangle"] == 3
+
+    def test_dpad_cells_are_present_for_every_family(self):
+        from gamepad_midi_bridge.ui.visualise_tab import button_cells
+        for family in (cl.PLAYSTATION, cl.XBOX, cl.SWITCH, cl.GENERIC):
+            keys = [key for _label, key in button_cells(family)]
+            for d in ("up", "down", "left", "right"):
+                assert d in keys, f"{family} lost the {d} d-pad cell"
+
+    def test_cell_count_still_fits_the_three_by_five_grid(self):
+        """paintEvent lays out exactly 15 cells."""
+        from gamepad_midi_bridge.ui.visualise_tab import button_cells
+        for family in (cl.PLAYSTATION, cl.XBOX, cl.SWITCH, cl.GENERIC):
+            assert len(button_cells(family)) == 15
+
+    def test_face_glyphs_differ_between_xbox_and_playstation(self):
+        assert cl.button_glyph(0, cl.XBOX) != cl.button_glyph(0, cl.PLAYSTATION)
+
+    def test_only_playstation_draws_a_touchpad(self):
+        assert cl.has_touchpad(cl.PLAYSTATION) is True
+        assert cl.has_touchpad(cl.XBOX) is False
