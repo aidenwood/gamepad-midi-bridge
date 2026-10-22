@@ -21,6 +21,7 @@ SRC = ROOT / "src" / "gamepad_midi_bridge"
 # script, so we point it at a tiny wrapper that imports the package properly.
 ENTRY = ROOT / "scripts" / "app_entry.py"
 RESOURCES = SRC / "resources"
+CONNECTOR_TEMPLATES = SRC / "connectors" / "templates"
 QSS = SRC / "ui" / "styles.qss"
 APP_NAME = "Universal Controller MIDI"
 APP_ID = "design.aidxn.gamepad-midi-bridge"
@@ -79,6 +80,14 @@ def build() -> None:
 
     if RESOURCES.exists() and any(RESOURCES.iterdir()):
         args += ["--add-data", datafile(RESOURCES, "gamepad_midi_bridge/resources")]
+
+    # Host exports and connector installation read these files relative to
+    # their Python modules. PyInstaller does not collect package data from an
+    # editable install automatically, so ship the full template tree.
+    args += [
+        "--add-data",
+        datafile(CONNECTOR_TEMPLATES, "gamepad_midi_bridge/connectors/templates"),
+    ]
 
     icon = _find_icon(system)
     if icon is not None:

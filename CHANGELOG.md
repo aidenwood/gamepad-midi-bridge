@@ -14,6 +14,7 @@ Preparing v3.0.0. Public downloads remain on the previous release until hardware
 - The paired MIDI/Console dock can expand to half the window height and remembers its dragged height during the session.
 - Stick-calibration instructions and results are non-modal toasts. The initial hands-off instruction is highlighted; completion dismisses automatically.
 - The controller-input test is opened explicitly from Status and receives raw button/axis input.
+- Packaged builds include the host connector templates, so Ableton Remote Script export and Resolume, OBS, REAPER, MadMapper and TouchDesigner template actions can read their bundled files.
 
 ## [2.2.1] - 2026-10-22
 

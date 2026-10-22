@@ -727,10 +727,16 @@ class TemplateBuilderTab(QWidget):
             return
         import shutil
         dest_root = Path(path_str) / REMOTE_SCRIPT_FOLDER
+        source = _template_source()
+        if not source.is_dir():
+            QMessageBox.warning(
+                self, "Export failed", "The Ableton Remote Script is missing from this build."
+            )
+            return
         try:
             if dest_root.exists():
                 shutil.rmtree(dest_root)
-            shutil.copytree(_template_source(), dest_root)
+            shutil.copytree(source, dest_root)
             (dest_root / "bindings.json").write_text(
                 json.dumps(self._template_payload(), indent=2), encoding="utf-8",
             )
