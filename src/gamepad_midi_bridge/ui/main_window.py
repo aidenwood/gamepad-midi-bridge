@@ -2048,8 +2048,16 @@ class MainWindow(QMainWindow):
             # `config` dict — earlier code tried `mapping.config.get(...)` and
             # crashed every connect with AttributeError. Gate on the seen-
             # controllers history alone, which is what we actually wanted.
+            #
+            # Hand the wizard the ControllerInfo we were just given. It used to
+            # re-read `worker.controller_info`, which is the Signal declared at
+            # bridge.py:95 rather than its payload, so the wizard was handed a
+            # SignalInstance and died on `.num_buttons`. That crashed on EVERY
+            # connect, not just the first: `mark_seen` only runs after the
+            # wizard completes, so a wizard that cannot open never marks the
+            # controller seen and the gate below passes again next time.
             if info.name not in seen_controllers():
-                QTimer.singleShot(800, lambda: self._run_test_wizard(info.name))
+                QTimer.singleShot(800, lambda inf=info: self._run_test_wizard(inf))
 
     def _on_calibration_progress(self, fraction: float) -> None:
         if self._calibration_dialog is not None:
@@ -2063,15 +2071,22 @@ class MainWindow(QMainWindow):
                 self._calibration_dialog.show()
             self._calibration_dialog.on_done(offsets, severe, significant)
 
-    def _run_test_wizard(self, controller_name: str) -> None:
-        """Launch the test wizard for a new controller."""
-        if self._bridge.worker is None or self._bridge.worker.controller_info is None:
+    def _run_test_wizard(self, info) -> None:
+        """Launch the test wizard for a new controller.
+
+        Takes the ControllerInfo directly. Reading it back off the worker is
+        what broke this: `worker.controller_info` is a Signal, so the old
+        `is None` guard could never be true and the wizard got a
+        SignalInstance instead of a controller.
+        """
+        if info is None:
             return
-        
-        info = self._bridge.worker.controller_info
+        if self._bridge.worker is None:
+            return
+
         self._test_wizard = ControllerTestWizard(info, self)
         self._test_wizard.wizard_complete.connect(
-            lambda missing: self._on_wizard_complete(controller_name, missing)
+            lambda missing, name=info.name: self._on_wizard_complete(name, missing)
         )
         self._test_wizard.show()
 
