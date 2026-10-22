@@ -18,6 +18,10 @@ Versions follow semver: `MAJOR.MINOR.PATCH`.
 - **Editing a MIDI note in the Mapping table actually saves it.** The cells have been editable since the table was written and nothing listened, so every edit was silently discarded on the next refresh while the controller kept sending the old note.
 - **Press lamps on the MIDI activity panel.** Sixteen per-channel lamps in the panel header — bright for notes, dim for CCs — so you can confirm MIDI is leaving the app without expanding a scrolling text log. They work while the panel is collapsed.
 - **D-pad presses show up in the MIDI activity panel.** They were sending real MIDI while appearing nowhere in the log or console; every other input type reported itself.
+- **Triggers no longer collapse to zero at half-press.** Pressure was remapped only when the raw value was negative, on the theory that some platform reports triggers as 0..1 natively — none does. The result was a cliff in the middle of every stroke: CC climbed to 63 over the first half of travel, snapped to 0 at the midpoint, then climbed to 127 over the second half. This hit DualSense and Xbox alike.
+- **Trigger bars stop freezing at full.** The UI throttles to 30 Hz while the poll loop runs at 100, and a sample the throttle dropped was never re-sent. A spring-loaded trigger returns to rest inside a single 33 ms window, so the meter kept painting the full-press value for the rest of the session with the pad untouched on the desk. Dropped samples are now held and flushed on the next tick.
+- **Stop clears every meter.** The Split View "Live Preview" was only reset by a controller-info event that never fires on stop, so it carried pre-stop values into the next run's calibration — the other half of why triggers looked pinned during "keep your hands off the controller".
+- **The axis oscilloscope draws the first half of a trigger pull.** It clamped the raw -1..+1 reading into 0..1 instead of remapping it, so the trace sat flat at zero until the midpoint.
 
 ## [2.2.0] - 2026-10-15
 
