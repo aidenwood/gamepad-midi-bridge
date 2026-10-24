@@ -9,6 +9,8 @@ thanks to dict.get.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
+
+from .touchpad_mouse import MouseModeConfig, clamp_sensitivity
 from typing import Dict, List, Optional
 
 from .midi_learn import MidiLearnConfig
@@ -813,6 +815,9 @@ class Mapping:
     left_stick_corners: CornerConfig = field(default_factory=CornerConfig)
     right_stick_corners: CornerConfig = field(default_factory=CornerConfig)
     touchpad: TouchpadConfig = field(default_factory=TouchpadConfig)
+    # Touchpad-as-mouse. Lives beside the touchpad config because it is the
+    # same hardware; off by default since it takes over the system cursor.
+    mouse_mode: MouseModeConfig = field(default_factory=MouseModeConfig)
     osc: OscConfig = field(default_factory=OscConfig)
 
     # Reserved for V1.1b adaptive triggers. Effect names come from dualsense
@@ -980,6 +985,7 @@ class Mapping:
             left_stick_corners=_corner_from_dict(data.get("left_stick_corners")),
             right_stick_corners=_corner_from_dict(data.get("right_stick_corners")),
             touchpad=_touchpad_from_dict(data.get("touchpad")),
+            mouse_mode=_mouse_mode_from_dict(data.get("mouse_mode")),
             osc=_osc_from_dict(data.get("osc")),
             l2_haptic_effect=data.get("l2_haptic_effect"),
             r2_haptic_effect=data.get("r2_haptic_effect"),
@@ -1235,6 +1241,28 @@ def _haptic_input_from_dict(d: Optional[dict]) -> HapticInputConfig:
         enabled=bool(d.get("enabled", False)),
         listen_channel=int(d.get("listen_channel", -1)),
         bindings=bindings if bindings else list(_DEFAULT_HAPTIC_BINDINGS),
+    )
+
+
+def _mouse_mode_from_dict(d: dict | None) -> MouseModeConfig:
+    """Hydrate MouseModeConfig from raw dict, defaulting to disabled.
+
+    Presets written before touchpad-as-mouse existed have no `mouse_mode` key
+    and must load with it off — never surprise someone by seizing their cursor
+    on preset load.
+    """
+    if not isinstance(d, dict):
+        return MouseModeConfig()
+    try:
+        toggle = int(d.get("toggle_button", 6))
+    except (TypeError, ValueError):
+        toggle = 6
+    return MouseModeConfig(
+        enabled=bool(d.get("enabled", False)),
+        toggle_button=max(0, min(31, toggle)),
+        sensitivity=clamp_sensitivity(d.get("sensitivity", 1.0)),
+        invert_y=bool(d.get("invert_y", False)),
+        suppress_midi=bool(d.get("suppress_midi", True)),
     )
 
 
