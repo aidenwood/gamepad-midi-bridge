@@ -971,6 +971,27 @@ class NodeGraphScene(QGraphicsScene):
         self.graph_changed.emit()
         return item
 
+    def add_template(self, template_id: str, scene_pos: QPointF) -> bool:
+        """Drop a starter sub-graph at `scene_pos`. True if anything landed.
+
+        Rebuilds the whole scene afterwards rather than adding items one by
+        one: a template brings sources, nodes, sinks and wires at once, and
+        load_graph already knows how to render all four from positions. The
+        merge itself is additive, so existing work on the canvas survives.
+        """
+        if self._graph is None or self._registry is None:
+            return False
+        from ..nodes import templates as node_templates
+        template = node_templates.get(template_id)
+        if template is None:
+            return False
+        node_templates.apply_to(
+            self._graph, template, (scene_pos.x(), scene_pos.y()),
+        )
+        self.load_graph(self._graph, self._registry)
+        self.graph_changed.emit()
+        return True
+
     def delete_wire(self, wire: "WireItem") -> None:
         """Remove a wire from both the scene and the underlying NodeGraph.
 
@@ -1738,3 +1759,34 @@ class NodeGraphView(QGraphicsView):
         if scale > self.MAX_ZOOM:
             factor = self.MAX_ZOOM / scale
             self.scale(factor, factor)
+
+
+def build_template_menu(scene: "NodeGraphScene", scene_pos: QPointF):
+    """Starter-template picker, grouped by category like the node picker.
+
+    Templates exist because 78 nodes behind one dropdown gives a newcomer no
+    way in. Each entry drops a small working sub-graph — source, a node or
+    two, a sink, already wired — so the canvas does something immediately and
+    there is a concrete example to pull apart.
+
+    Descriptions go on the item as a tooltip rather than in the label: the
+    label has to stay scannable, and the description is a sentence.
+    """
+    from .primitives import UIDropdownMenu
+    from ..nodes import templates as node_templates
+
+    menu = UIDropdownMenu()
+    menu.add_label("Start from a template")
+    for cat_kind, items in node_templates.by_category().items():
+        meta = category_meta(cat_kind)
+        sub = menu.add_submenu(meta.label if meta else cat_kind)
+        for t in items:
+            node_count = t.node_count
+            # add_item has no tooltip kwarg; it returns the QAction so the
+            # description can be attached there.
+            action = sub.add_item(
+                f"{t.label}  ·  {node_count} node{'' if node_count == 1 else 's'}",
+                on_click=(lambda tid=t.id: scene.add_template(tid, scene_pos)),
+            )
+            action.setToolTip(t.description)
+    return menu

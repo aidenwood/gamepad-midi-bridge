@@ -90,7 +90,14 @@ class CanvasLeftDock(QWidget):
         # Section 2 — Add menus (Radix dropdowns)
         self.btn_add_input = self._dock_button("+ IN", tooltip="Add a controller input source…")
         self.btn_add_node = self._dock_button("+ NODE", tooltip="Add a transform node…")
+        # Templates sit above single nodes deliberately: on an empty canvas a
+        # starter sub-graph is almost always the better first move, and the
+        # node list means nothing until you have seen one wired up.
+        self.btn_add_template = self._dock_button(
+            "+ START", tooltip="Drop a starter template — a small working sub-graph…",
+        )
         self.btn_add_output = self._dock_button("+ OUT", tooltip="Add a MIDI output…")
+        outer.addWidget(self.btn_add_template)
         outer.addWidget(self.btn_add_input)
         outer.addWidget(self.btn_add_node)
         outer.addWidget(self.btn_add_output)
@@ -107,6 +114,7 @@ class CanvasLeftDock(QWidget):
         self._scene = None
         # Keep dropdown menus alive across button clicks.
         self._add_node_menu: Optional[UIDropdownMenu] = None
+        self._add_template_menu: Optional[UIDropdownMenu] = None
         self._add_output_menu: Optional[UIDropdownMenu] = None
 
     # ----------------------------------------------------------- public API
@@ -129,6 +137,7 @@ class CanvasLeftDock(QWidget):
         # node registry + always drop new items at the centre of the view.
         self.btn_add_input.clicked.connect(self._popup_add_input)
         self.btn_add_node.clicked.connect(self._popup_add_node)
+        self.btn_add_template.clicked.connect(self._popup_add_template)
         self.btn_add_output.clicked.connect(self._popup_add_output)
 
     # ----------------------------------------------------------- internals
@@ -170,6 +179,18 @@ class CanvasLeftDock(QWidget):
         # a Sheets-style ribbon dropdown.
         pos = self.btn_add_node.mapToGlobal(self.btn_add_node.rect().bottomRight())
         self._add_node_menu.popup_at_global(pos)
+
+    def _popup_add_template(self) -> None:
+        if self._scene is None:
+            return
+        from .nodes_canvas import build_template_menu
+        self._add_template_menu = build_template_menu(
+            self._scene, self._viewport_centre_scene_pos(),
+        )
+        pos = self.btn_add_template.mapToGlobal(
+            self.btn_add_template.rect().bottomRight(),
+        )
+        self._add_template_menu.popup_at_global(pos)
 
     def _popup_add_input(self) -> None:
         if self._scene is None:

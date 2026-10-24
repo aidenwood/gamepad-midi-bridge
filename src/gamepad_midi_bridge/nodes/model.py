@@ -286,7 +286,12 @@ class SymbolicSink:
     Examples:
         "resolume.layer:1.effect:Frosted Glass.opacity"
         "ableton.track:Bass.send:A"
-        "midi.cc:7.ch:1"                — raw fallback
+        "midi.cc:7@ch:1"                — raw fallback
+
+    The raw form is regex-enforced in sinks.py as ``midi.cc:N@ch:C`` and
+    ``midi.note:N@ch:C``. This example previously read ``midi.cc:7.ch:1``,
+    which does not parse — anyone copying it got a sink that silently
+    resolved to nothing.
     """
     id: str
     symbol: str                          # connector-routable destination
