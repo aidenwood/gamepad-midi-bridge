@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import bluetooth as bt
+from .primitives.flow_layout import FlowLayout
 
 
 REFRESH_INTERVAL_MS = 6000   # background poll cadence
@@ -95,7 +96,11 @@ class BluetoothTab(QWidget):
         sub.setWordWrap(True)
         outer.addWidget(sub)
 
-        action_row = QHBoxLayout()
+        # FlowLayout, not QHBoxLayout: these three buttons sum to 509 px, and
+        # in a QHBoxLayout that became this whole page's minimum width — the
+        # page then needed a horizontal scrollbar on a narrow window. Wrapped,
+        # the floor is the widest single button and every control stays put.
+        action_row = FlowLayout(h_space=8, v_space=8)
         self._open_settings = QPushButton("Open system Bluetooth settings")
         self._open_settings.setObjectName("PrimaryButton")
         self._open_settings.clicked.connect(self._on_open_settings)
@@ -111,7 +116,8 @@ class BluetoothTab(QWidget):
         action_row.addWidget(self._open_settings)
         action_row.addWidget(self._refresh)
         action_row.addWidget(self._docs_link)
-        action_row.addStretch(1)
+        # No trailing stretch — FlowLayout already left-aligns and wraps; a
+        # stretch item would just be another thing to wrap.
         outer.addLayout(action_row)
 
         self._scroll = QScrollArea()

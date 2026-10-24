@@ -14,11 +14,6 @@ from PySide6.QtWidgets import QLabel, QWidget
 from gamepad_midi_bridge.ui.tokens import (
     ACCENT_TEAL,
     ACCENT_TEAL_FG,
-    BG_ELEVATED,
-    BORDER_SUBTLE,
-    TEXT_MUTED,
-    TEXT_PRIMARY,
-    TEXT_SECONDARY,
     FS_L,
     FS_M,
     FS_S,
@@ -30,6 +25,9 @@ from gamepad_midi_bridge.ui.tokens import (
     R_PILL,
     S_S,
     S_XS,
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
 )
 
 Variant = Literal["heading", "subheading", "body", "caption", "chip"]
@@ -107,10 +105,38 @@ class UILabel(QLabel):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(text, parent)
-        # body and caption word-wrap by default; heading/subheading/chip don't
-        if variant in ("body", "caption"):
+        # Everything wraps except "chip" — a pill badge has to stay on one
+        # line to read as a pill. Headings were excluded until 2026-10-24,
+        # which was fine while they were headings; in practice several are
+        # full sentences ("Community presets — built by other players,
+        # ready to map.") and an unwrappable sentence sets a hard floor on
+        # how narrow its whole page can be. At a width where they fit, this
+        # changes nothing.
+        if variant != "chip":
             self.setWordWrap(True)
+            # Qt still reports a word-wrapped label's minimum width as the
+            # width of the UNWRAPPED text, so the label ends up dictating
+            # how narrow its container may get — the exact opposite of what
+            # wrapping is for. On a 380 px window that pinned the
+            # Marketplace page to 437 px and the user got a horizontal
+            # scrollbar to read a paragraph. Let the label be as narrow as
+            # the layout likes and grow downwards instead.
+            policy = self.sizePolicy()
+            policy.setHeightForWidth(True)
+            self.setSizePolicy(policy)
+            # Wrapping can make a label taller than one line; without this
+            # the layout keeps the one-line height it first calculated and
+            # the second line is clipped.
+            self.setMinimumHeight(0)
         self.setStyleSheet(_build_stylesheet(variant))
+
+    def minimumSizeHint(self) -> QSize:
+        if not self.wordWrap():
+            return super().minimumSizeHint()
+        # Height comes from heightForWidth at the width we actually have, so
+        # a wrapped paragraph still reserves enough vertical room.
+        width = self.width() if self.width() > 0 else super().minimumSizeHint().width()
+        return QSize(0, self.heightForWidth(max(1, width)))
 
 
 class ElidingLabel(QLabel):
@@ -140,14 +166,14 @@ class ElidingLabel(QLabel):
         self.setMinimumWidth(0)
         super().setText(text)
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         self._full_text = text or ""
         self._apply_elide()
 
     def text(self) -> str:
         return self._full_text
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         hint = super().minimumSizeHint()
         return QSize(0, hint.height())
 
