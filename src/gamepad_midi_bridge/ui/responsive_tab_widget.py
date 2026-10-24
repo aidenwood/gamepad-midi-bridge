@@ -18,7 +18,9 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QLayout,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -31,9 +33,18 @@ from PySide6.QtWidgets import (
 # floor here; tall pages scroll within their own viewport instead.
 _MIN_CONTENT_HEIGHT = 160
 
+# Horizontal twin of the above. 320 is narrower than the window's own 380 px
+# floor, so the tab area is never the thing blocking a resize.
+_MIN_CONTENT_WIDTH = 320
+
 _COMPACT_THRESHOLD = 1100  # pixels — switch below this width. 11 tabs at
 # ~95 px each comfortably fit in ~1050 px; below this width we collapse to a
-# QComboBox dropdown so labels never get truncated to "Li..."/"Vis...".
+# QComboBox dropdown so labels never get truncated to "Li..."/"Vis..."
+
+# Tabs that own their own panning / zooming viewport. Nesting those inside a
+# QScrollArea gives two things fighting over the same wheel event, so they
+# opt out and keep their natural (small) width floor instead.
+_NO_SCROLL_TABS = frozenset({"Nodes"})
 
 
 class ResponsiveTabWidget(QWidget):
@@ -49,6 +60,9 @@ class ResponsiveTabWidget(QWidget):
         self._threshold = threshold
         self._compact = False  # current mode; set properly in first resizeEvent
         self._chrome_hidden = False
+        # index -> the REAL page widget. ``_tabs.widget(i)`` may be the
+        # QScrollArea wrapper, and callers want the page.
+        self._pages: list[QWidget] = []
 
         # --- inner QTabWidget ---
         self._tabs = QTabWidget()
@@ -85,17 +99,43 @@ class ResponsiveTabWidget(QWidget):
         layout.addWidget(self._tabs, 1)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
-        """Cap the vertical floor so a tall tab page can't squeeze a sibling
-        splitter pane. Keep the inner tabs' width hint; clamp the height."""
+        """Cap BOTH floors so one fat page can't dictate the whole window.
+
+        Height: a tall page (About is ~1080 px) would otherwise force the
+        window taller than the screen and squeeze the bottom dock to nothing.
+
+        Width: same problem sideways, and worse — the Bluetooth page alone
+        wanted 549 px, which meant the window physically could not be dragged
+        to the 380 px floor it advertises. Pages are wrapped in a QScrollArea
+        by ``addTab``, so a page that genuinely needs more room scrolls
+        instead of pinning every other part of the app.
+        """
         hint = self._tabs.minimumSizeHint()
-        return QSize(hint.width(), min(hint.height(), _MIN_CONTENT_HEIGHT))
+        return QSize(min(hint.width(), _MIN_CONTENT_WIDTH),
+                     min(hint.height(), _MIN_CONTENT_HEIGHT))
 
     # ------------------------------------------------------------------ public API
 
     def addTab(self, widget: QWidget, label: str) -> int:  # noqa: N802
-        """Add a tab. Mirrors QTabWidget.addTab."""
+        """Add a tab. Mirrors QTabWidget.addTab.
+
+        The page is wrapped in a scroll area unless it is in
+        ``_NO_SCROLL_TABS``. ``widgetResizable`` means the page still fills
+        the viewport whenever there is room, so nothing changes on a wide
+        window — scrollbars appear only when the page genuinely cannot fit.
+        """
         self._combo.addItem(label)
-        return self._tabs.addTab(widget, label)
+        self._pages.append(widget)
+        if label in _NO_SCROLL_TABS:
+            return self._tabs.addTab(widget, label)
+        scroller = QScrollArea()
+        scroller.setObjectName("TabScrollArea")
+        scroller.setWidgetResizable(True)
+        scroller.setFrameShape(QFrame.NoFrame)
+        scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroller.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroller.setWidget(widget)
+        return self._tabs.addTab(scroller, label)
 
     def tabText(self, index: int) -> str:  # noqa: N802
         """Return the tab label at *index*. Mirrors QTabWidget.tabText."""
@@ -114,7 +154,13 @@ class ResponsiveTabWidget(QWidget):
         self._tabs.setCurrentIndex(index)
 
     def widget(self, index: int) -> QWidget | None:
-        """Return the widget at *index*. Mirrors QTabWidget.widget."""
+        """Return the PAGE at *index*, not its scroll-area wrapper.
+
+        Mirrors QTabWidget.widget from the caller's point of view — callers
+        asked for the Mapping editor, not the viewport it happens to sit in.
+        """
+        if 0 <= index < len(self._pages):
+            return self._pages[index]
         return self._tabs.widget(index)
 
     # ------------------------------------------------------------------ mode switching

@@ -326,6 +326,7 @@ class UIButton(QPushButton):
         self._compact_text = ""
         self._extra_css = ""
         self._compact = False
+        self._min_floor = 0
         self.setStyleSheet(_build_stylesheet(variant, size))
         if variant == "mode":
             self.setCheckable(True)
@@ -374,6 +375,48 @@ class UIButton(QPushButton):
             self.setText(self._compact_text)
         else:
             self.setText(self._full_text)
+        # A minimum width pinned to the FULL label survives the text swap and
+        # silently cancels the whole point of compact mode — the row still
+        # demands its wide-mode width and the right-hand buttons run off the
+        # edge of the window. Re-pin to whatever the current presentation
+        # actually needs. (This was the root cause of the header clipping at
+        # narrow widths: main_window pinned minimumWidth once, at build time,
+        # from the full-label sizeHint.)
+        self.resync_minimum_width()
+
+    def set_min_floor(self, px: int) -> None:
+        """Set a width floor that survives label swaps and re-measurement.
+
+        The LIVE / SETUP pair reads as one segmented control, so they need a
+        matched floor regardless of which word is longer. A bare
+        ``setMinimumWidth`` would be wiped by the next ``resync``.
+        """
+        self._min_floor = int(px)
+        self.resync_minimum_width()
+
+    def resync_minimum_width(self) -> None:
+        """Pin ``minimumWidth`` to the current presentation's natural width.
+
+        Call after any change that alters the intrinsic width — label swap,
+        icon swap, font rescale.
+        """
+        self.setMinimumWidth(0)
+        self.setMinimumWidth(max(self._min_floor, self.sizeHint().width()))
+
+    def measure_widths(self) -> tuple[int, int]:
+        """Return ``(full_label_width, compact_glyph_width)`` in px.
+
+        Measured from real ``sizeHint()`` values in both presentations rather
+        than guessed, so the responsive header's breakpoints stay correct at
+        every font scale the A+ / A− buttons can produce.
+        """
+        was_compact = self._compact
+        self.set_compact(False)
+        full = self.sizeHint().width()
+        self.set_compact(True)
+        narrow = self.sizeHint().width()
+        self.set_compact(was_compact)
+        return full, narrow
 
     def add_css(self, css: str) -> None:
         """Append instance styling that survives a variant change."""

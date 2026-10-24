@@ -191,6 +191,26 @@ class LogConsole(QWidget):
     def is_collapsed(self) -> bool:
         return self._collapsed
 
+    def set_compact(self, compact: bool) -> None:
+        """Narrow-pane presentation of the header — mirrors MidiLogPanel.
+
+        Nothing is removed: "Clear" keeps its slot and its action, it just
+        loses the word, so the control is still one click away at any width.
+        """
+        compact = bool(compact)
+        if compact == getattr(self, "_compact", None):
+            return
+        self._compact = compact
+        self._clear_btn.setText("✕" if compact else "Clear")
+        self._clear_btn.setToolTip("Clear the console")
+        self.refresh_header_height()
+        # See MidiLogPanel.set_compact — a cached layout minimum would keep
+        # the old, wider floor and the compaction would buy no width.
+        self._header_bar.layout().invalidate()
+        if self.layout() is not None:
+            self.layout().invalidate()
+        self.updateGeometry()
+
     # ============================================================== helpers
 
     def _build_header(self) -> QFrame:
@@ -224,6 +244,7 @@ class LogConsole(QWidget):
         clear.setFlat(True)
         clear.setFixedHeight(26)
         clear.clicked.connect(self.clear)
+        self._clear_btn = clear
         h.addWidget(clear)
 
         self._toggle_btn = QPushButton("▾")

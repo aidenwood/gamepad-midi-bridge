@@ -46,6 +46,9 @@ def main() -> int:
     ap.add_argument("--tab", default=None, help="switch to this tab label before grabbing")
     ap.add_argument("--theme", default="system", choices=["system", "dark", "light"])
     ap.add_argument("--console", action="store_true", help="open the bottom log console")
+    ap.add_argument("--banner", action="store_true",
+                    help="show the update banner (it is normally hidden until "
+                         "the background update check fires)")
     args = ap.parse_args()
 
     w, h = (int(x) for x in args.size.lower().split("x"))
@@ -74,7 +77,20 @@ def main() -> int:
 
     win = MainWindow()
     win.resize(w, h)
+    # show() matters even offscreen: Qt only delivers resizeEvent to a mapped
+    # window, and the responsive header / dock reflow hangs off it. Grabbing
+    # an unshown window captures the build-time layout, not the real one.
+    win.show()
     _settle(app)
+
+    if args.banner:
+        from gamepad_midi_bridge.updater import UpdateInfo
+        win._on_update_available(UpdateInfo(
+            latest="3.0.0",
+            download_url="https://midi.aidxn.com/download",
+            notes_url="https://midi.aidxn.com/changelog",
+        ))
+        _settle(app)
 
     if args.console and hasattr(win, "_log_console"):
         try:

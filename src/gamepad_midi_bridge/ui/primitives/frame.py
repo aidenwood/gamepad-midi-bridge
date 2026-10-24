@@ -15,6 +15,7 @@ tokens.
 """
 from __future__ import annotations
 
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QFrame, QWidget
 
 from gamepad_midi_bridge.ui.tokens import BG_BASE
@@ -41,3 +42,28 @@ class UIChromeFrame(QFrame):
         self.setStyleSheet(
             f"QFrame {{ background-color: {background}; }}"
         )
+
+
+class ReflowFrame(QFrame):
+    """QFrame that reports a width floor of zero.
+
+    For containers whose children are re-arranged on every resize. Without
+    this there is a deadlock: Qt refuses to make the window narrower than
+    the CURRENT arrangement's minimum, so the resize that would trigger the
+    narrower arrangement can never happen. The header sat at a 716 px floor
+    for exactly this reason — it could not get narrow enough to wrap, so it
+    overflowed instead.
+
+    The owner is responsible for re-arranging on ``resizeEvent``; this only
+    removes the floor that stops the event from ever arriving.
+    """
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(0, super().minimumSizeHint().height())
+
+
+class ReflowWidget(QWidget):
+    """Plain-QWidget twin of :class:`ReflowFrame`. Same reasoning."""
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(0, super().minimumSizeHint().height())

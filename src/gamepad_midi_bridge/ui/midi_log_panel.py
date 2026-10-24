@@ -73,11 +73,17 @@ class ChannelBlinkers(QWidget):
     CELL_W = 13
     CELL_H = 13
     GAP = 2
+    # Narrow-pane sizes. All sixteen lamps stay — shrinking them keeps the
+    # "my press reached MIDI" answer visible at a phone-ish width, where
+    # hiding them would remove the one indicator the header exists for.
+    COMPACT_CELL_W = 6
+    COMPACT_GAP = 1
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._stamps: dict = {}     # channel -> (time, is_note)
-        self.setFixedSize(16 * self.CELL_W + 15 * self.GAP, self.CELL_H)
+        self._compact = False
+        self._apply_metrics()
         self.setToolTip(
             "MIDI channels 1-16. A lamp blinks when this app sends on that "
             "channel — bright for notes, dim for CCs.")
@@ -85,6 +91,25 @@ class ChannelBlinkers(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(40)
         self._timer.timeout.connect(self._tick)
+
+    def _cell(self) -> tuple[int, int]:
+        """(cell width, gap) for the current presentation."""
+        if self._compact:
+            return self.COMPACT_CELL_W, self.COMPACT_GAP
+        return self.CELL_W, self.GAP
+
+    def _apply_metrics(self) -> None:
+        cell, gap = self._cell()
+        self.setFixedSize(16 * cell + 15 * gap, self.CELL_H)
+
+    def set_compact(self, compact: bool) -> None:
+        """Shrink the lamps for a narrow pane. All sixteen stay visible."""
+        compact = bool(compact)
+        if compact == self._compact:
+            return
+        self._compact = compact
+        self._apply_metrics()
+        self.update()
 
     def blink(self, channel: int, is_note: bool) -> None:
         if not 0 <= channel <= 15:
@@ -111,9 +136,10 @@ class ChannelBlinkers(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         now = time.perf_counter()
         off = QColor("#1f232b")
+        cell, gap = self._cell()
         for ch in range(16):
-            x = ch * (self.CELL_W + self.GAP)
-            rect = QRectF(x, 0, self.CELL_W, self.CELL_H)
+            x = ch * (cell + gap)
+            rect = QRectF(x, 0, cell, self.CELL_H)
             stamp = self._stamps.get(ch)
             if stamp is None:
                 colour = off
@@ -193,6 +219,38 @@ class MidiLogPanel(QWidget):
     def is_collapsed(self) -> bool:
         return self._collapsed
 
+    def set_compact(self, compact: bool) -> None:
+        """Narrow-pane presentation of the header.
+
+        The untouched header needs roughly 620 px — title + sixteen 13 px
+        lamps + a 140 px filter combo + Clear + the toggle — which is wider
+        than the whole window in a phone-shaped layout, so the pane could
+        never shrink below it. Compact keeps every control reachable:
+        the title abbreviates, the lamps shrink, and the filter moves into
+        the Clear button's place as an icon-width combo.
+        """
+        compact = bool(compact)
+        if compact == getattr(self, "_compact", None):
+            return
+        self._compact = compact
+        self._header_title.setText("MIDI" if compact else "MIDI ACTIVITY")
+        self._blinkers.set_compact(compact)
+        self._filter_combo.setMaximumWidth(72 if compact else 140)
+        # Clear keeps its slot and its action — it just loses the word. A
+        # control that disappears at a window size is a control the user has
+        # to resize the window to reach.
+        self._clear_btn.setText("✕" if compact else "Clear")
+        self._clear_btn.setToolTip("Clear the MIDI activity log")
+        self.refresh_header_height()
+        # Qt caches a layout's minimum size. Without invalidating it the
+        # panel keeps reporting its 572 px full-header floor after
+        # compacting, and the splitter refuses to give it anything less —
+        # the compaction happens but buys no width at all.
+        self._header_bar.layout().invalidate()
+        if self.layout() is not None:
+            self.layout().invalidate()
+        self.updateGeometry()
+
     # ============================================================== layout
 
     def _build_header(self) -> QFrame:
@@ -239,6 +297,7 @@ class MidiLogPanel(QWidget):
         clear_btn.setFlat(True)
         clear_btn.setFixedHeight(26)
         clear_btn.clicked.connect(self._clear_all)
+        self._clear_btn = clear_btn
         h.addWidget(clear_btn)
 
         self._toggle_btn = QPushButton("▾")

@@ -183,7 +183,11 @@ class ControllerMeter(QWidget):
             f = QFont()
             f.setPointSize(13)
             p.setFont(f)
-            p.drawText(self.rect(), Qt.AlignCenter,
+            # TextWordWrap inside an inset rect — drawText with AlignCenter
+            # alone does not wrap, so on a phone-width window the second line
+            # ran off both edges and read "in a PS5 or Xbox controller, then".
+            box = self.rect().adjusted(20, 0, -20, 0)
+            p.drawText(box, Qt.AlignCenter | Qt.TextWordWrap,
                        "No controller connected.\nPlug in a PS5 or Xbox controller, then open Connect.")
             return
 

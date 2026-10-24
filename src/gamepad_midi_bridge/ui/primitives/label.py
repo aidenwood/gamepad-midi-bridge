@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QLabel, QWidget
 
 from gamepad_midi_bridge.ui.tokens import (
@@ -110,3 +111,55 @@ class UILabel(QLabel):
         if variant in ("body", "caption"):
             self.setWordWrap(True)
         self.setStyleSheet(_build_stylesheet(variant))
+
+
+class ElidingLabel(QLabel):
+    """QLabel that shortens its text with an ellipsis instead of clipping it.
+
+    A plain QLabel in a cramped row renders "Plug in a cont" — a sentence cut
+    mid-word, which reads as a rendering bug rather than as truncation. This
+    keeps the full string and paints as much of it as fits, with "…".
+
+    ``text()`` deliberately returns the FULL string, not the elided one: the
+    STATUS dropdown copies the status line into a menu item, and a menu that
+    says "Plug in a cont…" would be the same bug one layer down.
+    """
+
+    def __init__(
+        self,
+        text: str = "",
+        *,
+        mode: Qt.TextElideMode = Qt.ElideRight,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._full_text = text
+        self._mode = mode
+        # Never let the full string set the widget's width floor — that is
+        # precisely what stops a parent row from getting narrower.
+        self.setMinimumWidth(0)
+        super().setText(text)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._full_text = text or ""
+        self._apply_elide()
+
+    def text(self) -> str:
+        return self._full_text
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        hint = super().minimumSizeHint()
+        return QSize(0, hint.height())
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._apply_elide()
+
+    def _apply_elide(self) -> None:
+        available = max(0, self.width())
+        if available <= 0:
+            super().setText(self._full_text)
+            return
+        super().setText(
+            self.fontMetrics().elidedText(self._full_text, self._mode, available)
+        )

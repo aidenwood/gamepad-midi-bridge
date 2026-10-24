@@ -65,6 +65,8 @@ from .visualise_tab import VisualiseTab
 from .hud_overlay import HudOverlay
 from .responsive_tab_widget import ResponsiveTabWidget
 from .primitives.button import UIButton
+from .primitives.frame import ReflowFrame, ReflowWidget
+from .primitives.label import ElidingLabel
 from .icons import dot_icon, load_icon
 from .tokens import SHELL_PURPLE, SHELL_TEAL, SHELL_TEAL_FG
 
@@ -411,7 +413,10 @@ class MainWindow(QMainWindow):
         self._bottom_splitter.setStretchFactor(1, 1)
         # QSplitter recomputes its own maximum from its children when a body
         # is shown/hidden. A plain dock wrapper owns the half-window limit.
-        self._bottom_dock = QWidget()
+        # ReflowWidget: the dock flips between side-by-side and stacked on
+        # resize, and the side-by-side minimum (~719 px) would otherwise pin
+        # the whole window above the width where stacking kicks in.
+        self._bottom_dock = ReflowWidget()
         bottom_layout = QVBoxLayout(self._bottom_dock)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.addWidget(self._bottom_splitter)
@@ -423,6 +428,8 @@ class MainWindow(QMainWindow):
         # Apply initial splitter sizes from each panel's persisted collapsed
         # state. ``_set_bottom_panel_sizes`` is the single sizing path used by
         # toggle buttons too.
+        self._bottom_stacked = None  # force the first arrange to apply
+        self._arrange_bottom_dock(self.width() if self.width() > 100 else 1280)
         self._set_bottom_panel_sizes()
 
         # Each panel's toggle button emits collapse_changed → we recompute
@@ -451,6 +458,10 @@ class MainWindow(QMainWindow):
         self._midi_log_btn.clicked.connect(self._toggle_midi_log)
         self._inspect_btn.setChecked(False)
         self._inspect_btn.clicked.connect(self._toggle_inspector)
+        # Now that the splitter and its toggles exist, pick the column layout
+        # for the current width (resizeEvent takes over from here).
+        self._content_single = None  # force the first arrange to apply
+        self._arrange_content(self.width() if self.width() > 100 else 1280)
         # Two-way binding: closing an inspector via its X reflects in the toggle.
         self._inspector_a.visibility_changed.connect(self._on_inspector_visibility)
         self._inspector_b.visibility_changed.connect(self._on_inspector_visibility)
@@ -749,7 +760,11 @@ class MainWindow(QMainWindow):
         # Responsive status bar — wide window → single row; narrow window →
         # two rows so buttons never overflow off-screen. ``_arrange_status_bar``
         # below moves widgets between the two row layouts based on width.
-        bar = QFrame()
+        # ReflowFrame, not QFrame: this bar re-arranges itself on every
+        # resize, so the current arrangement's minimum width must not become
+        # the window's minimum width — that deadlock is why the header
+        # overflowed instead of wrapping.
+        bar = ReflowFrame()
         bar.setObjectName("StatusBar")
         bar.setAutoFillBackground(True)
         bar.setAttribute(Qt.WA_StyledBackground, True)
@@ -784,10 +799,14 @@ class MainWindow(QMainWindow):
         title_col = QVBoxLayout(self._title_col_widget)
         title_col.setContentsMargins(0, 0, 0, 0)
         title_col.setSpacing(2)
-        self._status_title = QLabel("Idle")
+        # Eliding, not clipping: in a cramped header a plain QLabel renders
+        # "Plug in a cont" — a sentence cut mid-word, which reads as a bug.
+        # ElidingLabel also reports a zero minimum width, so the status text
+        # can never be the reason the window refuses to get narrower.
+        self._status_title = ElidingLabel("Idle")
         self._status_title.setObjectName("StatusTitle")
         self._status_title.setMinimumHeight(18)
-        self._status_sub = QLabel("Plug in a controller, then open Connect.")
+        self._status_sub = ElidingLabel("Plug in a controller, then open Connect.")
         self._status_sub.setObjectName("StatusSub")
         self._status_sub.setMinimumHeight(16)
         title_col.addWidget(self._status_title)
@@ -895,8 +914,11 @@ class MainWindow(QMainWindow):
                    self._output_btn, self._shell_status_btn):
             _b.add_css("QPushButton { padding: 0px 12px; font-size: 12px; }")
         for _b in (self._mode_live_btn, self._mode_setup_btn):
-            _b.setMinimumWidth(68)
             _b.add_css("QPushButton { padding: 0px 14px; font-size: 12px; }")
+            # A floor, not a one-shot minimumWidth: it has to survive every
+            # re-measure the responsive header does, or the segmented LIVE /
+            # SETUP pair stops being a matched pair after the first reflow.
+            _b.set_min_floor(68)
         # Header actions must never be squeezed by the stretchy status
         # column beside them — a clipped "NODE VII" is worse than a
         # shorter status line.
@@ -904,7 +926,10 @@ class MainWindow(QMainWindow):
                    self._nodeview_btn, self._connect_btn, self._output_btn,
                    self._shell_status_btn):
             _b.setSizePolicy(_QSP.Fixed, _QSP.Fixed)
-            _b.setMinimumWidth(_b.sizeHint().width())
+        # Measure both presentations now so the responsive tiers below can be
+        # chosen from real widths instead of hardcoded pixel guesses — which
+        # go wrong the moment A+ / A− rescales the app font.
+        self._measure_header_widths()
 
         # Layout toggles — Split (side panel) + Console (bottom pane).
         # Click handlers wired in __init__ once dependent widgets exist.
@@ -1002,6 +1027,11 @@ class MainWindow(QMainWindow):
         self._update_btn.setFixedHeight(32)
         self._update_btn.setCursor(Qt.PointingHandCursor)
         self._update_btn.setVisible(False)
+        # Badges shrink to their glyph at narrow widths — see
+        # ``_apply_badge_compaction``. Keeping the label here means a 380 px
+        # window spends 100 px of its header on the word "Update".
+        self._update_btn.setProperty("_fullText", "⬆ Update")
+        self._update_btn.setProperty("_compactText", "⬆")
         self._update_btn.clicked.connect(self._download_update)
         self._update_info: Optional[UpdateInfo] = None
 
@@ -1015,6 +1045,8 @@ class MainWindow(QMainWindow):
         self._midi_fallback_btn.setFixedHeight(32)
         self._midi_fallback_btn.setCursor(Qt.PointingHandCursor)
         self._midi_fallback_btn.setVisible(False)
+        self._midi_fallback_btn.setProperty("_fullText", "⚠ No DAW routing")
+        self._midi_fallback_btn.setProperty("_compactText", "⚠")
         self._midi_fallback_btn.clicked.connect(self._show_midi_fallback_help)
 
         # Populate row layouts via the responsive arranger. Initial mode is
@@ -1022,11 +1054,106 @@ class MainWindow(QMainWindow):
         # width so we don't start empty.
         self._status_bar = bar
         self._status_bar_compact = None  # force first arrange to apply
+        self._header_tier = None
         self._arrange_status_bar(self.width() if self.width() > 100 else 1280)
         return bar
 
     # Status bar mode-switch threshold. Below this, buttons wrap to row 2.
+    # Kept as the "icons instead of labels" point; the real tier choice is
+    # measured, not hardcoded — see ``_pick_header_tier``.
     _STATUS_BAR_COMPACT_WIDTH = 720
+
+    # Horizontal room the status text column needs before it is worth
+    # showing at all. Below this it is dropped and the title moves to the
+    # window title bar's job — an 18 px sliver of elided text is noise.
+    _TITLE_MIN_PX = 96
+
+    # ── Responsive header: measured widths + tier selection ──────────────
+    # Four presentations of ONE header. Nothing is ever removed — every
+    # command keeps its slot, its state and its shortcut; only the label /
+    # row it sits on changes:
+    #
+    #   wide    one row, every label spelled out, status text beside it
+    #   medium  one row, the five action chips go icon-only, labels stay on
+    #           the LIVE / SETUP mode pair (they are the primary navigation)
+    #   narrow  two rows — row 1 nav + status, row 2 the four actions with
+    #           labels, which fit again now that they own a whole row
+    #   micro   two rows, row 2 icon-only, status text dropped
+    _HEADER_TIERS = ("wide", "medium", "narrow", "micro")
+
+    def _measure_header_widths(self) -> None:
+        """Cache each header button's full-label and icon-only width.
+
+        Re-run after a font rescale — every number below comes from a live
+        ``sizeHint()``, so the breakpoints follow the user's text size
+        instead of fighting it.
+        """
+        self._hdr_w: Dict[str, tuple] = {}
+        for name, btn in (
+            ("menu", self._menu_btn),
+            ("live", self._mode_live_btn),
+            ("setup", self._mode_setup_btn),
+            ("learn", self._nodeview_btn),
+            ("connect", self._connect_btn),
+            ("output", self._output_btn),
+            ("status", self._shell_status_btn),
+        ):
+            self._hdr_w[name] = btn.measure_widths()
+
+    def _badge_width(self, full: bool) -> int:
+        """Width the visible corner badges need, in the given presentation."""
+        total = 0
+        for btn in (self._midi_fallback_btn, self._update_btn):
+            if not btn.isVisible():
+                continue
+            text = btn.property("_fullText" if full else "_compactText") or ""
+            metrics = btn.fontMetrics().horizontalAdvance(str(text))
+            total += metrics + 26 + 10  # padding + layout spacing
+        return total
+
+    def _header_tier_fits(self, tier: str, avail: int) -> bool:
+        """Does *tier* fit inside *avail* px of header row?"""
+        w = self._hdr_w
+        gaps = 10  # QHBoxLayout spacing between siblings
+        modes = w["live"][0] + w["setup"][0] + gaps
+        actions_full = sum(w[k][0] for k in ("learn", "connect", "output", "status"))
+        actions_icon = sum(w[k][1] for k in ("learn", "connect", "output", "status"))
+        actions_gaps = gaps * 3
+        if tier == "wide":
+            need = (w["menu"][0] + 10 + modes + 14 + self._TITLE_MIN_PX
+                    + gaps + actions_full + actions_gaps
+                    + self._badge_width(full=True))
+        elif tier == "medium":
+            need = (w["menu"][1] + 10 + modes + 14 + self._TITLE_MIN_PX
+                    + gaps + actions_icon + actions_gaps
+                    + self._badge_width(full=False))
+        elif tier == "narrow":
+            # Two rows — the binding constraint is whichever row is wider.
+            row1 = w["menu"][1] + 10 + modes + 14 + self._TITLE_MIN_PX
+            row2 = actions_full + actions_gaps + self._badge_width(full=False)
+            need = max(row1, row2)
+        else:  # micro — the floor; always "fits" so a tier is always chosen
+            return True
+        return need <= avail
+
+    def _pick_header_tier(self, width: int) -> str:
+        """Richest presentation that fits in *width* px."""
+        if not getattr(self, "_hdr_w", None):
+            return "wide"
+        margins = self._status_bar.layout().contentsMargins()
+        avail = max(0, width - margins.left() - margins.right())
+        for tier in self._HEADER_TIERS:
+            if self._header_tier_fits(tier, avail):
+                return tier
+        return "micro"
+
+    def _apply_badge_compaction(self, full: bool) -> None:
+        """Swap the corner badges between label and glyph presentation."""
+        for btn in (self._midi_fallback_btn, self._update_btn):
+            key = "_fullText" if full else "_compactText"
+            text = btn.property(key)
+            if text and btn.text() != text:
+                btn.setText(str(text))
 
     # ── Shell modes + header dropdowns ───────────────────────────────────
     # Every existing tab keeps a reachable home. LIVE and SETUP are the two
@@ -1291,14 +1418,42 @@ class MainWindow(QMainWindow):
         self._popup(menu, self._shell_status_btn)
 
     def _arrange_status_bar(self, width: int) -> None:
-        """Switch the status bar between single-row (wide) and two-row
-        (narrow) layouts so buttons never overflow off-screen."""
+        """Reflow the header into the richest presentation that fits *width*.
+
+        Four tiers (see ``_HEADER_TIERS``). Below ``narrow`` the four action
+        chips wrap onto their own second row instead of running off the right
+        edge of the window — which is what used to happen, because a
+        ``minimumWidth`` pinned to the full-label ``sizeHint()`` survived
+        compact mode and kept the row at its wide-mode width.
+        """
         if not hasattr(self, "_status_row1_layout"):
             return  # bar not built yet
-        compact = width < self._STATUS_BAR_COMPACT_WIDTH
-        if compact == self._status_bar_compact:
+        tier = self._pick_header_tier(width)
+        if tier == self._header_tier:
             return
-        self._status_bar_compact = compact
+        self._header_tier = tier
+        two_rows = tier in ("narrow", "micro")
+        self._status_bar_compact = tier != "wide"
+
+        # Status text room is MEASURED, not inherited from the tier. Wrapping
+        # the actions onto row 2 frees row-1 space, so "narrow" often has more
+        # room for the status line than "medium" does — tying the text to the
+        # tier would hide it in exactly the layout where it fits best.
+        bar_margins = self._status_bar.layout().contentsMargins()
+        avail = max(0, width - bar_margins.left() - bar_margins.right())
+        hw = self._hdr_w
+        row1_used = (hw["menu"][0 if tier == "wide" else 1] + 10
+                     + hw["live"][0] + hw["setup"][0] + 10 + 14)
+        if not two_rows:
+            row1_used += (10 + 30
+                          + sum(hw[k][0 if tier == "wide" else 1]
+                                for k in ("learn", "connect", "output", "status"))
+                          + self._badge_width(full=(tier == "wide")))
+        title_room = avail - row1_used
+        show_title = title_room >= self._TITLE_MIN_PX
+        # The second line is the one that says what to DO next, so it earns
+        # its place whenever there is room for a readable amount of it.
+        show_sub = title_room >= 180
 
         # Strip both rows clean (preserves the underlying widgets — Qt
         # re-parents them when we addWidget below).
@@ -1309,14 +1464,18 @@ class MainWindow(QMainWindow):
                 if w is not None:
                     w.setParent(None)
 
-        # One header shape, two presentations. Narrow drops the labels and
-        # keeps the icons — the commands and their states never change.
-        # Everything that used to live out here now has a home behind MENU,
+        # One header shape, four presentations. The commands, their states
+        # and their shortcuts never change — only the label and the row.
+        # Everything that used to live out here still has a home behind MENU,
         # CONNECT, OUTPUT or STATUS; nothing was removed.
-        for btn in (self._menu_btn, self._nodeview_btn, self._connect_btn,
+        self._menu_btn.set_compact(tier != "wide")
+        action_compact = tier in ("medium", "micro")
+        for btn in (self._nodeview_btn, self._connect_btn,
                     self._output_btn, self._shell_status_btn):
-            btn.set_compact(compact)
+            btn.set_compact(action_compact)
+        self._apply_badge_compaction(full=(tier == "wide"))
 
+        # ---- Row 1: navigation + status text ----
         self._status_row1_layout.addWidget(self._menu_btn)
         self._status_row1_layout.addSpacing(10)
 
@@ -1334,25 +1493,42 @@ class MainWindow(QMainWindow):
         for _l in (self._status_title, self._status_sub):
             _l.setMinimumWidth(0)
             _l.setTextInteractionFlags(Qt.NoTextInteraction)
-        self._status_row1_layout.addWidget(self._title_col_widget, 1)
+        self._title_col_widget.setVisible(show_title)
+        self._status_sub.setVisible(show_sub)
+        if show_title:
+            self._status_row1_layout.addWidget(self._title_col_widget, 1)
+        else:
+            # The title column IS the row's stretchy slot. Hidden widgets are
+            # skipped entirely by QBoxLayout — stretch and all — so without a
+            # spacer in its place the slack is shared out between the buttons
+            # and the nav group drifts apart into three islands.
+            self._status_row1_layout.addStretch(1)
         # Rate + activity dot are bridge telemetry, not header chrome. They
         # rendered as an empty black box next to the title whenever idle.
         self._rate_label.setVisible(False)
         self._activity_dot.setVisible(False)
 
-        # Right-hand action group, visually distinct from the mode pair.
-        self._status_row1_layout.addWidget(self._nodeview_btn)
-        self._status_row1_layout.addWidget(self._connect_btn)
-        self._status_row1_layout.addWidget(self._output_btn)
-        self._status_row1_layout.addWidget(self._shell_status_btn)
+        # ---- Action group: row 1 when it fits, row 2 when it doesn't ----
+        actions = self._status_row2_layout if two_rows else self._status_row1_layout
+        if two_rows:
+            # Right-align the wrapped row so the actions stay under the
+            # same corner they occupy in wide mode — a group that jumps
+            # from right to left between breakpoints reads as a different
+            # toolbar, not the same one re-flowed.
+            actions.addStretch(1)
+        actions.addWidget(self._nodeview_btn)
+        actions.addWidget(self._connect_btn)
+        actions.addWidget(self._output_btn)
+        actions.addWidget(self._shell_status_btn)
         # Kept visible because it is an alert, not a routine control.
-        self._status_row1_layout.addWidget(self._midi_fallback_btn)
-        self._status_row1_layout.addWidget(self._update_btn)
+        actions.addWidget(self._midi_fallback_btn)
+        actions.addWidget(self._update_btn)
 
         self._status_divider1.setVisible(False)
-        self._status_row2_widget.setVisible(False)
-        self._status_bar.setFixedHeight(56 if compact else 64)
-        self._title_col_widget.setVisible(not compact)
+        self._status_row2_widget.setVisible(two_rows)
+        # One 30 px chip row + 8 px margins either side, plus the second
+        # 30 px row and the 6 px between them when the actions have wrapped.
+        self._status_bar.setFixedHeight(94 if two_rows else 64)
 
     # Font-scale clamp + step. Lets users size the UI for their resolution.
     _FONT_SCALE_MIN = 0.80
@@ -1434,6 +1610,23 @@ class MainWindow(QMainWindow):
             if panel is not None:
                 panel.refresh_header_height()
         self._set_bottom_panel_sizes()
+        # Header breakpoints are measured, not hardcoded — bigger text means
+        # the same window is effectively narrower, so re-measure and re-pick
+        # the tier. Without this, A+ at a narrow width clips the header again.
+        self._refresh_header_layout()
+
+    def _refresh_header_layout(self) -> None:
+        """Re-measure header buttons and re-pick the tier for the current
+        window width. Safe to call any time after the bar is built."""
+        if not hasattr(self, "_status_row1_layout"):
+            return
+        for btn in (self._menu_btn, self._nodeview_btn, self._connect_btn,
+                    self._output_btn, self._shell_status_btn,
+                    self._mode_live_btn, self._mode_setup_btn):
+            btn.resync_minimum_width()
+        self._measure_header_widths()
+        self._header_tier = None  # force the arrange to apply
+        self._arrange_status_bar(max(self.width(), 1))
 
     def _patch_inline_font_sizes(self, scale: float) -> None:
         """Walk every descendant widget and rescale any inline-stylesheet
@@ -1460,29 +1653,73 @@ class MainWindow(QMainWindow):
                 w.setStyleSheet(scaled)
 
     def _build_update_banner(self) -> QFrame:
-        bar = QFrame()
+        bar = ReflowFrame()  # see _build_status_bar — same reflow deadlock
         bar.setObjectName("UpdateBanner")
         bar.setAutoFillBackground(True)
         bar.setAttribute(Qt.WA_StyledBackground, True)
         bar.setVisible(False)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(18, 8, 18, 8)
-        h.setSpacing(10)
+        # Two candidate rows, same as the header: the buttons sit beside the
+        # message when there is room and underneath it when there isn't. A
+        # single QHBoxLayout pushed "Dismiss" off the right edge below about
+        # 560 px — the one control that makes the banner go away.
+        outer = QVBoxLayout(bar)
+        outer.setContentsMargins(18, 8, 18, 8)
+        outer.setSpacing(6)
+
+        self._banner_row1 = QHBoxLayout()
+        self._banner_row1.setContentsMargins(0, 0, 0, 0)
+        self._banner_row1.setSpacing(10)
+        self._banner_row2_widget = QWidget()
+        self._banner_row2 = QHBoxLayout(self._banner_row2_widget)
+        self._banner_row2.setContentsMargins(0, 0, 0, 0)
+        self._banner_row2.setSpacing(10)
+        self._banner_row2_widget.setVisible(False)
+        outer.addLayout(self._banner_row1)
+        outer.addWidget(self._banner_row2_widget)
 
         self._update_label = QLabel("")
         self._update_label.setObjectName("UpdateBannerLabel")
-        h.addWidget(self._update_label, 1)
+        self._update_label.setWordWrap(True)
+        self._update_label.setMinimumWidth(0)
 
         self._update_open = QPushButton("Release notes")
         self._update_open.setObjectName("UpdateBannerOpenButton")
-        h.addWidget(self._update_open)
 
-        dismiss = QPushButton("Dismiss")
-        dismiss.setObjectName("UpdateBannerDismissButton")
-        dismiss.setFlat(True)
-        dismiss.clicked.connect(lambda: bar.setVisible(False))
-        h.addWidget(dismiss)
+        self._update_dismiss = QPushButton("Dismiss")
+        self._update_dismiss.setObjectName("UpdateBannerDismissButton")
+        self._update_dismiss.setFlat(True)
+        self._update_dismiss.clicked.connect(lambda: bar.setVisible(False))
+
+        self._banner_stacked = None  # force the first arrange to apply
+        self._arrange_update_banner(self.width() if self.width() > 100 else 1280)
         return bar
+
+    # Below this the update banner's buttons wrap under the message.
+    _BANNER_STACK_WIDTH = 560
+
+    def _arrange_update_banner(self, width: int) -> None:
+        """Put the banner's buttons beside the message, or under it when the
+        window is too narrow to hold both on one line."""
+        if not hasattr(self, "_banner_row1"):
+            return
+        stacked = width < self._BANNER_STACK_WIDTH
+        if stacked == self._banner_stacked:
+            return
+        self._banner_stacked = stacked
+        for layout in (self._banner_row1, self._banner_row2):
+            while layout.count():
+                item = layout.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.setParent(None)
+
+        self._banner_row1.addWidget(self._update_label, 1)
+        target = self._banner_row2 if stacked else self._banner_row1
+        if stacked:
+            target.addStretch(1)
+        target.addWidget(self._update_open)
+        target.addWidget(self._update_dismiss)
+        self._banner_row2_widget.setVisible(stacked)
 
     def _on_update_available(self, info: UpdateInfo) -> None:
         self._update_info = info
@@ -1504,6 +1741,11 @@ class MainWindow(QMainWindow):
         url = info.notes_url or info.download_url or UPGRADE_URL
         self._update_open.clicked.connect(lambda: webbrowser.open(url))
         self._update_banner.setVisible(True)
+        # The badge and the banner both consume header / banner width, so the
+        # tier that fitted a second ago may not fit now. Re-pick both.
+        self._header_tier = None
+        self._arrange_status_bar(max(self.width(), 1))
+        self._arrange_update_banner(max(self.width(), 1))
 
     def _on_midi_fallback(self, port_name: str) -> None:
         """Show / hide the persistent 'no DAW routing' badge.
@@ -1807,9 +2049,22 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 learn(widget, title, text)
 
+    def _bottom_collapsed_height(self) -> int:
+        """Height the bottom dock needs with every pane collapsed.
+
+        Side by side that is one header; stacked it is both headers plus the
+        splitter handle between them — using the single-header figure in
+        stacked mode clips the lower pane's title to nothing.
+        """
+        a = self._log_console.header_height()
+        b = self._midi_log_panel.header_height()
+        if getattr(self, "_bottom_stacked", False):
+            return a + b + self._bottom_splitter.handleWidth()
+        return max(a, b)
+
     def _bottom_height_limit(self) -> int:
         total = self._body_splitter.height()
-        header = max(self._log_console.header_height(), self._midi_log_panel.header_height())
+        header = self._bottom_collapsed_height()
         return max(header, min(self.height() // 2, max(header, total - 100)))
 
     def _on_body_splitter_moved(self, _pos: int, _index: int) -> None:
@@ -1843,9 +2098,17 @@ class MainWindow(QMainWindow):
         limit = self._bottom_height_limit()
         self._bottom_dock.setMaximumHeight(limit)
         total = max(1, self._body_splitter.height() - self._body_splitter.handleWidth())
-        header = max(self._log_console.header_height(), self._midi_log_panel.header_height())
+        header = self._bottom_collapsed_height()
         opened = not (self._log_console.is_collapsed() and self._midi_log_panel.is_collapsed())
-        bottom = min(limit, getattr(self, "_bottom_open_height", 200)) if opened else header
+        want = getattr(self, "_bottom_open_height", 200)
+        if getattr(self, "_bottom_stacked", False) and opened:
+            # Stacked, both open: 200 px total is 100 px each, which is two
+            # headers and about one visible log line. Ask for enough that
+            # each pane still shows content; the limit clamps it anyway.
+            if not (self._log_console.is_collapsed()
+                    or self._midi_log_panel.is_collapsed()):
+                want = want * 2
+        bottom = min(limit, want) if opened else header
         self._body_splitter.setSizes([max(100, total - bottom), bottom])
 
     def _toggle_inspector(self) -> None:
@@ -1903,19 +2166,26 @@ class MainWindow(QMainWindow):
     def _rebalance_content_splitter(self) -> None:
         """Recompute pane widths after a visibility toggle so panels don't
         appear at 0px or compress workspace A unfairly."""
+        # On a narrow window the panels are not "fixed 320 beside the
+        # workspace" any more — there is no room for beside. Give the
+        # inspector the lion's share and let the workspace keep a usable
+        # sliver, rather than computing against an 800 px window that
+        # isn't there.
+        single = getattr(self, "_content_single", False)
+        panel_w = 240 if single else INSPECTOR_WIDTH
         sizes = []
         # workspace A — always visible, takes whatever's left.
         sizes.append(1)
         # inspector A — fixed if visible, else 0.
-        sizes.append(INSPECTOR_WIDTH if self._inspector_a.isVisible() else 0)
+        sizes.append(panel_w if self._inspector_a.isVisible() else 0)
         # side panel (workspace B content) — fixed-ish if visible, else 0.
         sizes.append(320 if self._side_panel.isVisible() else 0)
         # inspector B — fixed if visible, else 0.
-        sizes.append(INSPECTOR_WIDTH if self._inspector_b.isVisible() else 0)
+        sizes.append(panel_w if self._inspector_b.isVisible() else 0)
         # Scale workspace A to fill remaining width.
-        total = max(800, self.width())
+        total = max(self._content_splitter.width(), self.width(), 320)
         used = sum(sizes[1:])
-        sizes[0] = max(400, total - used)
+        sizes[0] = max(120 if single else 400, total - used)
         self._content_splitter.setSizes(sizes)
 
     # ============================================================== inspector
@@ -3111,17 +3381,113 @@ class MainWindow(QMainWindow):
 
     # ============================================================== resize
 
+    def _reflow(self, width: int) -> None:
+        """Re-pick every width-dependent presentation. One width in, four
+        reflows out: header tier, update banner, bottom dock, columns."""
+        self._arrange_status_bar(width)
+        self._arrange_update_banner(width)
+        self._arrange_bottom_dock(width)
+        self._arrange_content(width)
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        # A window restored at a narrow geometry gets its first resizeEvent
+        # only once it is on screen, so without this the first frame can be
+        # painted in the wrong tier. Cheap — each arranger early-outs when
+        # the presentation is already correct.
+        self._reflow(self.width())
+
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
-        # Reflow the status bar between 1-row (wide) and 2-row (narrow)
-        # modes whenever the window changes width.
-        self._arrange_status_bar(event.size().width())
+        width = event.size().width()
+        # Reflow the header into the richest tier that fits, wrap the update
+        # banner, and stack the bottom dock — one width, three reflows.
+        self._reflow(width)
         if hasattr(self, "_bottom_dock"):
             self._bottom_dock.setMaximumHeight(self._bottom_height_limit())
             QTimer.singleShot(0, self._apply_bottom_panel_sizes)
         panel = getattr(self, "_description_panel", None)
         if panel is not None and panel.isVisible():
             panel.place_default()
+
+    # Below this an inspector stops being a side panel and takes the whole
+    # workspace width, and Split view is not offered at all. Two workspaces
+    # plus an inspector inside 700 px is three unusable columns.
+    _CONTENT_SINGLE_COLUMN_WIDTH = 700
+
+    def _arrange_content(self, width: int) -> None:
+        """Collapse the workspace to a single column on a narrow window.
+
+        Nothing is disabled permanently — Split re-enables itself the moment
+        the window is wide enough to hold two columns again, and the panel
+        remembers whether the user had it open.
+        """
+        if not hasattr(self, "_content_splitter"):
+            return
+        single = width < self._CONTENT_SINGLE_COLUMN_WIDTH
+        if single == getattr(self, "_content_single", None):
+            return
+        self._content_single = single
+        # An inspector pinned to 320 px cannot share a 400 px window with the
+        # workspace. Let it shrink; the splitter then hands it most of the
+        # width when it is the thing the user asked to see.
+        for insp in (self._inspector_a, self._inspector_b):
+            insp.setMinimumWidth(240 if single else INSPECTOR_WIDTH)
+        if single:
+            # Remember the user's choice so widening the window restores it
+            # rather than silently dropping the feature.
+            self._split_wanted = self._split_btn.isChecked()
+            if self._split_btn.isChecked():
+                self._split_btn.setChecked(False)
+                self._toggle_split_view()
+            self._split_btn.setEnabled(False)
+            self._split_btn.setToolTip(
+                "Split view needs a wider window — widen past "
+                f"{self._CONTENT_SINGLE_COLUMN_WIDTH} px to use it")
+        else:
+            self._split_btn.setEnabled(True)
+            self._split_btn.setToolTip(
+                "Show controller meter alongside the current tab")
+            if getattr(self, "_split_wanted", False) and not self._split_btn.isChecked():
+                self._split_btn.setChecked(True)
+                self._toggle_split_view()
+        self._rebalance_content_splitter()
+
+    # Below this the MIDI-activity + Console panes stop sitting side by side.
+    # Two panes sharing 400 px gives each one 200 px, which is narrower than
+    # either panel's own header needs — both end up clipped and useless.
+    _BOTTOM_STACK_WIDTH = 760
+
+    def _arrange_bottom_dock(self, width: int) -> None:
+        """Side-by-side bottom panes on a wide window, stacked on a narrow one.
+
+        Also compacts each panel's header (shorter title, smaller channel
+        lamps, no filter dropdown) so a 380 px window can still show both.
+        """
+        if not hasattr(self, "_bottom_splitter"):
+            return
+        stacked = width < self._BOTTOM_STACK_WIDTH
+        if stacked != getattr(self, "_bottom_stacked", None):
+            self._bottom_stacked = stacked
+            self._bottom_splitter.setOrientation(
+                Qt.Vertical if stacked else Qt.Horizontal
+            )
+            # The handle colour rule is orientation-specific, so it has to be
+            # re-stated or the stacked handle renders as an invisible hairline.
+            axis = "vertical" if stacked else "horizontal"
+            self._bottom_splitter.setStyleSheet(
+                f"QSplitter::handle:{axis} {{ background-color: #3f4754; }} "
+                f"QSplitter::handle:{axis}:hover {{ background-color: #5a6478; }}"
+            )
+            self._set_bottom_panel_sizes()
+        # Header compaction is a finer-grained call than the stack switch:
+        # a pane is cramped at half of 900 px just as it is at all of 450.
+        # 572 px is the measured minimum of the MIDI header with every label
+        # spelled out and all sixteen lamps at full size; compacting drops it
+        # to 322. Switch just above the full figure.
+        pane = width if stacked else (width - self._bottom_splitter.handleWidth()) // 2
+        for panel in (self._midi_log_panel, self._log_console):
+            panel.set_compact(pane < 580)
 
     # ============================================================== close
 
