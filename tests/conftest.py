@@ -85,7 +85,26 @@ def qapp():
         return
     app = QApplication.instance() or QApplication([])
     yield app
-    # Deliberately NOT calling app.quit()/deleteLater(): letting Qt tear the
-    # application down while Python still owns wrapper objects is the crash
-    # this fixture exists to prevent. Holding the reference to process exit
-    # is the documented-safe shape for PySide6 test suites.
+
+    # Holding the QApplication reference stopped the hard crash, but the
+    # warning survived it — measured at 6 runs in 8 before this block, which
+    # is why it reads as intermittent: it depends on when CPython's GC gets
+    # round to the orphaned widgets.
+    #
+    # The remaining problem is *order*. Widgets a test created without a
+    # parent are owned by Python, so they are destroyed whenever the final GC
+    # runs — which is during Py_FinalizeEx, after Qt has started shutting
+    # down. Destroying them here, while the QApplication is still alive and
+    # able to process the resulting deferred deletes, puts them back in a safe
+    # order.
+    #
+    # Note this tears down leftover *widgets*, not the application — that
+    # distinction is the point. Calling app.quit()/deleteLater() is still
+    # wrong for the reason the original comment gave, and is still not done.
+    import gc
+    for widget in app.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    app.processEvents()
+    gc.collect()
+    app.processEvents()
