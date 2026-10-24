@@ -1349,15 +1349,25 @@ class BridgeWorker(QObject):
         if pressure_source == "left_stick_mag":
             x = reader.get_axis(0) or 0.0
             y = reader.get_axis(1) or 0.0
-            return (x*x + y*y) ** 0.5  # magnitude
+            # A full diagonal is 1.414, not 1.0 — unclamped it pushes
+            # aftertouch past 127 and the receiver sees a wrapped value.
+            return min(1.0, (x*x + y*y) ** 0.5)
         elif pressure_source == "right_stick_mag":
             x = reader.get_axis(2) or 0.0
             y = reader.get_axis(3) or 0.0
-            return (x*x + y*y) ** 0.5
+            return min(1.0, (x*x + y*y) ** 0.5)
         elif pressure_source == "l2":
-            return max(0.0, min(1.0, float(reader.get_axis(4) or 0.0)))
+            return shaping.normalise_trigger_pressure(
+                float(reader.get_axis(4) or 0.0))
         elif pressure_source == "r2":
-            return max(0.0, min(1.0, float(reader.get_axis(5) or 0.0)))
+            # SDL reports a trigger as -1.0 released .. +1.0 fully pressed.
+            # Clamping that to 0..1 (what this did) threw away the whole
+            # bottom half of the travel: aftertouch stayed dead until the
+            # trigger was already half down, then jumped. Every other
+            # trigger path in this file already goes through
+            # normalise_trigger_pressure — this one was the odd one out.
+            return shaping.normalise_trigger_pressure(
+                float(reader.get_axis(5) or 0.0))
         return 0.0
 
     def _dispatch_haptic(self, source: str, midi_id: int, normalized: float) -> None:
