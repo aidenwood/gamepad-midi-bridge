@@ -56,3 +56,35 @@ def test_pyinstaller_entry_routes_through_console_entry():
     src = (Path(__file__).resolve().parents[1] / "scripts" / "app_entry.py").read_text()
     assert "console_entry()" in src
     assert "sys.exit(main())" not in src
+
+
+def test_gui_launching_scripts_hard_exit():
+    """Any script that builds a real QApplication must hard-exit too.
+
+    The module docstring says *every* entry point that launches the GUI, but
+    the invariant was only enforced for console_entry and the PyInstaller
+    bootstrap. scripts/generate_screenshots.py builds a MainWindow and ended
+    with `sys.exit(main())`, so Python finalised, Shiboken's destructionVisitor
+    swept live Qt wrappers, and it segfaulted in Py_FinalizeEx — six macOS
+    crash reports on 2026-10-24 came from exactly that script.
+    """
+    scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+    offenders = []
+    for path in sorted(scripts_dir.glob("*.py")):
+        src = path.read_text()
+        builds_gui = "QApplication(" in src or "MainWindow(" in src
+        if not builds_gui:
+            continue
+        if "os._exit" not in src and "console_entry()" not in src:
+            offenders.append(path.name)
+    assert not offenders, (
+        "GUI-launching scripts missing a hard exit (they will segfault on "
+        f"interpreter shutdown): {offenders}"
+    )
+
+
+def test_generate_screenshots_does_not_use_sys_exit_main():
+    """Pin the specific regression: the plain sys.exit(main()) pattern."""
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "generate_screenshots.py").read_text()
+    assert "sys.exit(main())" not in src
+    assert "os._exit" in src

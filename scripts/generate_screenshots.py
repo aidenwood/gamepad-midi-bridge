@@ -94,4 +94,19 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Hard-exit, same as console_entry and scripts/screenshot.py. This script
+    # builds a real MainWindow, so letting Python finalise sends Shiboken's
+    # destructionVisitor sweeping live Qt wrappers and it segfaults in
+    # Py_FinalizeEx — six crash reports on 2026-10-24 came from exactly this
+    # path while generating tab screenshots. The screenshots are already
+    # written by the time main() returns, so skipping finalisers is safe.
+    #
+    # In a finally so an abnormal exit (Ctrl-C, uncaught exception) is covered
+    # too — that was the bug an earlier version of console_entry had.
+    _rc = 0
+    try:
+        _rc = main()
+    except KeyboardInterrupt:
+        _rc = 130  # 128 + SIGINT
+    finally:
+        os._exit(_rc if _rc is not None else 0)
