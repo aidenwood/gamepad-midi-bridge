@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from .primitives import UIButton, UILabel, UIInput
+from .primitives.flow_layout import FlowLayout
 
 from ..mapping import Mapping
 
@@ -87,10 +88,22 @@ class MarketplaceTab(QWidget):
 
         # Tag chips
         self._tag_chips_container = QWidget()
-        self._tag_chips_layout = QHBoxLayout(self._tag_chips_container)
-        self._tag_chips_layout.setContentsMargins(0, 0, 0, 0)
-        self._tag_chips_layout.setSpacing(6)
-        self._tag_chips_layout.addStretch(1)
+        # FlowLayout, not QHBoxLayout — one row of tag chips was setting the
+        # floor for the whole window. A QHBoxLayout reports a minimum width
+        # equal to the sum of its children, and this row holds one ~120px chip
+        # per unique tag across every marketplace preset: 3556px of minimum
+        # width against a 380px window floor, which is what
+        # tests/test_narrow_page_floors.py measured. Nothing could shrink the
+        # page below it, so at a laptop-width window the Marketplace content
+        # ran off the right edge instead of reflowing — preset descriptions cut
+        # mid-sentence, the Inspector clipped.
+        #
+        # Same bug and same fix as the Bluetooth tab's action row; see the
+        # header comment in primitives/flow_layout.py. The chips wrap onto as
+        # many rows as they need, so nothing is hidden and nothing pins.
+        self._tag_chips_layout = FlowLayout(
+            self._tag_chips_container, margin=0, h_space=6, v_space=6,
+        )
         self._tag_chips_container.setVisible(False)
         outer.addWidget(self._tag_chips_container)
 
@@ -343,8 +356,10 @@ class MarketplaceTab(QWidget):
 
     def _build_tag_chips(self) -> None:
         """Extract unique tags from visible presets and render filter chips."""
-        # Clear old chips
-        while self._tag_chips_layout.count() > 1:
+        # Clear old chips. `> 0`, not `> 1`: the QHBoxLayout kept a trailing
+        # addStretch(1) that had to survive each rebuild; FlowLayout wraps
+        # instead of pushing, so there is no spacer to leave behind.
+        while self._tag_chips_layout.count() > 0:
             item = self._tag_chips_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
@@ -383,7 +398,7 @@ class MarketplaceTab(QWidget):
                     f"QPushButton:hover {{ background-color: #24262d; }}"
                 )
             chip.clicked.connect(lambda _=False, t=tag: self._toggle_tag_filter(t))
-            self._tag_chips_layout.insertWidget(self._tag_chips_layout.count() - 1, chip)
+            self._tag_chips_layout.addWidget(chip)
 
     # ---------------------------------------------------------------- rendering
 
