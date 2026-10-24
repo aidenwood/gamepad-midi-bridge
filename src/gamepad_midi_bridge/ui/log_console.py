@@ -204,13 +204,15 @@ class LogConsole(QWidget):
         slab of black. The caller caps it.
         """
         header = self.header_height()
-        doc = self._body.document()
-        lines = doc.blockCount()
-        if self._collapsed or not self._body.toPlainText().strip():
+        if self._collapsed:
             return header
+        doc = self._body.document()
         line_h = self._body.fontMetrics().lineSpacing()
         margin = int(doc.documentMargin()) * 2
-        return header + margin + line_h * lines
+        if not self._body.toPlainText().strip():
+            # One line for the placeholder, not one per empty block.
+            return header + margin + line_h
+        return header + margin + line_h * doc.blockCount()
 
     def set_compact(self, compact: bool) -> None:
         """Narrow-pane presentation of the header — mirrors MidiLogPanel.
@@ -288,6 +290,9 @@ class LogConsole(QWidget):
         # take zero height so the auto-sized dock can hug its headers
         # without clipping them.
         body.setMinimumHeight(0)
+        # One line of empty state. Opening a quiet console has to look like
+        # it did something; QPlainTextEdit gives us this for free.
+        body.setPlaceholderText("Nothing logged yet.")
         font = QFont("SF Mono")
         font.setStyleHint(QFont.Monospace)
         font.setPointSize(11)
@@ -330,15 +335,13 @@ class LogConsole(QWidget):
         self.activity.emit("info")
 
     def _sync_body_visibility(self) -> None:
-        """An open console with nothing in it shows no body.
+        """Open shows the body — empty, that is its placeholder line.
 
-        Mirrors MidiLogPanel._sync_body_visibility — not collapsing, just
-        not reserving space for text that does not exist. At the auto-sized
-        dock's tight heights an empty body gets laid out over the header
-        strip, which reads as a clipped header.
+        Mirrors MidiLogPanel._sync_body_visibility. An open panel always
+        shows something, but ``content_height`` only asks for one line
+        when there is nothing in it, so it is never a slab of black.
         """
-        has_text = bool(self._body.toPlainText().strip())
-        self._body.setVisible(not self._collapsed and has_text)
+        self._body.setVisible(not self._collapsed)
 
     # ---- internal hooks ----------------------------------------------------
 

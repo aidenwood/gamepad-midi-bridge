@@ -49,18 +49,35 @@ def _settle(app, passes: int = 8) -> None:
 
 # --------------------------------------------------------------- the panels
 
-def test_empty_panel_asks_for_its_header_only(app):
+def test_empty_panel_asks_for_its_header_plus_one_line(app):
+    """Empty is one line of explanation, not a slab and not nothing.
+
+    Nothing at all was the first attempt and it was wrong: opening the
+    panel then moved the dock six pixels and looked like a dead button.
+    """
     from gamepad_midi_bridge.ui.log_console import LogConsole
     from gamepad_midi_bridge.ui.midi_log_panel import MidiLogPanel
     for panel in (MidiLogPanel(), LogConsole()):
         panel.set_collapsed(False)
         _settle(app)
-        assert panel.content_height() == panel.header_height(), (
-            f"{type(panel).__name__} reserves space for content it has none of")
+        header = panel.header_height()
+        wanted = panel.content_height()
+        assert header < wanted <= header + 48, (
+            f"{type(panel).__name__} open-but-empty wants {wanted}px "
+            f"against a {header}px header")
 
 
-def test_empty_panel_hides_its_body(app):
-    """An empty body laid out at a tight height paints over the header.
+def test_collapsed_panel_asks_for_its_header_only(app):
+    from gamepad_midi_bridge.ui.log_console import LogConsole
+    from gamepad_midi_bridge.ui.midi_log_panel import MidiLogPanel
+    for panel in (MidiLogPanel(), LogConsole()):
+        panel.set_collapsed(True)
+        _settle(app)
+        assert panel.content_height() == panel.header_height()
+
+
+def test_empty_panel_shows_an_explanation_not_a_blank(app):
+    """Open and empty shows why it is empty, never a bare strip.
 
     ``isHidden()``, not ``isVisible()`` — these panels are built standalone
     here, and every child of an unshown widget reports isVisible() False,
@@ -68,8 +85,27 @@ def test_empty_panel_hides_its_body(app):
     """
     from gamepad_midi_bridge.ui.log_console import LogConsole
     from gamepad_midi_bridge.ui.midi_log_panel import MidiLogPanel
+
+    midi = MidiLogPanel()
+    midi.set_collapsed(False)
+    _settle(app)
+    assert not midi._body.isHidden()
+    assert not midi._empty_hint.isHidden()
+    assert midi._list.isHidden()
+    assert midi._empty_hint.text().strip()
+
+    console = LogConsole()
+    console.set_collapsed(False)
+    _settle(app)
+    assert not console._body.isHidden()
+    assert console._body.placeholderText().strip()
+
+
+def test_collapsed_panel_hides_its_body(app):
+    from gamepad_midi_bridge.ui.log_console import LogConsole
+    from gamepad_midi_bridge.ui.midi_log_panel import MidiLogPanel
     for panel in (MidiLogPanel(), LogConsole()):
-        panel.set_collapsed(False)
+        panel.set_collapsed(True)
         _settle(app)
         assert panel._body.isHidden()
 
@@ -85,6 +121,8 @@ def test_panel_grows_with_its_content(app):
     _settle(app)
     assert panel.content_height() > empty
     assert not panel._body.isHidden()
+    assert not panel._list.isHidden()
+    assert panel._empty_hint.isHidden()
 
 
 def test_clearing_shrinks_the_panel_back(app):
@@ -97,8 +135,9 @@ def test_clearing_shrinks_the_panel_back(app):
     _settle(app)
     panel._clear_all()
     _settle(app)
-    assert panel.content_height() == panel.header_height()
-    assert panel._body.isHidden()
+    assert panel.content_height() <= panel.header_height() + 48
+    assert not panel._empty_hint.isHidden()
+    assert panel._list.isHidden()
 
 
 def test_panel_can_always_shrink_to_its_header(app):
@@ -122,10 +161,11 @@ def test_dock_hugs_two_empty_headers(app, window):
     wanted = window._bottom_wanted_height()
     both_headers = (window._log_console.header_height()
                     + window._midi_log_panel.header_height())
-    # Headers plus the splitter handle and a few px of breathing room —
-    # nowhere near the old flat 400.
-    assert wanted < both_headers + 24, (
+    # Two headers, two single-line empty states, a handle and a little
+    # breathing room — nowhere near the old flat 400.
+    assert wanted < both_headers + 110, (
         f"empty dock wants {wanted}px for {both_headers}px of headers")
+    assert wanted < 200
 
 
 def test_dock_grows_when_midi_arrives(app, window):
@@ -202,3 +242,51 @@ def test_wrapped_banner_row_is_transparent(app, window):
     window.resize(380, 820)
     _settle(app)
     assert "transparent" in window._banner_row2_widget.styleSheet()
+
+
+def test_opening_an_empty_panel_visibly_changes_the_dock(app, window):
+    """The regression guard for the first cut of auto-height.
+
+    Hiding an empty body made the dock hug two bare header strips, so
+    clicking MIDI on a quiet session grew the dock by six pixels — the
+    toggle flipped its arrow and nothing else happened. An affordance that
+    produces no visible result is a broken button as far as the user is
+    concerned.
+    """
+    window.resize(380, 820)
+    _settle(app)
+    window._midi_log_panel.set_collapsed(True)
+    window._log_console.set_collapsed(True)
+    _settle(app)
+    closed = window._bottom_wanted_height()
+
+    window._midi_log_btn.setChecked(True)
+    window._toggle_midi_log()
+    _settle(app)
+    opened = window._bottom_wanted_height()
+
+    assert opened - closed >= 20, (
+        f"opening an empty MIDI panel moved the dock {opened - closed}px — "
+        "not enough to read as having done anything")
+
+
+def test_a_queued_autosize_cannot_land_after_a_drag(app, window):
+    """A nudge queued before the drag must not fire a moment after it.
+
+    The auto-resize is debounced by 250 ms. Without cancelling it on
+    drag, the dock jumps back a quarter-second after the user lets go of
+    the handle — and in a long test run it also lands in whatever is
+    running next, which is how this first showed up: a flaky failure in
+    test_connection_ui rather than anything visibly wrong.
+    """
+    window.resize(900, 820)
+    _settle(app)
+    window._midi_log_panel.set_collapsed(False)
+    # Queue a nudge, then drag before it can fire.
+    window._nudge_bottom_autosize()
+    assert window._bottom_autosize_timer.isActive()
+    total = sum(window._body_splitter.sizes())
+    window._body_splitter.setSizes([total - 300, 300])
+    window._on_body_splitter_moved(0, 1)
+    assert not window._bottom_autosize_timer.isActive(), (
+        "a drag left an auto-resize in flight")

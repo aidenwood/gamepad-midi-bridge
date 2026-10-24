@@ -22,7 +22,7 @@ Exports:
 from gamepad_midi_bridge.ui.primitives.button import UIButton
 from gamepad_midi_bridge.ui.primitives.card import UICard
 from gamepad_midi_bridge.ui.primitives.context_menu import attach_context_menu
-from gamepad_midi_bridge.ui.primitives.dropdown import UIDropdownMenu
+from gamepad_midi_bridge.ui.primitives.dropdown import UIDropdownMenu, style_as_dropdown
 from gamepad_midi_bridge.ui.primitives.frame import (
     ReflowFrame,
     ReflowWidget,
@@ -40,6 +40,7 @@ __all__ = [
     "UIChromeFrame",
     "UIDoubleSpinBox",
     "UIDropdownMenu",
+    "style_as_dropdown",
     "UIInput",
     "UILabel",
     "UISpinBox",

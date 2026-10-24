@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QPushButton, QStackedLayout, QVBoxLayout, QWidget,
 )
 
+from .primitives.dropdown import style_as_dropdown
+
 from .. import presets as preset_io
 from .. import snapshots as snap_io
 from ..license import is_pro
@@ -311,7 +313,7 @@ class PresetManager(QWidget):
             return
         
         from PySide6.QtWidgets import QMenu
-        menu = QMenu(self)
+        menu = style_as_dropdown(QMenu(self))
         
         # Move to folder action
         move_action = menu.addAction("Move to folder…")

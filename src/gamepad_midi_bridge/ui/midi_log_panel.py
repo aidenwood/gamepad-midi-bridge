@@ -239,14 +239,20 @@ class MidiLogPanel(QWidget):
     def content_height(self) -> int:
         """Height this panel would like, given what is actually in it.
 
-        Collapsed or empty, that is the header alone — an empty log does not
-        earn a slab of black. Otherwise it is the header plus the rows it
-        holds, so the dock grows as messages arrive instead of reserving
-        space for messages that may never come. The caller caps it.
+        Collapsed, that is the header alone. Open but empty, it is the
+        header plus ONE line of empty state — enough that opening the panel
+        visibly does something, far short of the slab of black it used to
+        reserve. Otherwise it is the header plus the rows it holds, so the
+        dock grows as messages arrive instead of reserving space for
+        messages that may never come. The caller caps it.
         """
         header = self.header_height()
-        if self._collapsed or self._visible_count == 0:
+        if self._collapsed:
             return header
+        margins = self._body.layout().contentsMargins()
+        chrome = margins.top() + margins.bottom()
+        if self._visible_count == 0:
+            return header + chrome + self._empty_hint.sizeHint().height()
         row = self._list.sizeHintForRow(0)
         if row <= 0:
             row = 18
@@ -362,6 +368,17 @@ class MidiLogPanel(QWidget):
         # and clipped instead. The parent QSplitter owns the actual size.
         self._list.setMinimumHeight(0)
         self._list.itemSelectionChanged.connect(self._on_selection_changed)
+
+        # One line of empty state, shown instead of the list when there is
+        # nothing to list. Without it, opening this panel on a quiet session
+        # grew the dock by six pixels and looked like the toggle was broken —
+        # the auto-height fix traded a slab of black for no feedback at all.
+        self._empty_hint = QLabel(
+            "No MIDI yet — press a button on your controller.")
+        self._empty_hint.setObjectName("MidiLogPanelEmptyHint")
+        self._empty_hint.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        v.addWidget(self._empty_hint)
         v.addWidget(self._list, 1)
 
         self._user_scrolled = False
@@ -395,14 +412,17 @@ class MidiLogPanel(QWidget):
         self._sync_body_visibility()
 
     def _sync_body_visibility(self) -> None:
-        """An open panel with nothing in it shows no body.
+        """Open shows the list, or one line of empty state in its place.
 
-        This is NOT collapsing — the ▾ state is the user's choice and stays
-        untouched. It stops an empty list painting a slab of black, and at
-        the auto-sized dock's tight heights it stops that slab being laid
-        out ON TOP of the header strip, which read as a clipped header.
+        An open panel always shows SOMETHING — opening it has to look like
+        it did something. What it must not do is reserve a slab of black
+        for messages that have not arrived, so the empty state is a single
+        line and ``content_height`` asks for exactly that much.
         """
-        self._body.setVisible(not self._collapsed and self._visible_count > 0)
+        empty = self._visible_count == 0
+        self._body.setVisible(not self._collapsed)
+        self._empty_hint.setVisible(empty)
+        self._list.setVisible(not empty)
 
     def _on_scroll_changed(self) -> None:
         """Track if the user has manually scrolled away from the bottom."""

@@ -32,6 +32,47 @@ from PySide6.QtCore import QObject, QPoint, Qt
 from PySide6.QtGui import QAction, QCursor, QIcon, QKeySequence
 from PySide6.QtWidgets import QMenu, QPushButton, QWidget
 
+#: The objectName the global QSS targets. One definition — call sites use
+#: ``style_as_dropdown()`` rather than repeating the string.
+DROPDOWN_OBJECT_NAME = "UIDropdownMenu"
+
+
+def style_as_dropdown(menu: QMenu) -> QMenu:
+    """Opt an existing ``QMenu`` into the app's dropdown styling.
+
+    For menus built with raw ``QMenu(...)`` and ``addAction`` rather than this
+    module's fluent API. Returns the menu so it can be used inline.
+
+    WHY THIS EXISTS — menu styling consistency, 2026-10-24.
+    ``styles.qss`` styles ``QMenu#UIDropdownMenu``, deliberately scoped by
+    objectName so the app's dark surface does not leak into native menus we
+    do not own (the macOS application menu, the tray right-click menu). Five
+    in-app menus were built as bare ``QMenu(self)`` and never set that name,
+    so none of that rule applied to them: they fell back to the global
+    ``QWidget`` rule and rendered as a plain #0e0f12 box instead of the
+    intended #1d2028 elevated card with its border, radius, item padding and
+    hover states. Two visual languages for the same control.
+
+    This is COSMETIC — measured, not assumed. Rendering both offscreen against
+    the real stylesheet gives styled #1d2028 and bare #0e0f12, both at full
+    alpha, so an unstyled menu was never transparent or unreadable.
+
+    Specifically NOT the cause of the see-through menu in the v3 screen
+    recording: that frame is a crossfade between the menu closing and the
+    Connectors tab opening, and the frames 0.4s either side of it show the menu
+    painting solidly. ``WA_TranslucentBackground`` on the 3D chrome does not
+    propagate to a QMenu either — checked, the popup reports the attribute
+    unset with a translucent parent. Do not "fix" that frame.
+
+    Deliberately NOT applied to the system-tray menu — that one should stay
+    native. See the QMenu block in ``styles.qss``.
+    """
+    menu.setObjectName(DROPDOWN_OBJECT_NAME)
+    # Matches UIDropdownMenu: keep explicitly-placed separators where they
+    # were put, instead of letting Qt collapse them during macOS menu merging.
+    menu.setSeparatorsCollapsible(False)
+    return menu
+
 
 class UIDropdownMenu(QObject):
     """Fluent wrapper around QMenu — Radix-style API.
@@ -50,12 +91,11 @@ class UIDropdownMenu(QObject):
         self.menu = QMenu(title or "", parent)
         # Stable object name lets the global QSS target this menu (and any
         # submenus, which inherit) without leaking generic QMenu styling
-        # into native Qt menus we don't own.
-        self.menu.setObjectName("UIDropdownMenu")
-        # Don't let macOS-native menu-merging hijack items we explicitly
-        # name "Settings" / "Preferences" / "Quit" etc. inside an in-app
-        # dropdown — those should stay where the user dropped them.
-        self.menu.setSeparatorsCollapsible(False)
+        # into native Qt menus we don't own. Shared with every raw-QMenu call
+        # site via the same helper, so the two cannot drift — and separators
+        # stay where they were put rather than being collapsed by macOS menu
+        # merging.
+        style_as_dropdown(self.menu)
 
     # ============================================================ build API
 

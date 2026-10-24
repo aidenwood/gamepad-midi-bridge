@@ -50,7 +50,7 @@ def test_real_window_console_limits_and_controller_status(tmp_path):
             win._body_splitter.setSizes([450, 250])
             win._on_body_splitter_moved(450, 1)
             assert not win._log_console.is_collapsed()
-            assert win._bottom_open_height > win._log_console.header_height()
+            assert win._bottom_user_height > win._log_console.header_height()
             win._multi.connections = [
                 SlotConnection(name='DualSense', phase='Bridging', port='MIDI 1', running=True, messages=12),
                 SlotConnection(name='Xbox', phase='Error', channel=2, error='Output unavailable'),

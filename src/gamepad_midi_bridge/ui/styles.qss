@@ -520,6 +520,14 @@ QLabel#MidiLogPanelTitle {
     letter-spacing: 1.2px;
 }
 
+/* One line shown in place of the list while there is nothing to list.
+   Muted on purpose — it is an explanation, not content. */
+QLabel#MidiLogPanelEmptyHint {
+    color: #8a9099;
+    background: transparent;
+    padding: 2px 2px 4px 2px;
+}
+
 QComboBox#MidiLogPanelFilterCombo {
     background-color: #0e0f12;
     color: #c2c6cc;

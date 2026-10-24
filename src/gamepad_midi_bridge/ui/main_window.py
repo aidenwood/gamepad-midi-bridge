@@ -1299,7 +1299,31 @@ class MainWindow(QMainWindow):
         """
         self._style_menu(menu)
         self._open_dropdown = menu
-        menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
+
+        # Anchor the menu's LEFT edge under the button's left edge, unless
+        # that would push it past the window's right edge — then right-align
+        # it to the button instead.
+        #
+        # WHY: the header triggers are right-aligned, and STATUS is the last
+        # one. Anchoring left-under-left meant its menu grew rightward from a
+        # button already at the right edge, so "Plug in a controller, then
+        # open Connect." and "Test controller inputs…" ran outside the window
+        # and were cut mid-word. Qt keeps a popup on SCREEN, which is why this
+        # never raised anything — but on a narrow window the menu still hangs
+        # outside the app it belongs to.
+        #
+        # Right-aligning is what the trigger's own position implies: a menu
+        # under a right-hand button should share its right edge.
+        top_left = button.mapToGlobal(button.rect().bottomLeft())
+        menu_width = menu.sizeHint().width()
+        window_right = self.mapToGlobal(self.rect().bottomRight()).x()
+        if top_left.x() + menu_width > window_right:
+            right_anchor = button.mapToGlobal(button.rect().bottomRight())
+            top_left.setX(max(
+                self.mapToGlobal(self.rect().topLeft()).x(),
+                right_anchor.x() - menu_width,
+            ))
+        menu.popup(top_left)
 
     def _open_menu_dropdown(self) -> None:
         """Everything that is not a mode or a header action."""
@@ -2119,6 +2143,12 @@ class MainWindow(QMainWindow):
     def _on_body_splitter_moved(self, _pos: int, _index: int) -> None:
         if getattr(self, "_clamping_bottom", False):
             return
+        # A drag invalidates any auto-resize already in flight. Without this
+        # a nudge queued up to 250 ms ago still fires and re-sizes the dock
+        # a quarter-second after the user let go of the handle.
+        timer = getattr(self, "_bottom_autosize_timer", None)
+        if timer is not None:
+            timer.stop()
         sizes = self._body_splitter.sizes()
         if len(sizes) != 2:
             return
@@ -2139,10 +2169,12 @@ class MainWindow(QMainWindow):
         self._console_btn.setChecked(not self._log_console.is_collapsed())
         self._midi_log_btn.setChecked(not self._midi_log_panel.is_collapsed())
         if height > max(self._log_console.header_height(), self._midi_log_panel.header_height()) + 12:
-            self._bottom_open_height = height
             # A drag is a deliberate choice. From here the dock keeps the
             # height the user picked instead of auto-hugging its content —
             # an auto-size that silently undoes a drag is infuriating.
+            # ONE name for this number: _bottom_open_height used to hold the
+            # same value and, once auto-height landed, nothing read it. Two
+            # names for one fact is how they drift apart.
             self._bottom_user_height = height
         else:
             # Dragged all the way down to the headers: that is "close it",
