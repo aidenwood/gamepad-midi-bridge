@@ -44,6 +44,8 @@ The connector copies this folder into:
 Then in Live: Preferences -> Link, Tempo & MIDI -> Control Surface dropdown ->
 pick "Universal Controller MIDI". Set Input to the bridge's virtual MIDI port.
 """
+import time
+
 from __future__ import absolute_import
 
 import logging
@@ -218,6 +220,36 @@ class GamepadMidiBridge(ControlSurface):
         new_idx = min(len(scenes) - 1, idx + 1)
         song.view.selected_scene = song.scenes[new_idx]
         song.view.selected_scene.fire_as_selected()
+
+    # ----------------------------------------------------------------- heartbeat
+    # Live calls update_display roughly ten times a second. Sending a small
+    # SysEx from here is how the bridge learns that this script is actually
+    # LOADED and SELECTED, rather than merely present on disk — a Remote
+    # Script can sit in the folder with the control surface set to None and
+    # look perfectly installed from the outside.
+    #
+    # Throttled to once a second: the bridge treats a heartbeat as valid for
+    # three, so one a second tolerates a stall without flooding the port.
+    #
+    # Byte layout must stay in step with connectors/handshake.py:
+    #     F0 7D 'U' 'C' 'M' <host> <major> <minor> F7
+    # 0x7D is the manufacturer ID reserved for non-commercial use. 0x01 is
+    # the frozen host id for Ableton — an older script in the wild keeps
+    # sending the number it was built with, so it must never be renumbered.
+    _HEARTBEAT = (0xF0, 0x7D, 0x55, 0x43, 0x4D, 0x01, 1, 0, 0xF7)
+    _HEARTBEAT_INTERVAL = 1.0
+
+    def update_display(self):
+        super(GamepadMidiBridge, self).update_display()
+        try:
+            now = time.time()
+            if now - getattr(self, "_last_heartbeat", 0.0) >= self._HEARTBEAT_INTERVAL:
+                self._last_heartbeat = now
+                self._send_midi(self._HEARTBEAT)
+        except Exception:
+            # Never let a status heartbeat take Live's control surface down.
+            # A missing light is a nuisance; a dead Remote Script is a gig.
+            pass
 
     # ------------------------------------------------------------------ teardown
     def disconnect(self):

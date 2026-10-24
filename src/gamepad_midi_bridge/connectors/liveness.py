@@ -38,6 +38,7 @@ class HostState(str, Enum):
     NOT_INSTALLED = "not_installed"
     INSTALLED = "installed"      # present, host not running
     RUNNING = "running"          # host process is up and integration present
+    CONNECTED = "connected"      # the integration is talking to us — proof
     STALE = "stale"              # installed but the file is older than expected
     UNKNOWN = "unknown"          # probe failed; never pretend
 
@@ -68,8 +69,23 @@ class HostStatus:
 
     @property
     def is_live(self) -> bool:
-        """True only when the host is open AND the integration is in place."""
-        return self.state is HostState.RUNNING
+        """True when the host is at least open with the integration in place.
+
+        CONNECTED is strictly stronger than RUNNING — it means the
+        integration sent us a heartbeat, rather than us inferring from a
+        process name — but both are states where the thing works.
+        """
+        return self.state in (HostState.RUNNING, HostState.CONNECTED)
+
+    @property
+    def is_proven(self) -> bool:
+        """True only when the host actually talked to us.
+
+        RUNNING is inference from a process list; a host can be open with the
+        control surface set to None and still look RUNNING. CONNECTED is the
+        only state backed by evidence.
+        """
+        return self.state is HostState.CONNECTED
 
 
 def _list_processes() -> list[str]:
@@ -137,17 +153,31 @@ def status_for(
     slug: str,
     verify_result: tuple[str, str] | None,
     processes: list[str] | None = None,
+    *,
+    heartbeat_connected: bool = False,
 ) -> HostStatus:
-    """Compose install state and process state into one status.
+    """Compose install state, process state and heartbeat into one status.
 
     `verify_result` is whatever ``Connector.verify()`` returned — a
     (status, details) pair of 'verified' | 'outdated' | 'missing', or None
     when the probe could not run at all.
+
+    `heartbeat_connected` comes from HeartbeatTracker.is_connected(). It is
+    the only evidence-backed signal here, so it outranks the process check:
+    a host that is talking to us is connected whether or not we recognised
+    its process name.
     """
+
     if verify_result is None:
         return HostStatus(slug, HostState.UNKNOWN, "Could not check the integration")
 
     install_state, detail = verify_result
+
+    # Heartbeat first. If the integration is talking to us then it is loaded
+    # and listening, which is better evidence than any file stat — a Remote
+    # Script can be present on disk and not selected in Live's preferences.
+    if heartbeat_connected:
+        return HostStatus(slug, HostState.CONNECTED, "Connected — the integration is sending")
 
     if install_state == "missing":
         return HostStatus(slug, HostState.NOT_INSTALLED, detail)
