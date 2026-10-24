@@ -29,6 +29,7 @@ from .nodes import evaluate as _node_evaluate
 from .nodes.sinks import resolve as _node_sink_resolve
 from .nodes.sinks import value_to_midi as _node_value_to_midi
 from .calibration import calibrate
+from .connectors.handshake import HeartbeatTracker as _HeartbeatTracker
 from .controller import ControllerInfo, ControllerReader
 from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
@@ -235,6 +236,12 @@ class BridgeWorker(QObject):
         # Stick axes currently silenced by a single-axis slider mode. Tracked so
         # the centre value is sent once on the transition rather than every poll.
         self._muted_axes: set[int] = set()
+        # Host handshake. Fed from `_on_midi_in` on librtmidi's C thread and
+        # read from the GUI thread via `connected_hosts()`. No lock: the only
+        # writes are whole-value dict assignments in HeartbeatTracker.record,
+        # which are atomic under the GIL, and a stale read is worth at most one
+        # refresh interval on a status light.
+        self._host_beats = _HeartbeatTracker()
         self._last_raw_scan = 0.0
         # Battery + touchpad poll less often — they don't need 100Hz
         self._last_battery_poll: float = 0.0
@@ -967,6 +974,27 @@ class BridgeWorker(QObject):
             self.status.emit(f"MIDI-in unavailable: {e}")
             self._midi_in = None
 
+    def connected_hosts(self) -> list[str]:
+        """Host slugs that have sent a heartbeat inside the timeout.
+
+        The read side of the handshake, for a status light. Safe to call from
+        the GUI thread — see the `_host_beats` comment in `__init__` for why no
+        lock is needed.
+
+        This is PROOF of a connection, not an inference: a slug only appears
+        here if that host's connector template actually sent us a SysEx
+        heartbeat, and it disappears on its own `DEFAULT_TIMEOUT_SECONDS` after
+        the host stops. A host that quits does not leave the light green.
+
+        Returns [] when nothing is connected, including when the MIDI input
+        port failed to open — callers never need to special-case that.
+        """
+        return self._host_beats.connected_hosts(time.monotonic())
+
+    def host_version(self, slug: str) -> str | None:
+        """Reported version of a connected host, or None if never seen."""
+        return self._host_beats.version_of(slug)
+
     def _on_midi_in(self, event, _data) -> None:
         """rtmidi callback — runs on librtmidi's C thread.
 
@@ -993,6 +1021,18 @@ class BridgeWorker(QObject):
             return
         msg_type = status_byte & 0xF0
         channel = status_byte & 0x0F
+
+        # --- Host handshake (SysEx heartbeat from a connector template).
+        # Cheapest possible check first: only 0xF0 messages get as far as a
+        # parse, so the Note/CC path below pays one integer comparison. This
+        # runs on librtmidi's C thread, so it must not block — `feed()` is a
+        # parse plus a dict write, and returns None for anything that is not
+        # ours. We return immediately on a match: a heartbeat is never also a
+        # binding trigger, and falling through would walk every binding for a
+        # message that can never match one.
+        if status_byte == 0xF0:
+            self._host_beats.feed(message, now=time.monotonic())
+            return
 
         # --- Feature #15: Program Change → preset hot-swap. Runs regardless
         # of haptic_input.enabled so DAWs can drive preset loads even when the

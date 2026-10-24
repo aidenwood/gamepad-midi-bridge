@@ -440,6 +440,19 @@ class MainWindow(QMainWindow):
         self._midi_log_panel.collapse_changed.connect(
             lambda _collapsed: self._set_bottom_panel_sizes()
         )
+        # Auto-height: the dock hugs its content, so it has to follow the
+        # content as it arrives. Throttled to 4 Hz — content_grew fires on
+        # the MIDI hot path and a splitter resize per message would be
+        # thousands of relayouts a minute.
+        self._bottom_user_height = None   # None = auto; set by a manual drag
+        self._bottom_autosize_timer = QTimer(self)
+        self._bottom_autosize_timer.setSingleShot(True)
+        self._bottom_autosize_timer.setInterval(250)
+        self._bottom_autosize_timer.timeout.connect(self._apply_bottom_panel_sizes)
+        self._midi_log_panel.content_grew.connect(self._nudge_bottom_autosize)
+        self._log_console.activity.connect(
+            lambda _severity: self._nudge_bottom_autosize()
+        )
         # Dragging the handle past a panel's collapsed height should REOPEN it
         # (and dragging it down to the header should collapse it). Without this,
         # a drag resizes the pane but the body stays hidden — you get an empty
@@ -786,6 +799,13 @@ class MainWindow(QMainWindow):
         self._status_row1_layout.setSpacing(10)
 
         self._status_row2_widget = QWidget()
+        # Transparent, or the wrapped row paints the global QWidget base
+        # colour and the header reads as a purple bar with a black strip
+        # bolted under it. Row 2 is the SAME bar, just continued.
+        self._status_row2_widget.setObjectName("StatusBarRow2")
+        self._status_row2_widget.setAttribute(Qt.WA_StyledBackground, True)
+        self._status_row2_widget.setStyleSheet(
+            "QWidget#StatusBarRow2 { background: transparent; }")
         self._status_row2_layout = QHBoxLayout(self._status_row2_widget)
         self._status_row2_layout.setContentsMargins(0, 0, 0, 0)
         self._status_row2_layout.setSpacing(10)
@@ -1692,6 +1712,13 @@ class MainWindow(QMainWindow):
         self._banner_row1.setContentsMargins(0, 0, 0, 0)
         self._banner_row1.setSpacing(10)
         self._banner_row2_widget = QWidget()
+        # Same reason as the header's row 2 — see _build_status_bar. A
+        # wrapped row must continue its bar's background, not start a new
+        # black one underneath it.
+        self._banner_row2_widget.setObjectName("UpdateBannerRow2")
+        self._banner_row2_widget.setAttribute(Qt.WA_StyledBackground, True)
+        self._banner_row2_widget.setStyleSheet(
+            "QWidget#UpdateBannerRow2 { background: transparent; }")
         self._banner_row2 = QHBoxLayout(self._banner_row2_widget)
         self._banner_row2.setContentsMargins(0, 0, 0, 0)
         self._banner_row2.setSpacing(10)
@@ -2113,6 +2140,15 @@ class MainWindow(QMainWindow):
         self._midi_log_btn.setChecked(not self._midi_log_panel.is_collapsed())
         if height > max(self._log_console.header_height(), self._midi_log_panel.header_height()) + 12:
             self._bottom_open_height = height
+            # A drag is a deliberate choice. From here the dock keeps the
+            # height the user picked instead of auto-hugging its content —
+            # an auto-size that silently undoes a drag is infuriating.
+            self._bottom_user_height = height
+        else:
+            # Dragged all the way down to the headers: that is "close it",
+            # not "pin it at header height". Hand sizing back to auto so the
+            # dock reopens at content height next time there is content.
+            self._bottom_user_height = None
 
     def _apply_bottom_panel_sizes(self) -> None:
         if not hasattr(self, "_body_splitter"):
@@ -2122,16 +2158,48 @@ class MainWindow(QMainWindow):
         total = max(1, self._body_splitter.height() - self._body_splitter.handleWidth())
         header = self._bottom_collapsed_height()
         opened = not (self._log_console.is_collapsed() and self._midi_log_panel.is_collapsed())
-        want = getattr(self, "_bottom_open_height", 200)
-        if getattr(self, "_bottom_stacked", False) and opened:
-            # Stacked, both open: 200 px total is 100 px each, which is two
-            # headers and about one visible log line. Ask for enough that
-            # each pane still shows content; the limit clamps it anyway.
-            if not (self._log_console.is_collapsed()
-                    or self._midi_log_panel.is_collapsed()):
-                want = want * 2
-        bottom = min(limit, want) if opened else header
+        bottom = min(limit, self._bottom_wanted_height()) if opened else header
         self._body_splitter.setSizes([max(100, total - bottom), bottom])
+
+    def _nudge_bottom_autosize(self) -> None:
+        """Re-hug the dock to its content, at most 4x a second.
+
+        No-op once the user has dragged the splitter — their height stands.
+        """
+        if getattr(self, "_bottom_user_height", None) is not None:
+            return
+        timer = getattr(self, "_bottom_autosize_timer", None)
+        if timer is not None and not timer.isActive():
+            timer.start()
+
+    def _bottom_wanted_height(self) -> int:
+        """How tall the bottom dock should be right now.
+
+        Auto by default: the dock hugs whatever MIDI activity and Console
+        actually contain, so two empty panels are two headers rather than a
+        400 px slab of black. It grows as messages arrive and stops at
+        ``_bottom_height_limit``.
+
+        The moment the user drags the splitter themselves, their height wins
+        and this stops second-guessing it — an auto-size that overrides a
+        deliberate drag is infuriating.
+        """
+        manual = getattr(self, "_bottom_user_height", None)
+        if manual is not None:
+            return manual
+        gap = (self._bottom_splitter.handleWidth()
+               if getattr(self, "_bottom_stacked", False) else 0)
+        panels = (self._midi_log_panel, self._log_console)
+        heights = [p.content_height() for p in panels]
+        if getattr(self, "_bottom_stacked", False):
+            # Stacked: the panes are above each other, so the dock needs the
+            # sum. Side by side they share one height, so it is the max.
+            wanted = sum(heights) + gap
+        else:
+            wanted = max(heights)
+        # A little breathing room so the last line is not flush against the
+        # splitter handle, and a floor of the collapsed height.
+        return max(self._bottom_collapsed_height(), wanted + 6)
 
     def _toggle_inspector(self) -> None:
         """Show / hide the right inspector(s). When split is on, both

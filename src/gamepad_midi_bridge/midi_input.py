@@ -52,6 +52,27 @@ def list_input_ports() -> List[str]:
         del inp
 
 
+def _filter_message_types(inp) -> None:
+    """Decide what the input port is allowed to deliver.
+
+    One definition, called from every open path — this used to be the same
+    `ignore_types(...)` line copy-pasted at two call sites, which is how the
+    Windows branch and the virtual-port branch would quietly disagree.
+
+    `timing` and `active_sense` stay ignored: they are the genuine firehose
+    (clock ticks arrive 24x per quarter note) and nothing here consumes them.
+
+    `sysex` is DELIVERED as of 2026-10-24. It was ignored on the reasonable
+    grounds that we only care about Notes/CCs — but the host handshake in
+    `connectors/handshake.py` is a SysEx heartbeat
+    (F0 7D 'U' 'C' 'M' <host> <major> <minor> F7), so with sysex=True the
+    heartbeat was discarded by rtmidi before any of our code ran and the
+    connection status could never leave "inferred". SysEx is low-rate and
+    `HeartbeatTracker.feed()` is defensive about junk, so this costs nothing.
+    """
+    inp.ignore_types(sysex=False, timing=True, active_sense=True)
+
+
 def open_input_port(preferred_name: str = INPUT_PORT_NAME) -> OpenedInputPort:
     """Open (or create) a MIDI input port.
 
@@ -70,9 +91,7 @@ def open_input_port(preferred_name: str = INPUT_PORT_NAME) -> OpenedInputPort:
                 fb.lower() in lowered for fb in WINDOWS_FALLBACK_INPUT_NAMES
             ):
                 inp.open_port(i)
-                # Ignore SysEx/MTC/active-sense — we only care about Notes/CCs
-                # and the firehose of timing messages just wastes callback time.
-                inp.ignore_types(sysex=True, timing=True, active_sense=True)
+                _filter_message_types(inp)
                 return OpenedInputPort(port=inp, name=name, virtual=False)
         del inp
         raise MidiInputError(
@@ -83,7 +102,7 @@ def open_input_port(preferred_name: str = INPUT_PORT_NAME) -> OpenedInputPort:
     # macOS / Linux — make a real virtual input port
     try:
         inp.open_virtual_port(preferred_name)
-        inp.ignore_types(sysex=True, timing=True, active_sense=True)
+        _filter_message_types(inp)
         return OpenedInputPort(port=inp, name=preferred_name, virtual=True)
     except Exception as e:
         del inp

@@ -20,10 +20,17 @@ Pure stdlib: no Qt, no MIDI I/O, no clock of its own — the caller supplies
 timestamps. That keeps it testable without a DAW, and keeps it off the hot
 rtmidi callback thread's conscience.
 
-NOT yet wired to the input port. `midi_input.open_input_port` currently calls
-``ignore_types(sysex=True, ...)``, so SysEx never reaches the callback. Turning
-that on touches the live MIDI path on librtmidi's C thread, which the bridge
-comments are explicit must stay non-blocking — a deliberate, separate change.
+WIRED as of 2026-10-24. `midi_input._filter_message_types` now passes SysEx
+through (`sysex=False`) while still ignoring clock and active-sense, and
+`BridgeWorker._on_midi_in` feeds every inbound message to a `HeartbeatTracker`.
+
+That feed runs on librtmidi's C thread, which the bridge comments are explicit
+must stay non-blocking — so the hot path does exactly two things: a cheap
+first-byte check for 0xF0, then `tracker.feed()`, which is a dict write. No
+lock, no allocation beyond the parse, no I/O. `feed()` is also total: it returns
+None for anything that is not our heartbeat, and `parse()` is exhaustively
+fuzzed against malformed input in tests/test_connector_handshake.py, because
+this now sees every SysEx byte any host on the system decides to send.
 """
 from __future__ import annotations
 

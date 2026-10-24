@@ -312,6 +312,12 @@ QFrame#UpdateBanner {
 QLabel#UpdateBannerLabel {
     color: #2dd4bf;
     font-weight: 500;
+    /* Transparent, not the inherited base colour. Without this the message
+       renders as a black box floating inside the banner's own background —
+       a filled panel nobody asked for, and it got worse once the banner
+       learned to wrap (the box then spans the full width above the
+       buttons). The banner is the surface; the label just sits on it. */
+    background: transparent;
 }
 
 QPushButton#UpdateBannerOpenButton {

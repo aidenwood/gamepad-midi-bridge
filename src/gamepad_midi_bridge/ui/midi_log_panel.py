@@ -19,7 +19,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
@@ -171,6 +171,11 @@ class MidiLogPanel(QWidget):
     # recompute QSplitter sizes (see :pymeth:`MainWindow._set_bottom_panel_sizes`).
     collapse_changed = Signal(bool)
 
+    # Emitted when a row lands. MainWindow uses it to re-hug an auto-sized
+    # bottom dock to the new content height; it throttles on its side,
+    # because this fires on the MIDI hot path.
+    content_grew = Signal()
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._current_filter = MidiFilter.ALL
@@ -218,6 +223,37 @@ class MidiLogPanel(QWidget):
 
     def is_collapsed(self) -> bool:
         return self._collapsed
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        """Floor is the header — a panel can always shrink to its own strip.
+
+        Qt otherwise derives this from the QListWidget inside (~120 px even
+        when empty), which beats the auto-sized dock's smaller request: the
+        splitter hands over less than the panel insists on, and the header
+        renders vertically clipped. Collapsing already proves a panel can
+        live at header height, so that is the honest floor.
+        """
+        hint = super().minimumSizeHint()
+        return QSize(hint.width(), min(hint.height(), self.header_height()))
+
+    def content_height(self) -> int:
+        """Height this panel would like, given what is actually in it.
+
+        Collapsed or empty, that is the header alone — an empty log does not
+        earn a slab of black. Otherwise it is the header plus the rows it
+        holds, so the dock grows as messages arrive instead of reserving
+        space for messages that may never come. The caller caps it.
+        """
+        header = self.header_height()
+        if self._collapsed or self._visible_count == 0:
+            return header
+        row = self._list.sizeHintForRow(0)
+        if row <= 0:
+            row = 18
+        margins = self._body.layout().contentsMargins()
+        frame = self._list.frameWidth() * 2
+        return (header + margins.top() + margins.bottom() + frame
+                + row * self._visible_count)
 
     def set_compact(self, compact: bool) -> None:
         """Narrow-pane presentation of the header.
@@ -318,9 +354,13 @@ class MidiLogPanel(QWidget):
 
         self._list = QListWidget()
         self._list.setObjectName("MidiLogPanelList")
-        # Minimum height keeps the list scrollable when fully expanded;
-        # the parent QSplitter owns the actual size.
-        self._list.setMinimumHeight(80)
+        # No minimum height. The dock is auto-sized from content
+        # (MainWindow._bottom_wanted_height), so an EMPTY list must be able
+        # to take zero height — an 80 px floor on an empty log is exactly
+        # the slab of black the auto-height exists to remove, and when the
+        # dock honours the smaller request anyway the header gets squashed
+        # and clipped instead. The parent QSplitter owns the actual size.
+        self._list.setMinimumHeight(0)
         self._list.itemSelectionChanged.connect(self._on_selection_changed)
         v.addWidget(self._list, 1)
 
@@ -352,7 +392,17 @@ class MidiLogPanel(QWidget):
         # ``QSplitter`` owns sizing — see ``MainWindow._set_bottom_panel_sizes``.
         # Self-resizing fights the splitter and produces drag flicker.
         self._toggle_btn.setText("▴" if self._collapsed else "▾")
-        self._body.setVisible(not self._collapsed)
+        self._sync_body_visibility()
+
+    def _sync_body_visibility(self) -> None:
+        """An open panel with nothing in it shows no body.
+
+        This is NOT collapsing — the ▾ state is the user's choice and stays
+        untouched. It stops an empty list painting a slab of black, and at
+        the auto-sized dock's tight heights it stops that slab being laid
+        out ON TOP of the header strip, which read as a clipped header.
+        """
+        self._body.setVisible(not self._collapsed and self._visible_count > 0)
 
     def _on_scroll_changed(self) -> None:
         """Track if the user has manually scrolled away from the bottom."""
@@ -413,9 +463,16 @@ class MidiLogPanel(QWidget):
             self._list.addItem(item)
             self._visible_count += 1
 
+        # First row in an empty panel brings the body back.
+        self._sync_body_visibility()
+
         # Auto-scroll to bottom unless user scrolled.
         if not self._user_scrolled:
             self._list.scrollToBottom()
+
+        # Tell the dock its content grew, so an auto-sized dock can follow.
+        # Throttled by the listener, not here — this is a hot path.
+        self.content_grew.emit()
 
     def _passes_filter(self, filter_tag: MidiFilter) -> bool:
         """Check if a row's tag matches the current filter."""
@@ -448,6 +505,9 @@ class MidiLogPanel(QWidget):
                 item.setFont(self._monospace_font())
                 self._list.addItem(item)
                 self._visible_count += 1
+        # A filter can empty the visible list without emptying the panel.
+        self._sync_body_visibility()
+        self.content_grew.emit()
         if not self._user_scrolled:
             self._list.scrollToBottom()
 
@@ -458,6 +518,9 @@ class MidiLogPanel(QWidget):
         self._visible_count = 0
         self._user_scrolled = False
         self._blinkers.clear()
+        # Cleared means empty: drop the body and let the dock shrink back.
+        self._sync_body_visibility()
+        self.content_grew.emit()
 
     @staticmethod
     def _monospace_font():

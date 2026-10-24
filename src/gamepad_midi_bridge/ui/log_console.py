@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout,
@@ -191,6 +191,27 @@ class LogConsole(QWidget):
     def is_collapsed(self) -> bool:
         return self._collapsed
 
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        """Floor is the header — see MidiLogPanel.minimumSizeHint."""
+        hint = super().minimumSizeHint()
+        return QSize(hint.width(), min(hint.height(), self.header_height()))
+
+    def content_height(self) -> int:
+        """Height this panel would like, given what is actually in it.
+
+        Mirrors MidiLogPanel.content_height — collapsed or empty means the
+        header alone, so a console nobody has written to does not reserve a
+        slab of black. The caller caps it.
+        """
+        header = self.header_height()
+        doc = self._body.document()
+        lines = doc.blockCount()
+        if self._collapsed or not self._body.toPlainText().strip():
+            return header
+        line_h = self._body.fontMetrics().lineSpacing()
+        margin = int(doc.documentMargin()) * 2
+        return header + margin + line_h * lines
+
     def set_compact(self, compact: bool) -> None:
         """Narrow-pane presentation of the header — mirrors MidiLogPanel.
 
@@ -263,6 +284,10 @@ class LogConsole(QWidget):
         body.setReadOnly(True)
         body.setMaximumBlockCount(MAX_LINES)
         body.setFrameStyle(QFrame.NoFrame)
+        # See MidiLogPanel._build_body — an empty console must be able to
+        # take zero height so the auto-sized dock can hug its headers
+        # without clipping them.
+        body.setMinimumHeight(0)
         font = QFont("SF Mono")
         font.setStyleHint(QFont.Monospace)
         font.setPointSize(11)
@@ -292,13 +317,28 @@ class LogConsole(QWidget):
         # ``MainWindow._set_bottom_panel_sizes``. Self-imposed setMaximumHeight
         # fights the splitter's drag re-layout and causes flicker.
         self._toggle_btn.setText("▴" if self._collapsed else "▾")
-        self._body.setVisible(not self._collapsed)
+        self._sync_body_visibility()
         if not self._collapsed:
             # Opening the console counts as reading it.
             self._unseen_severity = None
 
     def clear(self) -> None:
         self._body.clear()
+        # Cleared means empty: drop the body so the auto-sized dock shrinks
+        # back to the header instead of holding a slab of black.
+        self._sync_body_visibility()
+        self.activity.emit("info")
+
+    def _sync_body_visibility(self) -> None:
+        """An open console with nothing in it shows no body.
+
+        Mirrors MidiLogPanel._sync_body_visibility — not collapsing, just
+        not reserving space for text that does not exist. At the auto-sized
+        dock's tight heights an empty body gets laid out over the header
+        strip, which reads as a clipped header.
+        """
+        has_text = bool(self._body.toPlainText().strip())
+        self._body.setVisible(not self._collapsed and has_text)
 
     # ---- internal hooks ----------------------------------------------------
 
@@ -323,6 +363,8 @@ class LogConsole(QWidget):
     def _append_line(self, tag: str, text: str) -> None:
         # appendPlainText handles maximumBlockCount trimming for us.
         self._body.appendPlainText(f"{tag} {text}")
+        # First line in an empty console brings the body back.
+        self._sync_body_visibility()
         self.activity.emit(self._note_severity(tag))
         # Auto-scroll to the bottom if we're already near it (so scroll-back
         # doesn't get yanked away when new lines arrive).
