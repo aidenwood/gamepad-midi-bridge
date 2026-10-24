@@ -90,7 +90,11 @@ def _list_processes() -> list[str]:
                 capture_output=True, text=True, timeout=4, check=False,
             ).stdout
         return [line.strip().lower() for line in out.splitlines() if line.strip()]
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
+        # Everything subprocess can actually raise: ps/tasklist missing,
+        # the 4s timeout expiring, a bad argument. Narrow rather than blind
+        # so a genuine programming error here still surfaces instead of
+        # silently reporting "no processes" and greying out every status.
         return []
 
 
