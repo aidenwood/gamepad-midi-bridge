@@ -49,12 +49,18 @@ XBOX_CLASSIC: Profile = (
     None,
 )
 
-# Xbox Wireless Controller 0x0B20 over Bluetooth, per SDL's own entry
+# Xbox Wireless Controller 0x0B20, per SDL's own entry
 # `030000005e040000200b000011050000`: the triggers are SWAPPED relative to
 # everything else (lefttrigger:a5, righttrigger:a4) and the face/meta buttons
 # are shifted (x:b3, y:b4, leftshoulder:b6, rightshoulder:b7, back:b10,
 # start:b11, guide:b12, leftstick:b13, rightstick:b14).
-XBOX_BT_0B20: Profile = (
+#
+# NOT a Bluetooth profile, despite what this was called until 2026-10-24.
+# That GUID's first field is `0300`, little-endian 0x0003 = BUS_USB — so the
+# layout is sourced from a USB entry, and the old name asserted a transport
+# the evidence never supported. Which transport the quirk actually belongs to
+# is UNVERIFIED; see the transport note on ``profile_for`` below.
+XBOX_0B20: Profile = (
     {0: 0, 1: 1, 2: 2, 3: 3, 4: 5, 5: 4},
     {0: 0, 1: 1, 2: 3, 3: 4, 4: 6, 5: 7, 6: 10, 7: 11, 8: 13, 9: 14, 10: 12},
     None,
@@ -70,8 +76,8 @@ XBOX_WIRED_NO_HAT: Profile = (
 )
 
 _BY_PID: Dict[int, Profile] = {
-    0x0B20: XBOX_BT_0B20,
-    0x0B12: XBOX_CLASSIC,   # confirmed on hardware, 2026-10-22
+    0x0B20: XBOX_0B20,
+    0x0B12: XBOX_CLASSIC,   # confirmed on hardware over USB, 2026-10-22
     0x0B13: XBOX_CLASSIC,
     0x0B05: XBOX_CLASSIC,
     0x0B00: XBOX_CLASSIC,
@@ -100,6 +106,20 @@ def profile_for(guid: Optional[str], num_hats: int, num_buttons: int) -> Profile
     primary target and its raw-HID layout is what the defaults were written
     for. Do not add a Sony entry without confirming on hardware first; that
     is the mistake this module exists to stop repeating.
+
+    KNOWN GAP — transport. SDL's own database carries SEPARATE mappings for
+    the same Microsoft PID over USB and over Bluetooth, because the layouts
+    genuinely differ. This table keys on PID alone, so a pad that was
+    confirmed over USB gets the same profile over Bluetooth. Every entry
+    here was sourced from a USB GUID (bus field `0300`), so Bluetooth is
+    currently unverified across the board.
+
+    It is deliberately NOT guessed. ``scripts/controller_report.py`` prints
+    the decoded transport alongside the resolved profile, and the STATUS
+    dropdown shows the same thing in-app — so the missing data point is one
+    run away. When a Bluetooth layout IS confirmed on hardware, add a
+    ``(bus, pid)`` lookup in front of ``_BY_PID`` rather than replacing the
+    USB-confirmed entry.
     """
     vid, pid = vid_pid_from_guid(guid)
     if vid == VENDOR_MICROSOFT:

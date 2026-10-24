@@ -1413,6 +1413,28 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("MIDI output does not confirm reception in your DAW.").setEnabled(False)
         info = getattr(self, "_active_controller_info", None)
+        # What the app DECIDED about this pad. A wrong index profile is the
+        # one failure that looks like the app is broken rather than
+        # misconfigured — "L2 moves the right stick" — and until now the
+        # only way to see the decision was a terminal script.
+        if info is not None:
+            from ..control_labels import (
+                BUS_BLUETOOTH, BUS_USB, bus_from_guid, vid_pid_from_guid,
+            )
+            menu.addSeparator()
+            vid, pid = vid_pid_from_guid(info.guid)
+            bus = bus_from_guid(info.guid)
+            transport = {BUS_USB: "USB",
+                         BUS_BLUETOOTH: "Bluetooth"}.get(bus, "unknown")
+            menu.addAction(
+                f"Device: {vid:04x}:{pid:04x} over {transport}").setEnabled(False)
+            if info.axis_map:
+                labels = ("LX", "LY", "RX", "RY", "L2", "R2")
+                mapping = "  ".join(
+                    f"{labels[i]}→a{a}" for i, a in enumerate(info.axis_map))
+                menu.addAction(f"Axis profile: {mapping}").setEnabled(False)
+                if tuple(info.axis_map) == tuple(range(6)):
+                    menu.addAction("  (no remap — raw device order)").setEnabled(False)
         test = menu.addAction("Test controller inputs…", lambda: self._run_test_wizard(info))
         test.setEnabled(info is not None and bool(self._multi.connections[0].running))
         self._popup(menu, self._shell_status_btn)
