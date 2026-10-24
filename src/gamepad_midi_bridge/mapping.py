@@ -24,6 +24,25 @@ COLOR_TAGS = ("none", "red", "orange", "yellow", "green", "teal", "blue", "purpl
 # Axes that come from analog sticks (vs triggers). Sticks need drift compensation.
 STICK_AXES = frozenset({0, 1, 2, 3})
 
+# Per-stick axis modes. "xy" is both axes live (legacy behaviour and the
+# default); the others collapse the stick to a single-axis slider. Kept as a
+# frozenset so validation and any UI picker read from one list.
+STICK_AXIS_MODES = frozenset({"xy", "y_only", "x_only"})
+
+# Within a stick, the even axis index is X and the odd one is Y:
+# left stick is axes 0 (X) and 1 (Y), right stick is 2 (X) and 3 (Y).
+def stick_axis_is_muted(axis_idx: int, axis_mode: str) -> bool:
+    """True when `axis_mode` silences this axis of the stick it belongs to.
+
+    Pure helper — no Qt, no hardware. Unknown modes never mute, so a bad value
+    degrades to normal XY rather than a silent dead stick on stage.
+    """
+    if axis_mode == "y_only":
+        return axis_idx % 2 == 0      # mute X, keep Y — a vertical fader
+    if axis_mode == "x_only":
+        return axis_idx % 2 == 1      # mute Y, keep X — a horizontal fader
+    return False
+
 # Trigger axis indices — used by both the per-tick polling loop and the
 # preset migration so we know where to attach a TriggerConfig.
 L2_AXIS = 4
@@ -226,6 +245,14 @@ class StickConfig:
       - `outer_clamp`     : top fraction of travel that pegs to ±1
       - `curve`           : "linear" | "exponential" | "logarithmic" | "s-curve"
       - `curve_amount`    : 0..1, strength of the curve
+      - `axis_mode`       : "xy" (default, both axes live) | "y_only" | "x_only".
+                            Collapses the stick to a single-axis slider — a
+                            vertical fader for "y_only", horizontal for
+                            "x_only" — without touching the CC assignments, so
+                            flipping back restores the exact same mapping.
+                            Safe to change mid-performance: the muted axis gets
+                            one centre value (64) so whatever it was driving
+                            parks instead of freezing at its last position.
       - `polar_mode`      : if True, emit (angle, magnitude) as 2 CCs instead of (X, Y)
       - `polar_angle_cc`  : CC number for the angle when polar_mode is on
       - `polar_mag_cc`    : CC number for the magnitude when polar_mode is on
@@ -246,6 +273,7 @@ class StickConfig:
     outer_clamp: float = 0.0
     curve: str = "linear"
     curve_amount: float = 0.5
+    axis_mode: str = "xy"
     polar_mode: bool = False
     polar_angle_cc: int = 7   # volume CC by default — meaningless but visible
     polar_mag_cc: int = 8     # balance CC
@@ -1318,6 +1346,13 @@ def _stick_from_dict(d: Optional[dict]) -> StickConfig:
         outer_clamp=max(0.0, min(0.99, float(d.get("outer_clamp", 0.0)))),
         curve=curve,
         curve_amount=max(0.0, min(1.0, float(d.get("curve_amount", 0.5)))),
+        # Unknown / missing values fall back to "xy", which is the legacy
+        # behaviour — presets written before this field load unchanged.
+        axis_mode=(
+            str(d.get("axis_mode", "xy"))
+            if str(d.get("axis_mode", "xy")) in STICK_AXIS_MODES
+            else "xy"
+        ),
         polar_mode=bool(d.get("polar_mode", False)),
         polar_angle_cc=int(d.get("polar_angle_cc", 7)),
         polar_mag_cc=int(d.get("polar_mag_cc", 8)),

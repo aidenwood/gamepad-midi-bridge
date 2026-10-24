@@ -34,7 +34,7 @@ from .demo_controller import SyntheticControllerReader
 from .keyboard_controller import KeyboardControllerReader
 from .mouse_controller import MouseControllerReader
 from .corner_quantizer import CornerDetector, decode_switch
-from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, Midi2Config, MidiClockConfig, PassthroughConfig, PatternRecorderConfig, QuantizeConfig, R2_AXIS, STICK_AXES, StickFlickConfig, StickLfoConfig, TriggerAftertouchConfig
+from .mapping import HapticInputBinding, L2_AXIS, Macro, MacroEvent, Mapping, Midi2Config, MidiClockConfig, PassthroughConfig, PatternRecorderConfig, QuantizeConfig, R2_AXIS, STICK_AXES, StickFlickConfig, StickLfoConfig, TriggerAftertouchConfig, stick_axis_is_muted
 from .pattern import PatternEngine, PatternState
 from . import midi2 as _midi2
 from .rtp_midi import RtpMidiSender
@@ -232,6 +232,9 @@ class BridgeWorker(QObject):
         self._pending_axis: Dict[int, float] = {}
         self._prev_raw_buttons: Dict[int, bool] = {}
         self._prev_raw_axes: Dict[int, float] = {}
+        # Stick axes currently silenced by a single-axis slider mode. Tracked so
+        # the centre value is sent once on the transition rather than every poll.
+        self._muted_axes: set[int] = set()
         self._last_raw_scan = 0.0
         # Battery + touchpad poll less often — they don't need 100Hz
         self._last_battery_poll: float = 0.0
@@ -1891,6 +1894,19 @@ class BridgeWorker(QObject):
                 raw = max(-1.0, min(1.0, raw - offsets.get(axis_idx, 0.0)))
                 # Select the appropriate stick config (left = 0,1; right = 2,3)
                 stick_cfg = mapping.left_stick if axis_idx < 2 else mapping.right_stick
+                # Single-axis slider mode. Mode is read fresh every poll, so a
+                # performer can flip XY <-> Y-only mid-set. On the transition we
+                # send one centre value: without it the muted axis freezes at
+                # wherever it happened to be, leaving a filter or a light pinned
+                # off-centre with no way to move it.
+                if stick_axis_is_muted(axis_idx, stick_cfg.axis_mode):
+                    if axis_idx not in self._muted_axes:
+                        self._muted_axes.add(axis_idx)
+                        if not osc_only:
+                            cc(cc_num, 64)
+                        self._prev_raw_axes.pop(axis_idx, None)
+                    continue
+                self._muted_axes.discard(axis_idx)
                 # Apply shaping (deadzone, curves, etc.)
                 raw = shaping.apply_stick_shape(
                     raw,
