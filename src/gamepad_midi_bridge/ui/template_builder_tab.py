@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from ..mapping import Mapping
 from ..templates import TEMPLATES, Template
+from .primitives.flow_layout import FlowLayout
 
 
 # Palette matches controller_meter.py + global teal accent.
@@ -337,7 +338,20 @@ class TemplateBuilderTab(QWidget):
         self._table.itemSelectionChanged.connect(self._on_table_selection)
         v.addWidget(self._table, 1)
 
-        actions = QHBoxLayout()
+        # FlowLayout, not QHBoxLayout. These five buttons measure 603px side by
+        # side, and a QHBoxLayout's minimum width is the sum of its children.
+        # The page itself is wrapped in a QScrollArea, so that never tripped
+        # tests/test_narrow_page_floors.py — the scroll area honestly reports
+        # an 88px floor and simply clips what will not fit. The cost lands on
+        # the user instead: with the Inspector docked beside it the page is far
+        # narrower than the window, "Reset to defaults" falls off the right
+        # edge, and reaching it means scrolling sideways past a button row.
+        #
+        # Wrapping is the fix the primitive exists for — same as the Bluetooth
+        # tab's action row and the Marketplace tag chips. No addStretch here:
+        # FlowLayout wraps rather than pushing, so a trailing spacer would just
+        # claim a slot on the last row.
+        actions = FlowLayout(margin=0, h_space=6, v_space=6)
         for label, slot in (
             ("Save template…", self._on_save_template),
             ("Load template…", self._on_load_template),
@@ -346,7 +360,6 @@ class TemplateBuilderTab(QWidget):
             ("Reset to defaults", self._on_reset_defaults),
         ):
             b = QPushButton(label); b.clicked.connect(slot); actions.addWidget(b)
-        actions.addStretch(1)
         v.addLayout(actions)
 
         v.addWidget(self._build_templates_panel())

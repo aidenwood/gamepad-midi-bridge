@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from .primitives.dropdown import style_as_dropdown
+from .primitives.flow_layout import FlowLayout
 
 from .. import presets as preset_io
 from .. import snapshots as snap_io
@@ -48,7 +49,20 @@ class PresetManager(QWidget):
         self._list.customContextMenuRequested.connect(self._on_context_menu)
         v.addWidget(self._list, 1)
 
-        row = QHBoxLayout()
+        # FlowLayout, not QHBoxLayout. Seven buttons measure 706px side by
+        # side and a QHBoxLayout's minimum width is the sum of its children,
+        # so the row could never give any of them up. The Presets page sits
+        # in a QScrollArea, which reports an honest 88px floor and simply
+        # clips the overflow — that is why tests/test_narrow_page_floors.py
+        # passes while the v3 screen recording shows only Load, Save current
+        # as…, Delete and Compare presets…; Export cheat sheet, Snapshots…
+        # and Setlist… are off the right edge behind a sideways scroll.
+        #
+        # Wrapping drops the floor to the widest single button (129px) and
+        # keeps every action reachable. Same fix as the Templates action row,
+        # the Marketplace tag chips and the Bluetooth tab — see the header
+        # comment in primitives/flow_layout.py.
+        row = FlowLayout(margin=0, h_space=6, v_space=6)
         self._load_btn = QPushButton("Load")
         self._save_btn = QPushButton("Save current as…")
         self._delete_btn = QPushButton("Delete")
@@ -78,7 +92,6 @@ class PresetManager(QWidget):
         row.addWidget(self._export_btn)
         row.addWidget(self._snapshots_btn)
         row.addWidget(self._setlist_btn)
-        row.addStretch(1)
         v.addLayout(row)
 
         self._stack.addWidget(content)
