@@ -55,6 +55,9 @@ def main() -> int:
     import pygame
 
     from gamepad_midi_bridge.control_labels import (
+        BUS_BLUETOOTH,
+        BUS_USB,
+        bus_from_guid,
         display_name,
         family_for,
         vid_pid_from_guid,
@@ -65,6 +68,18 @@ def main() -> int:
     pygame.init()
     pygame.joystick.init()
     pygame.event.pump()
+
+    # Which SDL driver is in play decides the index layout, so it belongs in
+    # any report about indices being wrong. controller.py forces HIDAPI on
+    # (see the comment there — it is what makes Bluetooth pads visible on
+    # macOS 12+), and the HIDAPI driver reports a different layout from the
+    # IOKit one SDL would otherwise use.
+    print(f"pygame {pygame.version.ver}  SDL {'.'.join(str(v) for v in pygame.version.SDL)}")
+    print("  SDL hints in effect: " + ", ".join(
+        f"{k.replace('SDL_JOYSTICK_', '')}={os.environ.get(k, '<default>')}"
+        for k in ("SDL_JOYSTICK_HIDAPI", "SDL_JOYSTICK_HIDAPI_XBOX",
+                  "SDL_JOYSTICK_HIDAPI_PS5")))
+    print()
 
     count = pygame.joystick.get_count()
     print(f"SDL sees {count} controller(s)\n")
@@ -92,6 +107,14 @@ def main() -> int:
     print(f"  label family   : {family_for(display_name(info.raw_name, info.guid))}")
     print(f"  GUID           : {info.guid}")
     print(f"  VID:PID        : {vid:04x}:{pid:04x}")
+    # Transport matters: SDL ships separate mappings for the same Xbox PID
+    # over USB and over Bluetooth, and sdl_profiles currently keys on PID
+    # alone. If a profile misbehaves, the bus is the first thing to compare
+    # against the transport it was confirmed on.
+    bus = bus_from_guid(info.guid)
+    bus_name = {BUS_USB: "USB", BUS_BLUETOOTH: "Bluetooth"}.get(
+        bus, f"unknown (0x{bus:02x})")
+    print(f"  transport      : {bus_name}")
     print(f"  axes/buttons/hats: {info.num_axes}/{info.num_buttons}/{info.num_hats}")
     print()
     print("  resolved profile")
